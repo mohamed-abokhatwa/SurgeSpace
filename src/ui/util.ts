@@ -30,36 +30,56 @@ export interface Hop {
   length: number;
 }
 
-/** Shortest route (by length) between two nodes, through pipes, pumps and valves. */
-export function findPath(net: Network, a: string, b: string): Hop[] | null {
-  const links: Hop[] = [
-    ...net.pipes.filter((p) => !p.closed).map((p) => ({ kind: 'pipe' as const, id: p.id, from: p.from, to: p.to, reversed: false, length: p.length })),
-    ...net.pumps.map((p) => ({ kind: 'pump' as const, id: p.id, from: p.from, to: p.to, reversed: false, length: 0 })),
-    ...net.valves.map((v) => ({ kind: 'valve' as const, id: v.id, from: v.from, to: v.to, reversed: false, length: 0 })),
-  ];
+/** Adjacency of pipes, pumps and valves, both directions. */
+function buildAdj(net: Network) {
   const adj = new Map<string, Hop[]>();
-  for (const l of links) {
+  const add = (l: Hop) => {
     adj.set(l.from, [...(adj.get(l.from) ?? []), l]);
     adj.set(l.to, [...(adj.get(l.to) ?? []), { ...l, from: l.to, to: l.from, reversed: true }]);
-  }
+  };
+  net.pipes.filter((p) => !p.closed).forEach((p) => add({ kind: 'pipe', id: p.id, from: p.from, to: p.to, reversed: false, length: p.length }));
+  net.pumps.forEach((p) => add({ kind: 'pump', id: p.id, from: p.from, to: p.to, reversed: false, length: 0 }));
+  net.valves.forEach((v) => add({ kind: 'valve', id: v.id, from: v.from, to: v.to, reversed: false, length: 0 }));
+  return adj;
+}
+
+/** Dijkstra with a binary heap from node a; stops early at b when given. */
+function dijkstra(net: Network, a: string, b?: string) {
+  const adj = buildAdj(net);
   const dist = new Map<string, number>([[a, 0]]);
   const prev = new Map<string, Hop>();
-  const todo = new Set(net.nodes.map((n) => n.id));
-  while (todo.size) {
-    let u = '';
-    let best = Infinity;
-    for (const n of todo) {
-      const d = dist.get(n) ?? Infinity;
-      if (d < best) { best = d; u = n; }
+  const heap: [number, string][] = [[0, a]];
+  const push = (x: [number, string]) => {
+    heap.push(x);
+    let i = heap.length - 1;
+    while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; }
+  };
+  const pop = () => {
+    const top = heap[0], last = heap.pop()!;
+    if (heap.length) {
+      heap[0] = last;
+      let i = 0;
+      for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; }
     }
-    if (!u || best === Infinity) break;
-    todo.delete(u);
+    return top;
+  };
+  const done = new Set<string>();
+  while (heap.length) {
+    const [d, u] = pop();
+    if (done.has(u)) continue;
+    done.add(u);
     if (u === b) break;
     for (const h of adj.get(u) ?? []) {
-      const nd = best + h.length + 1e-6;
-      if (nd < (dist.get(h.to) ?? Infinity)) { dist.set(h.to, nd); prev.set(h.to, h); }
+      const nd = d + h.length + 1e-6;
+      if (nd < (dist.get(h.to) ?? Infinity)) { dist.set(h.to, nd); prev.set(h.to, h); push([nd, h.to]); }
     }
   }
+  return { dist, prev };
+}
+
+/** Shortest route (by length) between two nodes, through pipes, pumps and valves. */
+export function findPath(net: Network, a: string, b: string): Hop[] | null {
+  const { prev } = dijkstra(net, a, b);
   if (!prev.has(b) && a !== b) return null;
   const path: Hop[] = [];
   let cur = b;
@@ -71,20 +91,15 @@ export function findPath(net: Network, a: string, b: string): Hop[] | null {
   return path;
 }
 
-/** Default profile route: from the first source (reservoir) to the farthest node by length. */
+/** Default profile route: from the source feeding the first pump (or the first reservoir) to the farthest node by length. */
 export function defaultRoute(net: Network): [string, string] {
-  const src = net.nodes.find((n) => n.kind === 'reservoir' && (net.pumps.some((p) => p.from !== n.id) || true));
+  const src = net.nodes.find((n) => n.kind === 'reservoir');
   const pumpSuction = net.pumps[0]?.from;
   const start = pumpSuction ? net.nodes.find((n) => n.kind === 'reservoir' && net.pipes.some((p) => (p.from === n.id && p.to === pumpSuction) || (p.to === n.id && p.from === pumpSuction)))?.id ?? src?.id : src?.id;
   if (!start) return [net.nodes[0]?.id ?? '', net.nodes[net.nodes.length - 1]?.id ?? ''];
+  const { dist } = dijkstra(net, start);
   let far = start, farD = -1;
-  for (const n of net.nodes) {
-    if (n.id === start) continue;
-    const p = findPath(net, start, n.id);
-    if (!p) continue;
-    const d = p.reduce((s, h) => s + h.length, 0);
-    if (d > farD) { farD = d; far = n.id; }
-  }
+  for (const [id, d] of dist) if (id !== start && d > farD) { farD = d; far = id; }
   return [start, far];
 }
 

@@ -131,6 +131,8 @@ export function elHazek(): Network {
 }
 
 /** Examples are drawn in screen coordinates; networks use engineering coordinates (y up). */
+import bwsn1 from './bwsn1.json';
+
 const yUp = (n: Network): Network => ({ ...n, nodes: n.nodes.map((x) => ({ ...x, y: -x.y })) });
 
 export const EXAMPLES: { id: string; make: () => Network }[] = [
@@ -139,4 +141,6 @@ export const EXAMPLES: { id: string; make: () => Network }[] = [
   { id: 'gravity', make: () => yUp(gravityValve()) },
   { id: 'loop', make: () => yUp(loopedNetwork()) },
   { id: 'elhazek', make: () => yUp(elHazek()) },
+  // real network with a published HAMMER result (see validation/README.md)
+  { id: 'bwsn1', make: () => structuredClone(bwsn1 as unknown as Network) },
 ];

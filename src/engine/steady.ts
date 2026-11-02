@@ -1,6 +1,6 @@
 // Steady state by the global gradient algorithm (Todini & Pilati), the method EPANET uses.
 // Gives the initial heads and flows for the transient.
-import { pipeR, pumpQuadratic, valveKv } from './hydraulics';
+import { pipeR, pumpCurve, valveKv } from './hydraulics';
 import { area, type Network } from './types';
 
 export interface SteadyResult {
@@ -54,6 +54,7 @@ export function solveSteady(net: Network): SteadyResult {
     return net.valves[l.ref].opening <= 0;
   });
   const demand = net.nodes.map((n) => (n.kind === 'reservoir' ? 0 : n.demand ?? 0));
+  const curves = net.pumps.map((p) => pumpCurve(p));
 
   // node adjacency for the sparse system
   const adj: number[][] = Array.from({ length: N }, () => []);
@@ -77,7 +78,7 @@ export function solveSteady(net: Network): SteadyResult {
       }
       if (l.kind === 'pipe') {
         const r = pipeR(net.pipes[l.ref], q, net.settings.friction);
-        const dh = Math.max(2 * r * Math.abs(q), 1e-7);
+        const dh = Math.max((net.settings.friction === 'HW' ? 1.852 : 2) * r * Math.abs(q), 1e-7);
         p[k] = 1 / dh;
         y[k] = p[k] * r * q * Math.abs(q);
       } else if (l.kind === 'valve') {
@@ -86,9 +87,9 @@ export function solveSteady(net: Network): SteadyResult {
         p[k] = 1 / dh;
         y[k] = p[k] * kv * q * Math.abs(q);
       } else {
-        const { a, b, c } = pumpQuadratic(net.pumps[l.ref]);
-        const h = -(a + b * q + c * q * q); // head "loss" is negative (gain)
-        const dh = Math.max(-(b + 2 * c * q), 1e-7);
+        const pc = curves[l.ref];
+        const h = -pc.h(q); // head "loss" is negative (gain)
+        const dh = Math.max(-pc.dh(q), 1e-7);
         p[k] = 1 / dh;
         y[k] = p[k] * h;
       }
@@ -123,8 +124,7 @@ export function solveSteady(net: Network): SteadyResult {
     let statusChanged = false;
     links.forEach((l, k) => {
       if (l.kind === 'pump' && net.pumps[l.ref].on) {
-        const pump = net.pumps[l.ref];
-        const { a } = pumpQuadratic(pump);
+        const a = curves[l.ref].h(0);
         if (!closed[k] && Q[k] < -1e-6) {
           closed[k] = true;
           statusChanged = true;

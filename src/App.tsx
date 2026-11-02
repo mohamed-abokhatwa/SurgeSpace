@@ -7,7 +7,8 @@ import type { Network } from './engine/types';
 import { call, cancelAll } from './ui/client';
 import { HistoryView } from './ui/HistoryView';
 import { ImportDialog } from './ui/ImportDialog';
-import { MapView, type ColorMode, type Selection } from './ui/MapView';
+import { MapView, surgeScale, type ColorMode, type Selection } from './ui/MapView';
+import { Timeline } from './ui/Timeline';
 import { ChecksView, EventPanel, Inspector, ModelPanel, ProtectionPanel, SettingsPanel } from './ui/panels';
 import { ProfileView } from './ui/ProfileView';
 import { defaultRoute, download, findPath, fmt, pressureColor } from './ui/util';
@@ -37,7 +38,8 @@ export default function App() {
   const [sizing, setSizing] = useState<VesselSizing | null>(null);
   const [airSugg, setAirSugg] = useState<AirValveSuggestion[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [frame, setFrame] = useState(0);
+  const [framePos, setFramePos] = useState(0);
+  const [flowDashes, setFlowDashes] = useState(true);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [mode, setMode] = useState<ColorMode>('max');
@@ -65,7 +67,7 @@ export default function App() {
       setChecks(out.checks);
       setUnc(null);
       setStale(false);
-      setFrame(0);
+      setFramePos(0);
       setHistNodes((h) => {
         const valid = h.filter((id) => out.result.nodeHead[id]);
         if (valid.length) return valid;
@@ -90,21 +92,17 @@ export default function App() {
     if (!playing || !result) return;
     let raf = 0;
     let last = performance.now();
-    let acc = 0;
     const T = result.times;
     const frameDt = T.length > 1 ? T[1] - T[0] : 1;
+    // continuous time: the map and profile interpolate between stored frames
     const tick = (now: number) => {
-      acc += ((now - last) / 1000) * speed;
+      const adv = (((now - last) / 1000) * speed) / frameDt;
       last = now;
-      const adv = Math.floor(acc / frameDt);
-      if (adv > 0) {
-        acc -= adv * frameDt;
-        setFrame((f) => {
-          const nf = f + adv;
-          if (nf >= T.length - 1) { setPlaying(false); return T.length - 1; }
-          return nf;
-        });
-      }
+      setFramePos((f) => {
+        const nf = f + adv;
+        if (nf >= T.length - 1) { setPlaying(false); return T.length - 1; }
+        return nf;
+      });
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -131,10 +129,10 @@ export default function App() {
     return new Set((p ?? []).filter((h) => h.kind === 'pipe').map((h) => h.id));
   }, [net, route]);
 
-  const select = (s: Selection) => {
+  const select = useCallback((s: Selection) => {
     setSel(s);
     if (s?.type === 'node' && result?.nodeHead[s.id]) setHistNodes((h) => (h.includes(s.id) ? h : [...h.slice(-3), s.id]));
-  };
+  }, [result]);
 
   const doUncertainty = async () => {
     setBusy('Uncertainty runs…');
@@ -172,8 +170,53 @@ export default function App() {
     return { maxH, minP, maxP, cav };
   }, [result]);
 
-  const tNow = result ? result.times[Math.min(frame, result.times.length - 1)] : 0;
+  const tNow = result ? (() => { const T = result.times, f0 = Math.min(Math.floor(framePos), T.length - 1), f1 = Math.min(f0 + 1, T.length - 1); return T[f0] + (T[f1] - T[f0]) * (framePos - f0); })() : 0;
+  const sScale = useMemo(() => (result ? surgeScale(result) : 1), [result]);
+  useEffect(() => { if (result && !(framePos <= result.times.length - 1)) setFramePos(0); }, [result, framePos]);
+  const live = mode === 'surge' || mode === 'pressure';
+  const togglePlay = useCallback(() => {
+    if (!result) return;
+    if (framePos >= result.times.length - 1) setFramePos(0);
+    if (mode !== 'surge' && mode !== 'pressure') setMode('surge');
+    setPlaying((p) => !p);
+  }, [result, framePos, mode]);
+  // keyboard: space plays / pauses, arrows step, when not typing in a field
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable || t.getAttribute('role') === 'slider')) return;
+      if (!result) return;
+      if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setPlaying(false);
+        if (!live) setMode('surge');
+        const d = (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 10 : 1);
+        setFramePos((f) => Math.max(0, Math.min(result.times.length - 1, Math.round(f) + d)));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [result, togglePlay, live]);
   const fails = checks.filter((c) => c.level === 'fail').length;
+  // route picker: thousands of options on big networks, so build it only when the route or nodes change
+  const routePicker = useMemo(() => (
+    <div className="row small" style={{ marginLeft: 'auto', gap: 6, paddingBottom: 4 }}>
+      <span className="muted">Route</span>
+      <select className="cell" style={{ width: 110, border: '1px solid var(--line-2)' }} value={route[0]} onChange={(e) => setRoute([e.target.value, route[1]])}>{net.nodes.map((n) => <option key={n.id}>{n.id}</option>)}</select>
+      <span>→</span>
+      <select className="cell" style={{ width: 110, border: '1px solid var(--line-2)' }} value={route[1]} onChange={(e) => setRoute([route[0], e.target.value])}>{net.nodes.map((n) => <option key={n.id}>{n.id}</option>)}</select>
+    </div>
+  ), [net.nodes, route]);
+  // the side panel does not depend on playback time; keep it out of the per-frame re-render
+  const sidePanel = useMemo(() => (
+    <>
+      {side === 'model' && <ModelPanel net={net} setNet={setNet} selection={sel} onSelect={select} />}
+      {side === 'event' && <EventPanel net={net} setNet={setNet} />}
+      {side === 'protection' && <ProtectionPanel net={net} setNet={setNet} busy={!!busy} onSizeVessel={doSize} onAirValves={doAir} sizing={sizing} airSugg={airSugg} />}
+      {side === 'settings' && <SettingsPanel net={net} setNet={setNet} />}
+    </>
+  ), [side, net, setNet, sel, select, busy, sizing, airSugg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="app">
@@ -216,27 +259,38 @@ export default function App() {
             ))}
           </div>
           <div className="side-body">
-            {side === 'model' && <ModelPanel net={net} setNet={setNet} selection={sel} onSelect={select} />}
-            {side === 'event' && <EventPanel net={net} setNet={setNet} />}
-            {side === 'protection' && <ProtectionPanel net={net} setNet={setNet} busy={!!busy} onSizeVessel={doSize} onAirValves={doAir} sizing={sizing} airSugg={airSugg} />}
-            {side === 'settings' && <SettingsPanel net={net} setNet={setNet} />}
+            {sidePanel}
           </div>
         </aside>
 
         <section className="work">
           <div className="map-wrap">
-            <MapView net={net} result={result} envelopes={unc?.envelopes} frame={frame} mode={result ? mode : 'plain'} selection={sel} onSelect={select} route={routeSet} />
+            <MapView net={net} result={result} envelopes={unc?.envelopes} framePos={framePos} mode={result ? mode : 'plain'} selection={sel} onSelect={select} route={routeSet} flowDashes={flowDashes} playing={playing} sScale={sScale} />
             <div className="map-tools">
-              {(['max', 'min', 'steady', 'frame'] as const).map((m) => (
-                <button key={m} className={`btn small ${mode === m ? 'primary' : ''}`} onClick={() => setMode(m)} disabled={!result}>
-                  {m === 'max' ? 'Max pressure' : m === 'min' ? 'Min pressure' : m === 'steady' ? 'Steady' : 'Animation'}
-                </button>
-              ))}
+              <div className="seg" role="group" aria-label="Live view">
+                {(['surge', 'pressure'] as const).map((m) => (
+                  <button key={m} className={`seg-btn ${mode === m ? 'on' : ''}`} onClick={() => setMode(m)} disabled={!result}>{m === 'surge' ? 'Surge' : 'Pressure'}</button>
+                ))}
+              </div>
+              <div className="seg" role="group" aria-label="Envelopes">
+                {(['max', 'min', 'steady'] as const).map((m) => (
+                  <button key={m} className={`seg-btn ${mode === m ? 'on' : ''}`} onClick={() => { setMode(m); setPlaying(false); }} disabled={!result}>{m === 'max' ? 'Max' : m === 'min' ? 'Min' : 'Steady'}</button>
+                ))}
+              </div>
+              {live && result && (
+                <button className={`btn small ${flowDashes ? 'primary' : ''}`} onClick={() => setFlowDashes((v) => !v)} aria-pressed={flowDashes} title="Show flow direction and speed">Flow</button>
+              )}
             </div>
             {result && (
               <div className="legend">
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>{mode === 'frame' ? `Pressure at ${tNow.toFixed(2)} s` : mode === 'max' ? 'Maximum pressure' : mode === 'min' ? 'Minimum pressure' : 'Steady pressure'}</div>
-                {[[-10, 'vapour'], [0, '0 m'], [10, '10 m'], [50, '50 m'], [90, '90 % class'], [120, 'over class']].map(([p, l]) => (
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>{mode === 'surge' ? `Change from steady · ${tNow.toFixed(2)} s` : mode === 'pressure' ? `Pressure head · ${tNow.toFixed(2)} s` : mode === 'max' ? 'Maximum pressure' : mode === 'min' ? 'Minimum pressure' : 'Steady pressure'}</div>
+                {mode === 'surge' ? (
+                  <div>
+                    <div className="surge-bar" />
+                    <div className="row mono" style={{ justifyContent: 'space-between', fontSize: 10.5 }}><span>−{fmt(sScale, 0)}</span><span>0</span><span>+{fmt(sScale, 0)} m</span></div>
+                    <div className="muted" style={{ fontSize: 10.5, marginTop: 2 }}>blue = drop · red = rise</div>
+                  </div>
+                ) : [[-10, 'vapour'], [0, '0 m'], [10, '10 m'], [50, '50 m'], [90, '90 % class'], [120, 'over class']].map(([p, l]) => (
                   <div key={l} className="row" style={{ gap: 6 }}><span style={{ width: 22, height: 6, borderRadius: 3, background: pressureColor(p as number, 100) }} />{l}</div>
                 ))}
               </div>
@@ -244,9 +298,9 @@ export default function App() {
             {sel && <Inspector net={net} setNet={setNet} sel={sel} result={result} onClose={() => setSel(null)} />}
             {result && (
               <div className="player">
-                <button className="btn small primary" onClick={() => { if (frame >= result.times.length - 1) setFrame(0); setMode('frame'); setPlaying(!playing); }}>{playing ? '❚❚' : '▶'}</button>
-                <input type="range" min={0} max={result.times.length - 1} value={frame} onChange={(e) => { setFrame(+e.target.value); setMode('frame'); }} aria-label="Time" />
-                <span className="mono small" style={{ minWidth: 76, textAlign: 'right' }}>{tNow.toFixed(2)} s</span>
+                <button className="btn primary play" onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} title="Space">{playing ? '❚❚' : '▶'}</button>
+                <Timeline net={net} result={result} framePos={framePos} onSeek={(f) => { setFramePos(f); setPlaying(false); if (!live) setMode('surge'); }} />
+                <span className="mono small" style={{ minWidth: 64, textAlign: 'right' }}>{tNow.toFixed(2)} s</span>
                 <select className="cell" style={{ width: 64 }} value={speed} onChange={(e) => setSpeed(+e.target.value)} aria-label="Playback speed">
                   {[0.25, 0.5, 1, 2, 4, 8].map((s) => <option key={s} value={s}>{s}×</option>)}
                 </select>
@@ -261,20 +315,13 @@ export default function App() {
               {([['profile', 'Profile'], ['history', 'Time history'], ['checks', `Checks${fails ? ` · ${fails} to fix` : ''}`], ['uncertainty', 'Uncertainty'], ['summary', 'Engine']] as const).map(([k, l]) => (
                 <button key={k} className={`tab ${bottom === k ? 'on' : ''}`} onClick={() => setBottom(k)} style={k === 'checks' && fails ? { color: 'var(--bad)' } : undefined}>{l}</button>
               ))}
-              {bottom === 'profile' && (
-                <div className="row small" style={{ marginLeft: 'auto', gap: 6, paddingBottom: 4 }}>
-                  <span className="muted">Route</span>
-                  <select className="cell" style={{ width: 110, border: '1px solid var(--line-2)' }} value={route[0]} onChange={(e) => setRoute([e.target.value, route[1]])}>{net.nodes.map((n) => <option key={n.id}>{n.id}</option>)}</select>
-                  <span>→</span>
-                  <select className="cell" style={{ width: 110, border: '1px solid var(--line-2)' }} value={route[1]} onChange={(e) => setRoute([route[0], e.target.value])}>{net.nodes.map((n) => <option key={n.id}>{n.id}</option>)}</select>
-                </div>
-              )}
+              {bottom === 'profile' && routePicker}
             </div>
             <div className="bottom-body">
               {!result ? <div className="empty">Results appear here after a run.</div> : (
                 <>
-                  {bottom === 'profile' && <ProfileView net={net} result={result} a={route[0]} b={route[1]} frame={frame} uEnv={unc?.envelopes} showNow={mode === 'frame'} />}
-                  {bottom === 'history' && <HistoryView net={net} result={result} nodes={histNodes} frame={frame} />}
+                  {bottom === 'profile' && <ProfileView net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} uEnv={unc?.envelopes} showNow={live} />}
+                  {bottom === 'history' && <HistoryView net={net} result={result} nodes={histNodes} tNow={tNow} />}
                   {bottom === 'checks' && <ChecksView checks={checks} onFocus={(c) => { if (c.where?.pipe) select({ type: 'pipe', id: c.where.pipe }); else if (c.where?.node) select({ type: 'node', id: c.where.node }); setMode(c.title.toLowerCase().includes('minimum') || c.title.toLowerCase().includes('column') ? 'min' : 'max'); }} />}
                   {bottom === 'uncertainty' && (
                     <div>
@@ -315,6 +362,17 @@ export default function App() {
                           <tr><td>Wave damping</td><td>Steady or quasi-steady friction by default</td><td>{net.settings.unsteadyFriction ? 'Unsteady friction on (Brunone–Vítkovský, Vardy coefficient)' : 'Quasi-steady (unsteady friction off in Settings)'}</td></tr>
                           <tr><td>Uncertainty</td><td>One deterministic run</td><td>Worst-case envelope over wave speed, stroke, inertia and time step</td></tr>
                           <tr><td>Protection design</td><td>Trial and error</td><td>Automatic vessel and air valve sizing</td></tr>
+                        </tbody>
+                      </table>
+                      <div className="label">Validation</div>
+                      <table className="grid">
+                        <thead><tr><th>Benchmark</th><th>Compared</th><th>Agreement</th></tr></thead>
+                        <tbody>
+                          <tr><td>Bentley HAMMER · Tnet0 valve closure</td><td>Max and min head at both points</td><td>Exact to 0.1 m (761.8 / 738.3 m at the valve)</td></tr>
+                          <tr><td>Bentley HAMMER · BWSN-1 network, pump shutdown</td><td>Max and min head at 332 pipe ends</td><td>Mean 1.6 m (max) and 0.8 m (min) on surges up to 44 m; 92 % within 3 m</td></tr>
+                          <tr><td>TSNet · EPANET Net3, valve closure</td><td>Head histories at 8 nodes</td><td>First wave within 0.2–1.5 m; steady within 0.01 m</td></tr>
+                          <tr><td>EPANET 2.2 · Net3, ky4, Net6 (3,323 junctions)</td><td>Steady heads and flows</td><td>Mean 0.001 m, worst 0.012 m</td></tr>
+                          <tr><td>Closed-form theory</td><td>Joukowsky, 2L/a, junction transmission</td><td>0.05–0.8 %</td></tr>
                         </tbody>
                       </table>
                       <div className="row" style={{ gap: 6, marginTop: 12, flexWrap: 'wrap' }}>

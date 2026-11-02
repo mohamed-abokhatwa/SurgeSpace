@@ -9,7 +9,7 @@
 //  • Implicit device boundaries: pump run-down with inertia and non-return valve, surge vessel
 //    (polytropic gas, separate in/out losses), air valve (Wylie–Streeter air-flow model),
 //    pressure relief valve, pressure-dependent demands.
-import { frictionF, omegaRated, pipeR, pumpQuadratic, pumpTorqueQuadratic, solveDense } from './hydraulics';
+import { frictionF, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpQuadratic, pumpTorqueQuadratic, solveDense, type PumpCurve } from './hydraulics';
 import { solveSteady, type SteadyResult } from './steady';
 import { G, HB, HV, RHO, area, type Network, type NetNode } from './types';
 
@@ -42,6 +42,8 @@ export interface TransientResult {
   nodeHead: Record<string, Float32Array>; // per frame
   frameSamples: Record<string, Float64Array>; // sample positions per pipe for animation
   frameHeads: Record<string, Float32Array>; // frames × samples, row-major
+  /** Mid-pipe flow per frame, m³/s (positive from → to), for flow animation. */
+  frameFlows: Record<string, Float32Array>;
   envelopes: PipeEnvelope[];
   nodeMax: Record<string, number>;
   nodeMin: Record<string, number>;
@@ -70,6 +72,10 @@ export interface RunOptions {
   dtMax?: number;
   /** Keep each pipe's friction factor at its steady value (for comparison with codes that do this). */
   constantFriction?: boolean;
+  /** Force this time step and round every pipe to whole reaches, as fixed-step codes do (comparison runs only). */
+  fixedDt?: number;
+  /** Turn column separation off: heads may fall below vapour pressure (for comparison with codes without a cavity model). */
+  noCavitation?: boolean;
 }
 
 /** Pick the largest time step that keeps every pipe's wave-speed adjustment under the tolerance. */
@@ -136,7 +142,7 @@ interface PipeState {
 }
 
 type Element =
-  | { kind: 'pump'; idx: number; ids: string[]; m: number; i: number; j: number; Q: number; alpha: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number }
+  | { kind: 'pump'; idx: number; ids: string[]; m: number; curve: PumpCurve; i: number; j: number; Q: number; alpha: number; alphaSet: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number }
   | { kind: 'valve'; idx: number; i: number; j: number; Q: number; open: number; closed: boolean; check: boolean; kq: number }
   | { kind: 'rigid'; idx: number; i: number; j: number; Q: number; Qold: number; closed: boolean; check: false; inert: number; pipe: number };
 
@@ -145,6 +151,15 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const warnings: string[] = [];
   const st = net.settings;
   const steady = opt.steady ?? solveSteady(net);
+  // constant-power pumps have no physical curve: use EPANET's one-point curve through the steady duty
+  if (net.pumps.some((p) => p.power)) {
+    net = { ...net, pumps: net.pumps.map((p) => {
+      if (!p.power) return p;
+      const q = Math.max(steady.flows.get(p.id) ?? 0, 1e-4);
+      return { ...p, power: undefined, curve: [[q, (p.power * 1000) / (RHO * G * q)]] as [number, number][] };
+    }) };
+    warnings.push('Constant-power pumps were given a curve through their steady duty point for the transient.');
+  }
   warnings.push(...steady.warnings);
   const nodes = net.nodes;
   const nIdx = new Map(nodes.map((n, i) => [n.id, i]));
@@ -164,7 +179,13 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const stroke = (ev.duration ?? 0) * (opt.strokeFactor ?? 1);
   let dtMax = opt.dtMax ?? 0.05;
   if ((ev.kind === 'valveClose' || ev.kind === 'valveOpen') && stroke > 0) dtMax = Math.min(dtMax, Math.max(stroke / 20, 1e-3));
-  const sel = selectTimeStep(travel, st.maxAdjust, st.maxReaches, dtMax);
+  const sel = opt.fixedDt
+    ? (() => {
+        const fdt = opt.fixedDt!;
+        const N = travel.map((t) => Math.max(1, Math.round(t / fdt)));
+        return { dt: fdt, N, err: Math.max(...travel.map((t, k) => Math.abs(t / (N[k] * fdt) - 1))) };
+      })()
+    : selectTimeStep(travel, st.maxAdjust, st.maxReaches, dtMax);
   const dt = sel.dt;
   if (sel.err > st.maxAdjust)
     warnings.push(`Wave speeds adjusted by up to ${(sel.err * 100).toFixed(2)} % (limit ${(st.maxAdjust * 100).toFixed(2)} %) within the ${st.maxReaches.toLocaleString()}-reach budget. Shorten very short pipes or raise the budget for exact geometry.`);
@@ -270,7 +291,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const tq = pumpTorqueQuadratic(p);
     const q = ks.reduce((sum, k) => sum + (steady.flows.get(net.pumps[k].id) ?? 0), 0);
     const e: Extract<Element, { kind: 'pump' }> = {
-      kind: 'pump', idx: ks[0], ids: ks.map((k) => net.pumps[k].id), m, i: nIdx.get(p.from)!, j: nIdx.get(p.to)!, Q: q, alpha: p.on ? 1 : 0, tripped: false, on: p.on,
+      kind: 'pump', idx: ks[0], ids: ks.map((k) => net.pumps[k].id), m, curve: pumpCurve(p), i: nIdx.get(p.from)!, j: nIdx.get(p.to)!, Q: q, alpha: p.on ? 1 : 0, alphaSet: 1, tripped: false, on: p.on,
       closed: !p.on || q <= 0, check: p.checkValve, T: 0, I: p.inertia * (opt.inertiaFactor ?? 1), w: omegaRated(p),
       a, b: b / m, c: c / (m * m), ta: tq.ta, tb: tq.tb / m, tc: tq.tc / (m * m),
     };
@@ -320,7 +341,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   nodes.forEach((n) => (nodeHead[n.id] = new Float32Array(nFrames)));
   const frameSamples: Record<string, Float64Array> = {};
   const frameHeads: Record<string, Float32Array> = {};
+  const frameFlows: Record<string, Float32Array> = {};
   pipes.forEach((p) => {
+    frameFlows[p.env.id] = new Float32Array(nFrames);
     const id = p.env.id;
     frameSamples[id] = Float64Array.from(p.samples, (i) => i * p.dx);
     frameHeads[id] = new Float32Array(nFrames * p.samples.length);
@@ -332,6 +355,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const h2 = Float64Array.from([Hn[i], Hn[j]]);
     frameSamples[p.id] = s2;
     frameHeads[p.id] = new Float32Array(nFrames * 2);
+    frameFlows[p.id] = new Float32Array(nFrames);
     return { i, j, env: { id: p.id, s: s2, z: z2, hSteady: h2.slice(), hMax: h2.slice(), hMin: h2.slice(), cavMax: new Float64Array(2), tMax: new Float64Array(2), tMin: new Float64Array(2) } as PipeEnvelope };
   });
   const vesselOut: TransientResult['vessels'] = {};
@@ -345,18 +369,28 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const nodeMax = new Float64Array(NN).fill(-Infinity);
   const nodeMin = new Float64Array(NN).fill(Infinity);
 
+  // Standard gate-valve table: 1/K relative to fully open, at 0, 10, … 100 % stroke (as used by TSNet and textbooks)
+  const GATE = [0, 0.0167, 0.0313, 0.0556, 0.1, 0.17, 0.333, 0.625, 1.25, 2.5, 5].map((v) => v / 5);
+  const gateArea = (stroke01: number) => {
+    const x = Math.max(0, Math.min(1, stroke01)) * 10;
+    const i = Math.min(9, Math.floor(x));
+    return Math.sqrt(GATE[i] + (GATE[i + 1] - GATE[i]) * (x - i));
+  };
   const valveOpening = (e: Extract<Element, { kind: 'valve' }>, t: number) => {
     const v = net.valves[e.idx];
-    if ((ev.kind !== 'valveClose' && ev.kind !== 'valveOpen') || !ev.targets.includes(v.id) || t <= ev.start) return v.opening;
+    const law = (s01: number) => (v.law === 'gate' ? gateArea(s01) : s01);
+    if ((ev.kind !== 'valveClose' && ev.kind !== 'valveOpen') || !ev.targets.includes(v.id) || t <= ev.start) return law(v.opening);
     const tf = ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1);
     const s = stroke > 0 ? Math.min((t - ev.start) / stroke, 1) : 1;
-    return tf + (v.opening - tf) * (1 - s) ** (ev.exponent ?? 1);
+    return law(tf + (v.opening - tf) * (1 - s) ** (ev.exponent ?? 1));
   };
 
   // ── node residual pieces ───────────────────────────────────────────────
   const Sc = new Float64Array(NN);
   const Sb = new Float64Array(NN);
-  const vapourH = (i: number) => nodes[i].elev - HB + HV;
+  // with column separation off, the vapour limit is moved far below any real head
+  const HBc = opt.noCavitation ? HB + 1e5 : HB;
+  const vapourH = (i: number) => nodes[i].elev - HBc + HV;
   /** Net inflow to node i from everything except elements, at head H (and the device states it implies). */
   const nodeFlow = (i: number, H: number, qext = 0): number => {
     const n = nodes[i];
@@ -372,7 +406,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     return q;
   };
   function gasVolume(C3: number, H: number, z: number) {
-    const y = H - z + HB - HV;
+    const y = H - z + HBc - HV;
     return y > 1e-14 ? C3 / y : C3 / 1e-14;
   }
   function vesselFlow(vs: NonNullable<(typeof vessels)[number]>, H: number) {
@@ -453,10 +487,10 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   /** Closed-form DGCM solve for a plain node (no devices, constant demand). */
   const plainNode = (i: number) => !nodes[i].relief && !vessels[i] && !airv[i] && demK[i] === 0;
   const dgcm = (sb: number, sc: number, qext: number, z: number, C3: number, Vold: number) => {
-    const E = Vold + dt * (sb * (z - HB + HV) - sc - qext);
+    const E = Vold + dt * (sb * (z - HBc + HV) - sc - qext);
     const disc = Math.sqrt(E * E + 4 * dt * sb * C3);
     const y = E > 0 ? (2 * C3) / (E + disc) : (-E + disc) / (2 * dt * sb);
-    return { H: y + z - HB + HV, V: C3 / Math.max(y, 1e-12) };
+    return { H: y + z - HBc + HV, V: C3 / Math.max(y, 1e-12) };
   };
 
   // element helpers
@@ -464,7 +498,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     if (e.closed) return Q; // residual Q = 0
     if (e.kind === 'valve') return e.kq * Q * Math.abs(Q) - e.open * e.open * (Hi - Hj);
     if (e.kind === 'rigid') return (e.inert * (Q - e.Qold)) / dt + rigidR(e, Q) * Q * Math.abs(Q) - (Hi - Hj);
-    return Hj - Hi - (e.a * alpha * alpha + e.b * alpha * Q + e.c * Q * Q);
+    return Hj - Hi - pumpHeadAt(e.curve, Q / e.m, alpha);
   };
 
 
@@ -473,7 +507,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const headAt = (i: number, qext: number) => (isRes[i] ? Hn[i] : solveNode(i, qext));
     const alphaOf = (Q: number) => {
       if (e.kind !== 'pump') return 0;
-      if (!e.tripped) return e.on ? 1 : 0;
+      if (!e.tripped) return e.on ? e.alphaSet : 0;
       const k = dt / (2 * e.I * e.w);
       const A = k * e.ta, B = 1 + k * e.tb * Q, C = k * e.tc * Q * Q - e.alpha + k * e.T;
       let al = Math.abs(A) < 1e-14 ? -C / B : (-B + Math.sqrt(Math.max(B * B - 4 * A * C, 0))) / (2 * A);
@@ -494,8 +528,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       const Hj = headAt(e.j, Q);
       if (e.kind === 'valve') return e.kq * Q * Math.abs(Q) - e.open * e.open * (Hi - Hj);
       if (e.kind === 'rigid') return (e.inert * (Q - e.Qold)) / dt + rigidR(e, Q) * Q * Math.abs(Q) - (Hi - Hj);
-      const al = alphaOf(Q);
-      return Hj - Hi - (e.a * al * al + e.b * al * Q + e.c * Q * Q);
+      return Hj - Hi - pumpHeadAt(e.curve, Q / e.m, alphaOf(Q));
     };
     const hasCheck = e.check;
     if (hasCheck && res(0) >= 0) return finish(0, true); // non-return valve shut: flow would reverse
@@ -563,7 +596,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
           if (fi >= 0) r[fi] -= q;
           if (fj >= 0) r[fj] += q;
           const sv = e.kind === 'pump' && e.tripped ? speedVars.indexOf(e) : -1;
-          const alpha = e.kind === 'pump' ? (sv >= 0 ? v[free.length + els.length + sv] : e.on ? 1 : 0) : 0;
+          const alpha = e.kind === 'pump' ? (sv >= 0 ? v[free.length + els.length + sv] : e.on ? e.alphaSet : 0) : 0;
           r[free.length + k] = elFlowAt(e, headOf(e.i, v), headOf(e.j, v), q, alpha);
         });
         speedVars.forEach((e, k) => {
@@ -613,8 +646,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
           changed = true;
         } else if (e.closed) {
           const sv = e.kind === 'pump' && e.tripped ? speedVars.indexOf(e) : -1;
-          const alpha = e.kind === 'pump' ? (sv >= 0 ? x[free.length + els.length + sv] : e.on ? 1 : 0) : 0;
-          const lift = e.kind === 'pump' ? e.a * alpha * alpha : 0;
+          const alpha = e.kind === 'pump' ? (sv >= 0 ? x[free.length + els.length + sv] : e.on ? e.alphaSet : 0) : 0;
+          const lift = e.kind === 'pump' ? pumpHeadAt(e.curve, 0, alpha) : 0;
           if (Hi + lift > Hj + 1e-6 && (e.kind === 'valve' ? e.open > 0 : alpha > 0.01)) {
             e.closed = false;
             changed = true;
@@ -642,6 +675,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       const arr = frameHeads[p.env.id];
       const ns = p.samples.length;
       for (let k = 0; k < ns; k++) arr[frame * ns + k] = p.H[p.samples[k]];
+      const mid = p.samples[ns >> 1];
+      frameFlows[p.env.id][frame] = (p.Qu[mid] + p.Qd[mid]) / 2;
     });
     rigidEnv.forEach((r) => {
       const arr = frameHeads[r.env.id];
@@ -661,6 +696,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
           pumpOut[id].flow[frame] = e.Q / e.m;
         }
       } else if (e.kind === 'valve') valveOut[net.valves[e.idx].id].opening[frame] = e.open;
+      else if (e.kind === 'rigid') frameFlows[net.pipes[e.pipe].id][frame] = e.Q;
     });
     airv.forEach((a, i) => a && (airOut[nodes[i].id].air[frame] = a.V));
     frame++;
@@ -672,7 +708,14 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const t = step * dt;
     // events
     elements.forEach((e) => {
-      if (e.kind === 'pump' && ev.kind === 'pumpTrip' && ev.targets.includes(e.ids[0]) && t >= ev.start && e.on && !e.tripped) e.tripped = true;
+      if (e.kind === 'pump' && ev.kind === 'pumpTrip' && ev.targets.includes(e.ids[0]) && t >= ev.start && e.on) {
+        if (ev.pumpMode === 'ramp') {
+          // controlled stop: speed forced linearly to zero over the ramp time
+          const T = Math.max((ev.duration ?? 0) * (opt.strokeFactor ?? 1), 1e-9);
+          e.alphaSet = Math.max(0, 1 - (t - ev.start) / T);
+          e.alpha = e.alphaSet;
+        } else if (!e.tripped) e.tripped = true;
+      }
       if (e.kind === 'valve') {
         e.open = valveOpening(e, t);
         if (e.open <= 0) e.closed = true;
@@ -702,7 +745,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         }
       } else hu.fill(0, 0, N + 1);
       const sb = 2 / B, dtsb = dt * sb, z = p.z, C3a = p.C3, V = p.V, Hn2 = p.Hn, Qun = p.Qun, Qdn = p.Qdn;
-      const offs = -HB + HV;
+      const offs = -HBc + HV;
       for (let i = 1; i < N; i++) {
         const qa = Qd[i - 1], qb = Qu[i + 1];
         const CP = H[i - 1] + B * qa - fR[i - 1] * qa * Math.abs(qa) - hu[i - 1];
@@ -844,6 +887,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     nodeHead,
     frameSamples,
     frameHeads,
+    frameFlows,
     envelopes: [...pipes.map((p) => p.env), ...rigidEnv.map((r) => r.env)],
     rigidPipes: rigidPipes.map((p) => p.id),
     nodeMax: nodeMaxR,

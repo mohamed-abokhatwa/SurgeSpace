@@ -1,20 +1,21 @@
+import { useMemo } from 'react';
 import type { TransientResult } from '../engine/transient';
 import type { Network } from '../engine/types';
 import { Chart, type Series } from './Chart';
 
 const COLORS = ['#e0620c', '#2563eb', '#16a34a', '#a855f7', '#e11d48', '#0891b2'];
 
-export function HistoryView({ net, result, nodes, frame }: { net: Network; result: TransientResult; nodes: string[]; frame: number }) {
+export function HistoryView({ net, result, nodes, tNow }: { net: Network; result: TransientResult; nodes: string[]; tNow: number }) {
   const t = result.times;
-  const series: Series[] = nodes.filter((id) => result.nodeHead[id]).map((id, k) => {
+  const series: Series[] = useMemo(() => nodes.filter((id) => result.nodeHead[id]).map((id, k) => {
     const n = net.nodes.find((x) => x.id === id)!;
     const h = result.nodeHead[id];
     return { name: `${id} pressure`, color: COLORS[k % COLORS.length], x: t, y: Array.from(h, (v) => v - n.elev) };
-  });
+  }), [nodes, result, net.nodes, t]);
   const pumps = Object.entries(result.pumps);
   const vessels = Object.entries(result.vessels);
   const airs = Object.entries(result.airValves).filter(([, a]) => a.maxAir > 1e-4);
-  const now = t[Math.min(frame, t.length - 1)];
+  const now = tNow;
   return (
     <div>
       <div className="label">Pressure head at selected nodes</div>

@@ -73,6 +73,7 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
   if (missing) notes.push(`${missing} nodes had no coordinates and were placed on a grid.`);
 
   const pipes: Pipe[] = [];
+  const cvPipes: string[] = [];
   for (const r of sec('PIPES')) {
     const status = (r[7] ?? 'OPEN').toUpperCase();
     pipes.push({
@@ -80,7 +81,7 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
       roughness: friction === 'DW' ? dwRough(Number(r[5])) : roughConv(Number(r[5])),
       minorLoss: Number(r[6] ?? 0) || 0, wavespeed: 1000, closed: status === 'CLOSED',
     });
-    if (status === 'CV') notes.push(`Pipe ${r[0]} has a check valve; modelled as an open pipe (add a non-return valve if it matters).`);
+    if (status === 'CV') cvPipes.push(r[0]);
   }
   if (pipes.length) notes.push('All pipes got a wave speed of 1000 m/s. Set real values by material (steel ~1200, ductile iron ~1100, PVC ~400, HDPE ~300 m/s).');
 
@@ -89,16 +90,23 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
     const kv = new Map<string, string>();
     for (let i = 3; i < r.length - 1; i += 2) kv.set(r[i].toUpperCase(), r[i + 1]);
     let curve: [number, number][] = [];
+    let power: number | undefined;
     if (kv.has('HEAD')) curve = curves.get(kv.get('HEAD')!) ?? [];
+    if (kv.has('POWER')) {
+      power = Number(kv.get('POWER')) * (us ? 0.7457 : 1); // hp or kW → kW
+      curve = [[0.1, (power * 1000) / (998.2 * 9.80665 * 0.1)]];
+    }
     if (!curve.length) {
-      notes.push(`Pump ${r[0]} has no head curve (power pump); a 100 L/s × 40 m curve was assumed.`);
+      notes.push(`Pump ${r[0]} has no head curve; a 100 L/s × 40 m curve was assumed.`);
       curve = [[0.1, 40]];
     }
-    const sorted = [...curve].sort((a, b) => a[0] - b[0]);
+    const s = kv.has('SPEED') ? Number(kv.get('SPEED')) : 1;
+    let sorted = [...curve].sort((a, b) => a[0] - b[0]);
+    if (s !== 1 && s > 0) sorted = sorted.map(([q, h]) => [q * s, h * s * s] as [number, number]); // homologous speed setting
     const design = sorted.length === 1 ? sorted[0] : sorted[Math.min(1, sorted.length - 1)];
     const speedRpm = 1480;
     pumps.push({
-      id: r[0], from: r[1], to: r[2], curve: sorted.length >= 3 ? [sorted[0], sorted[Math.floor(sorted.length / 2)], sorted[sorted.length - 1]] : sorted,
+      id: r[0], from: r[1], to: r[2], curve: sorted, ...(power ? { power: power * (s > 0 ? s ** 3 : 1) } : {}),
       efficiency: 0.8, speed: speedRpm, inertia: Math.round(estimateInertia((998.2 * 9.80665 * design[0] * design[1]) / 0.8 / 1000, speedRpm) * 100) / 100,
       checkValve: true, on: true,
     });
@@ -110,10 +118,25 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
     if (type !== 'TCV' && type !== 'GPV') notes.push(`Valve ${r[0]} (${type}) is modelled as a fixed-opening valve.`);
     valves.push({ id: r[0], from: r[1], to: r[2], diameter: Number(r[3]) * df, k0: type === 'TCV' ? Math.max(Number(r[5]) || 0.2, 0.05) : Math.max(Number(r[6] ?? 0.2) || 0.2, 0.05), opening: 1 });
   }
+  // pipes with a check valve become a non-return valve followed by the pipe
+  for (const id of cvPipes) {
+    const p = pipes.find((x) => x.id === id)!;
+    const n = nodes.find((x) => x.id === p.from)!;
+    const nid = `${p.from}~${id}`;
+    nodes.push({ id: nid, kind: 'junction', x: n.x, y: n.y, elev: n.elev, demand: 0 });
+    valves.push({ id: `${id}-NRV`, from: p.from, to: nid, diameter: p.diameter, k0: 0.05, opening: 1, check: true });
+    p.from = nid;
+  }
+  if (cvPipes.length) notes.push(`${cvPipes.length} pipe(s) with a check valve became a non-return valve plus the pipe.`);
   for (const r of sec('STATUS')) {
     const id = r[0], st = (r[1] ?? '').toUpperCase();
     const p = pumps.find((x) => x.id === id);
     if (p && st === 'CLOSED') p.on = false;
+    if (p && Number.isFinite(Number(st)) && Number(st) !== 1) {
+      const sp = Number(st);
+      if (sp <= 0) p.on = false;
+      else { p.curve = p.curve.map(([q, h]) => [q * sp, h * sp * sp]); if (p.power) p.power *= sp ** 3; }
+    }
     const pi = pipes.find((x) => x.id === id);
     if (pi && st === 'CLOSED') pi.closed = true;
   }

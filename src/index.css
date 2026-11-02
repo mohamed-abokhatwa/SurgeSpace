@@ -38,8 +38,8 @@
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; color: inherit; }
-.app { display: grid; grid-template-rows: 52px 1fr; height: 100%; }
-.topbar { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.app { display: grid; grid-template-rows: 52px minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: 100%; overflow: hidden; }
+.topbar { display: flex; align-items: center; gap: 10px; padding: 0 14px; min-width: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -0.01em; font-size: 16px; white-space: nowrap; }
 .brand small { font: 500 11px var(--mono); color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
 .project-name { min-width: 0; flex: 1; font-weight: 500; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -85,8 +85,8 @@ table.grid tr.sel td { background: var(--accent-soft); }
 .pill.good { color: var(--good); border-color: currentColor; }
 .pill.bad { color: var(--bad); border-color: currentColor; }
 .pill.warn { color: var(--warn); border-color: currentColor; }
-.player { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line); box-shadow: var(--shadow); backdrop-filter: blur(6px); }
-.player input[type='range'] { flex: 1; accent-color: var(--accent); }
+.player { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; background: color-mix(in srgb, var(--panel) 96%, transparent); border: 1px solid var(--line); box-shadow: var(--shadow); }
+
 .legend { position: absolute; top: 12px; right: 12px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line); font-size: 11.5px; box-shadow: var(--shadow); }
 .map-tools { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
 .inspector { position: absolute; left: 12px; top: 56px; width: 270px; max-height: calc(100% - 130px); overflow: auto; }
@@ -112,3 +112,20 @@ svg text { font-family: var(--sans); }
   .topbar, .side, .player, .map-tools, .legend, .inspector { display: none !important; }
   .main { display: block; }
 }
+/* map controls */
+.seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 9px; border: 1px solid var(--line-2); background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: var(--shadow); }
+.seg-btn { height: 26px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-weight: 500; font-size: 13px; cursor: pointer; }
+.seg-btn.on { background: var(--accent); color: #fff; }
+.seg-btn:disabled { opacity: 0.5; cursor: default; }
+.zoom-tools { position: absolute; right: 12px; bottom: 96px; display: flex; flex-direction: column; gap: 4px; }
+.zoom-tools .btn { width: 30px; justify-content: center; padding: 0; box-shadow: var(--shadow); }
+.hovercard { position: absolute; pointer-events: none; min-width: 190px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px; z-index: 6; }
+.surge-bar { width: 150px; height: 8px; border-radius: 4px; margin: 2px 0 3px; background: linear-gradient(90deg, #1d4ed8, #60a5fa 27%, #9aa7b8 50%, #f87171 73%, #b91c1c); }
+:root[data-theme='dark'] .surge-bar { background: linear-gradient(90deg, #4f9dff, #9cc7ff 27%, #55657b 50%, #ffa38a 73%, #ff4d4d); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .surge-bar { background: linear-gradient(90deg, #4f9dff, #9cc7ff 27%, #55657b 50%, #ffa38a 73%, #ff4d4d); } }
+.player .play { width: 38px; height: 38px; justify-content: center; padding: 0; border-radius: 50%; font-size: 13px; flex: none; }
+.timeline { flex: 1; min-width: 0; cursor: pointer; border-radius: 6px; outline: none; touch-action: none; user-select: none; }
+.timeline:focus-visible { box-shadow: 0 0 0 2px var(--accent-soft); }
+.timeline-keys { gap: 14px; margin-top: 1px; }
+.linkish { border: 0; background: none; padding: 0; font: 500 11px var(--mono); color: var(--muted); cursor: pointer; }
+.linkish:hover { color: var(--accent); }

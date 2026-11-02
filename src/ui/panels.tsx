@@ -123,6 +123,15 @@ export function EventPanel({ net, setNet }: { net: Network; setNet: SetNet }) {
           </div>
           <div className="grid2" style={{ marginTop: 10 }}>
             <label className="field"><span>Start time (s)</span><input type="number" step="0.1" value={ev.start} onChange={(e) => set({ start: num(e.target.value) })} /></label>
+            {ev.kind === 'pumpTrip' && (
+              <label className="field"><span>How the pump stops</span>
+                <select value={ev.pumpMode ?? 'trip'} onChange={(e) => set({ pumpMode: e.target.value as 'trip' | 'ramp', duration: ev.duration ?? 5 })}>
+                  <option value="trip">Power failure (inertia run-down)</option>
+                  <option value="ramp">Controlled stop (VFD ramp)</option>
+                </select>
+              </label>
+            )}
+            {ev.kind === 'pumpTrip' && ev.pumpMode === 'ramp' && <label className="field"><span>Ramp-down time (s)</span><input type="number" step="0.5" value={ev.duration ?? 5} onChange={(e) => set({ duration: num(e.target.value) })} /></label>}
             {ev.kind !== 'pumpTrip' && <label className="field"><span>Stroke time (s)</span><input type="number" step="0.1" value={ev.duration ?? 5} onChange={(e) => set({ duration: num(e.target.value) })} /></label>}
             {ev.kind !== 'pumpTrip' && <label className="field"><span>Final opening (0–1)</span><input type="number" step="0.05" value={ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1)} onChange={(e) => set({ finalOpening: num(e.target.value) })} /></label>}
             {ev.kind !== 'pumpTrip' && (

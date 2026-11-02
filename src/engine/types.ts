@@ -84,6 +84,8 @@ export interface Pump {
   /** Non-return valve on the discharge (prevents reverse flow). */
   checkValve: boolean;
   on: boolean;
+  /** Constant-power pump (EPANET POWER), kW. The head curve is then H = P / (ρ g Q). */
+  power?: number;
 }
 
 export interface Valve {
@@ -97,6 +99,8 @@ export interface Valve {
   opening: number;
   /** Acts as a non-return valve (closes on reverse flow). */
   check?: boolean;
+  /** How flow area follows the stroke: 'area' (opening = effective area) or 'gate' (standard gate-valve loss table). */
+  law?: 'area' | 'gate';
 }
 
 export type EventKind = 'pumpTrip' | 'valveClose' | 'valveOpen' | 'none';
@@ -112,6 +116,9 @@ export interface TransientEvent {
   finalOpening?: number;
   /** Closure law exponent: 1 = linear area, 2+ = gate-valve-like (most flow cut late). */
   exponent?: number;
+  /** Pump events: 'trip' = power failure, speed falls by inertia; 'ramp' = controlled stop (VFD), speed
+   *  forced linearly to zero over `duration`. */
+  pumpMode?: 'trip' | 'ramp';
 }
 
 export interface Settings {

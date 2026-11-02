@@ -138,8 +138,12 @@ export function Chart({
           ))}
           {bands.map((b) => {
             let d = '';
-            for (let i = 0; i < b.x.length; i++) d += `${i ? 'L' : 'M'}${X(b.x[i]).toFixed(1)},${Y(b.hi[i]).toFixed(1)}`;
-            for (let i = b.x.length - 1; i >= 0; i--) d += `L${X(b.x[i]).toFixed(1)},${Y(b.lo[i]).toFixed(1)}`;
+            const st = Math.max(1, Math.floor(b.x.length / (iw * 1.5)));
+            const idx: number[] = [];
+            for (let i = 0; i < b.x.length; i += st) idx.push(i);
+            if (idx[idx.length - 1] !== b.x.length - 1) idx.push(b.x.length - 1);
+            idx.forEach((i, k) => (d += `${k ? 'L' : 'M'}${X(b.x[i]).toFixed(1)},${Y(b.hi[i]).toFixed(1)}`));
+            for (let k = idx.length - 1; k >= 0; k--) d += `L${X(b.x[idx[k]]).toFixed(1)},${Y(b.lo[idx[k]]).toFixed(1)}`;
             return <path key={`b${b.name}`} d={d + 'Z'} fill={b.color} stroke="none" />;
           })}
           {series.map((s) => (

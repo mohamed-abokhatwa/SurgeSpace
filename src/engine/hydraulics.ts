@@ -51,6 +51,67 @@ export function pumpQuadratic(pump: Pump): { a: number; b: number; c: number } {
   return { a, b, c };
 }
 
+export interface PumpCurve {
+  /** Head at rated speed for flow q (m³/s), with straight-line extension outside the curve. */
+  h: (q: number) => number;
+  /** dh/dq at rated speed. */
+  dh: (q: number) => number;
+  kind: 'power' | 'linear';
+}
+
+/**
+ * Pump head curve exactly as EPANET interprets it: one design point → h = A − B q² (A = 1.333 h);
+ * three points starting at zero flow → h = A − B q^C; any other point set → straight segments.
+ * Outside the data the curve continues as a straight line with the end slope.
+ */
+export function pumpCurve(pump: Pump): PumpCurve {
+  if (pump.power && pump.power > 0) {
+    const k = (pump.power * 1000) / (RHO * G);
+    return { h: (q) => k / Math.max(q, 1e-4), dh: (q) => -k / Math.max(q, 1e-4) ** 2, kind: 'power' };
+  }
+  const pts = [...pump.curve].sort((a, b) => a[0] - b[0]);
+  let core: (q: number) => number;
+  let kind: PumpCurve['kind'] = 'power';
+  let qLo = 0, qHi: number;
+  if (pts.length === 1) {
+    const [q1, h1] = pts[0];
+    const A = 1.33334 * h1, B = (A - h1) / (q1 * q1);
+    core = (q) => A - B * q * q;
+    qHi = 2 * q1;
+  } else if (pts.length === 3 && pts[0][0] === 0 && pts[1][1] < pts[0][1] && pts[2][1] < pts[1][1]) {
+    const [[, h0], [q1, h1], [q2, h2]] = pts;
+    const C = Math.log((h0 - h2) / (h0 - h1)) / Math.log(q2 / q1);
+    const B = (h0 - h1) / q1 ** C;
+    core = (q) => h0 - B * Math.max(q, 0) ** C;
+    qHi = q2;
+  } else {
+    kind = 'linear';
+    qLo = pts[0][0];
+    qHi = pts[pts.length - 1][0];
+    core = (q) => {
+      for (let i = 1; i < pts.length; i++) if (q <= pts[i][0]) return pts[i - 1][1] + ((pts[i][1] - pts[i - 1][1]) * (q - pts[i - 1][0])) / (pts[i][0] - pts[i - 1][0] || 1e-12);
+      return pts[pts.length - 1][1];
+    };
+  }
+  const eps = Math.max(qHi, 1e-6) * 1e-4;
+  const slopeHi = (core(qHi) - core(qHi - eps)) / eps;
+  const slopeLo = kind === 'linear' && pts.length > 1 ? (pts[1][1] - pts[0][1]) / (pts[1][0] - pts[0][0] || 1e-12) : Math.min((core(qLo + eps) - core(qLo)) / eps, -1e-9);
+  const h = (q: number) => (q > qHi ? core(qHi) + slopeHi * (q - qHi) : q < qLo ? core(qLo) + slopeLo * (q - qLo) : core(q));
+  const dh = (q: number) => {
+    if (q > qHi) return slopeHi;
+    if (q < qLo) return slopeLo;
+    const e = Math.max(Math.abs(q), qHi) * 1e-6;
+    return (core(Math.min(q + e, qHi)) - core(Math.max(q - e, qLo))) / (Math.min(q + e, qHi) - Math.max(q - e, qLo));
+  };
+  return { h, dh, kind };
+}
+
+/** Homologous head at speed ratio α: H = α² h(Q/α); a stopped impeller acts as a small resistance. */
+export function pumpHeadAt(c: PumpCurve, Q: number, alpha: number): number {
+  if (alpha < 1e-4) return -50 * Q * Math.abs(Q);
+  return alpha * alpha * c.h(Q / alpha);
+}
+
 /** Rated (best-efficiency) flow: the middle curve point, or the single design point. */
 export function pumpRatedQ(pump: Pump): number {
   const pts = [...pump.curve].sort((p1, p2) => p1[0] - p2[0]);
@@ -71,14 +132,14 @@ export function pumpEff(pump: Pump, q: number): number {
  * With the head curve, the homologous forms H = aα² + bαQ + cQ² and T = taα² + tbαQ + tcQ² stay smooth at α → 0.
  */
 export function pumpTorqueQuadratic(pump: Pump): { ta: number; tb: number; tc: number } {
-  const { a, b, c } = pumpQuadratic(pump);
+  const curve = pumpCurve(pump);
   const qr = pumpRatedQ(pump);
   const w = omegaRated(pump);
   const xs: number[] = [];
   const ys: number[] = [];
   for (let i = 1; i <= 24; i++) {
     const q = (qr * 1.4 * i) / 24;
-    const h = Math.max(a + b * q + c * q * q, 0);
+    const h = Math.max(curve.h(q), 0);
     xs.push(q);
     ys.push((RHO * G * q * h) / (pumpEff(pump, q) * w));
   }
