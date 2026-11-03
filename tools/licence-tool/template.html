@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SurgeSpace Licence Tool</title>
+<style>
+:root { --bg:#f4f6fa; --panel:#fff; --line:#e2e8f0; --line2:#cbd5e1; --text:#0d1b2c; --muted:#526276; --accent:#e0620c; --good:#15803d; --bad:#dc2626; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg:#07111f; --panel:#0c1a2c; --line:rgba(120,170,230,.14); --line2:rgba(120,170,230,.28); --text:#e6edf6; --muted:#93a4ba; --accent:#ff7a1a; --good:#4ade80; --bad:#f87171; color-scheme: dark; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 14px max(16px, env(safe-area-inset-left)); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+header h1 { font-size: 17px; margin: 0; }
+header .key { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+main { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+section.wide { grid-column: 1 / -1; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin: 0 0 12px; }
+label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+input, select, textarea { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line2); border-radius: 7px; padding: 7px 9px; min-width: 0; }
+textarea { font: 12.5px var(--mono); resize: vertical; width: 100%; }
+.mono { font-family: var(--mono); }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+button { font: inherit; font-weight: 600; border: 1px solid var(--line2); background: var(--panel); color: var(--text); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .5; cursor: default; }
+.ok { color: var(--good); } .bad { color: var(--bad); } .muted { color: var(--muted); } .small { font-size: 12.5px; }
+.out { margin-top: 12px; display: grid; gap: 8px; }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-bottom: 1px solid var(--line); padding: 6px; white-space: nowrap; }
+td { border-bottom: 1px solid var(--line); padding: 6px; white-space: nowrap; }
+tr.cancelled td { color: var(--muted); text-decoration: line-through; }
+tr.cancelled td:last-child { text-decoration: none; }
+.notice { background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SurgeSpace Licence Tool</h1>
+  <span class="small muted">Runs only on this computer. Nothing is sent anywhere.</span>
+  <span class="key" id="keyState">No signing key loaded</span>
+</header>
+<main>
+  <section class="wide" id="keySection">
+    <h2>1 · Signing key</h2>
+    <p class="small">Activation codes are signed with your private key. Create it once, keep the file safe (for example on an encrypted USB stick and in your password manager), and never send it to anyone. SurgeSpace only contains the public key, which can check codes but not make them.</p>
+    <div class="row">
+      <button id="loadKey">Open signing key file…</button>
+      <button id="newKey">Create a new signing key (first time only)</button>
+      <label class="row small" style="flex-direction:row;gap:6px"><input type="checkbox" id="remember"> Remember the key on this computer</label>
+    </div>
+    <div id="pubOut" class="out" hidden>
+      <div class="notice">Public key to put in SurgeSpace (safe to share):<br><b class="mono" id="pubKey" style="user-select:all;word-break:break-all"></b></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2 · Make an activation code</h2>
+    <form id="issue" class="grid">
+      <label style="grid-column:1/-1">Machine ID (from the customer's email)<input id="mid" class="mono" placeholder="SS-XXXX-XXXX-XXXX-XXXX" required autocomplete="off"><span id="midState" class="small"></span></label>
+      <label style="grid-column:1/-1">Licensee (company or person, shown in the app)<input id="name" required></label>
+      <label>Email (for your register)<input id="email" type="email"></label>
+      <label>Licence number<input id="lno" class="mono" required></label>
+      <label>Plan<select id="plan"><option value="pro">Pro</option><option value="enterprise">Enterprise</option></select></label>
+      <label>Duration<select id="dur"><option value="1">1 month</option><option value="3">3 months</option><option value="6">6 months</option><option value="12" selected>1 year</option><option value="24">2 years</option><option value="36">3 years</option><option value="0">No end date</option><option value="date">Until a date…</option></select></label>
+      <label id="untilWrap" hidden>Last valid day<input id="until" type="date"></label>
+      <label style="grid-column:1/-1">Notes (for your register: invoice, payment…)<input id="notes"></label>
+      <div class="row" style="grid-column:1/-1"><button class="primary" type="submit" id="makeBtn">Make activation code</button><span id="issueMsg" class="small"></span></div>
+    </form>
+    <div id="codeOut" class="out" hidden>
+      <label>Activation code<textarea id="code" rows="4" readonly></textarea></label>
+      <div class="row"><button id="copyCode">Copy code</button><button id="copyMail">Copy reply email</button><span id="copyMsg" class="small ok"></span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3 · Check a code</h2>
+    <p class="small muted">Paste a code to see what is inside and whether it was signed with your key.</p>
+    <textarea id="checkIn" rows="4" placeholder="SSA-…"></textarea>
+    <div id="checkOut" class="out small"></div>
+  </section>
+
+  <section class="wide">
+    <h2>4 · Register of issued licences</h2>
+    <div class="row" style="margin-bottom:10px">
+      <input id="search" placeholder="Search name, email, machine, licence…" style="flex:1;min-width:200px">
+      <button id="exportCsv">Export CSV</button>
+      <button id="importCsv">Import CSV…</button>
+      <button id="makeStatus" class="primary">Make status file for the website</button>
+    </div>
+    <p class="small muted">The register is kept in this browser on this computer: export it regularly as a backup. "Cancel" marks a licence as cancelled; then make a new status file and upload it to <span class="mono">lic.engspace.app/surgespace/status.txt</span>. SurgeSpace checks that file every few days and stops a cancelled licence.</p>
+    <div class="tablewrap"><table><thead><tr><th>Licence</th><th>Licensee</th><th>Email</th><th>Machine ID</th><th>Plan</th><th>Issued</th><th>Last day</th><th>Notes</th><th></th></tr></thead><tbody id="reg"></tbody></table></div>
+  </section>
+</main>
+<script>/*APP*/</script>
+</body>
+</html>

@@ -1,100 +1,60 @@
-// Licensing tests: keys, signed tokens, offline checks, seats, trials, refresh and deactivation.
+// Licensing tests: Machine IDs, activation codes (forgery, wrong machine, expiry) and the online status file.
 import * as ed from '@noble/ed25519';
-import {
-  checkToken, DAY, features, handleRequest, hashKey, newLicenseKey, normaliseKey, OFFLINE_GRACE_DAYS, signToken, TRIAL_DAYS, verifyToken,
-  type ActivationRow, type LicenseRow, type LicenseStore, type TrialRow,
-} from '../supabase/functions/_shared/licenseCore';
+import { checkCode, features, hex, machineIdFrom, makeCode, makeStatus, newKeyPair, normaliseMachineId, publicKeyOf, readCode, readStatus } from '../src/license/core';
 
 let pass = 0, fail = 0;
 const t = (name: string, ok: boolean, info = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? ` (${info})` : ''}`); ok ? pass++ : fail++; };
 
-function memStore() {
-  const lic: LicenseRow[] = [], act: ActivationRow[] = [], trials: TrialRow[] = [];
-  const s: LicenseStore & { lic: LicenseRow[]; act: ActivationRow[] } = {
-    lic, act,
-    licenseByHash: async (h) => lic.find((l) => l.key_hash === h) ?? null,
-    licenseById: async (id) => lic.find((l) => l.id === id) ?? null,
-    activations: async (id) => act.filter((a) => a.license_id === id),
-    upsertActivation: async (a) => { const i = act.findIndex((x) => x.license_id === a.license_id && x.device_id === a.device_id); if (i >= 0) act[i] = a; else act.push(a); },
-    removeActivation: async (id, d) => { const i = act.findIndex((x) => x.license_id === id && x.device_id === d); if (i >= 0) act.splice(i, 1); },
-    trialFor: async (e, d) => trials.find((x) => x.email === e || x.device_id === d) ?? null,
-    createTrial: async (x) => { trials.push(x); },
-  };
-  return s;
-}
+const kp = await newKeyPair();
+const priv = Uint8Array.from(kp.privateKey.match(/../g)!.map((x) => parseInt(x, 16)));
+const pub = Uint8Array.from(kp.publicKey.match(/../g)!.map((x) => parseInt(x, 16)));
+t('public key derives from the private key', (await publicKeyOf(kp.privateKey)) === kp.publicKey);
 
-const priv = ed.utils.randomSecretKey();
-const pub = await ed.getPublicKeyAsync(priv);
-const other = ed.utils.randomSecretKey();
-const now = 1_800_000_000;
-const devA = 'deviceAAAAAAAAAAAAAAAA', devB = 'deviceBBBBBBBBBBBBBBBB', devC = 'deviceCCCCCCCCCCCCCCCC';
+// Machine IDs
+const mid = machineIdFrom(crypto.getRandomValues(new Uint8Array(16)));
+const mid2 = machineIdFrom(crypto.getRandomValues(new Uint8Array(16)));
+t('Machine ID format', /^SS(-[0-9A-Z]{4}){4}$/.test(mid), mid);
+t('Machine ID read back from lower case, spaces and O/0 mix-ups', normaliseMachineId(mid.toLowerCase().replace(/-/g, ' ').replace(/0/g, 'o')) === mid);
+const typo = mid.slice(0, -1) + (mid.endsWith('0') ? '1' : '0');
+t('one mistyped character is caught', normaliseMachineId(typo) === null);
+t('same device gives the same Machine ID', machineIdFrom(new Uint8Array(16).fill(7)) === machineIdFrom(new Uint8Array(16).fill(7)));
 
-// keys
-const key = newLicenseKey();
-t('key format', /^SSPC(-[0-9A-Z]{5}){4}$/.test(key), key);
-t('key normalises from lower case and spaces', normaliseKey(key.toLowerCase().replace(/-/g, ' ')) === key);
-const typo = key.slice(0, -1) + (key.endsWith('0') ? '1' : '0');
-t('one wrong character is caught by the check symbol', normaliseKey(typo) === null);
+// codes
+const key = (id: string) => id.replace(/^SS-/, '').replace(/-/g, '');
+const day = 20_400;
+const code = await makeCode({ m: key(mid), p: 'pro', n: 'Firm Ltd', l: 'SS-2026-0001', i: day, e: day + 364 }, priv);
+t('code starts with SSA- and is short enough for an email', code.startsWith('SSA-') && code.length < 260, `${code.length} characters`);
+const ok = await checkCode(code, pub, mid, day + 10);
+t('valid code on its machine', ok.ok && ok.payload.n === 'Firm Ltd' && ok.daysLeft === 355);
+const wrapped = code.match(/.{1,60}/g)!.join('\n  ');
+t('code still works after an email client wraps it', (await checkCode(wrapped, pub, mid, day)).ok);
+const other = await checkCode(code, pub, mid2, day);
+t('code refused on another computer', !other.ok && other.reason === 'other-machine');
+const late = await checkCode(code, pub, mid, day + 365);
+t('code refused after its last day', !late.ok && late.reason === 'expired');
+t('code valid on its last day', (await checkCode(code, pub, mid, day + 364)).ok);
+const forever = await makeCode({ m: key(mid), p: 'enterprise', n: 'Utility', l: 'SS-2026-0002', i: day, e: null }, priv);
+const fv = await checkCode(forever, pub, mid, day + 5000);
+t('code with no end date', fv.ok && fv.daysLeft === null);
+const [b, s] = code.slice(4).split('.');
+const edited = JSON.parse(Buffer.from(b, 'base64url').toString());
+edited.e = day + 9999;
+const forged = 'SSA-' + Buffer.from(JSON.stringify(edited)).toString('base64url') + '.' + s;
+t('edited code (longer end date) is rejected', (await readCode(forged, pub)) === null);
+const strangerKey = ed.utils.randomSecretKey();
+const fake = await makeCode({ m: key(mid), p: 'pro', n: 'Pirate', l: 'X', i: day, e: null }, strangerKey);
+t('code signed with any other key is rejected', (await readCode(fake, pub)) === null);
+t('garbage is rejected', (await readCode('hello', pub)) === null && (await readCode('', pub)) === null);
+t('free plan limits', features('free').maxPipes === 25 && !features('free').exportFiles && features('pro').exportFiles);
 
-// tokens
-const p0 = { v: 1 as const, lid: 'L1', plan: 'pro' as const, seats: 2, email: 'a@b.co', dev: devA, iat: now, exp: now + 365 * DAY, rby: now + 30 * DAY };
-const tok = await signToken(p0, priv);
-t('token verifies with the right public key', (await verifyToken(tok, pub))?.lid === 'L1');
-t('token fails with another key', (await verifyToken(tok, await ed.getPublicKeyAsync(other))) === null);
-const [body, sig] = tok.split('.');
-const forged = Buffer.from(JSON.stringify({ ...p0, plan: 'enterprise', seats: 99 })).toString('base64url') + '.' + sig;
-t('edited token is rejected', (await verifyToken(forged, pub)) === null);
-void body;
-t('token on another device is rejected', (await checkToken(tok, pub, devB, now)).ok === false);
-t('token past licence end is rejected', (await checkToken(tok, pub, devA, now + 366 * DAY)).ok === false);
-const off = await checkToken(tok, pub, devA, now + 31 * DAY);
-t('token offline beyond grace is rejected', !off.ok && off.reason === 'offline-too-long');
-const fresh = await checkToken(tok, pub, devA, now + 8 * DAY);
-t('token older than 7 days asks for a quiet refresh', fresh.ok && fresh.needsRefresh);
-t('free plan limits', features('free').maxPipes === 25 && !features('free').exportFiles && features('pro').maxPipes === Infinity);
-
-// server: activation and seats
-const st = memStore();
-st.lic.push({ id: 'L1', key_hash: await hashKey(key), plan: 'pro', seats: 2, email: 'eng@firm.com', name: 'Firm Ltd', expires_at: now + 365 * DAY, status: 'active' });
-const r1 = await handleRequest({ action: 'activate', key, deviceId: devA, deviceName: 'Laptop' }, st, priv, pub, now);
-t('activation on device A', r1.ok && !!r1.token);
-const r1b = await handleRequest({ action: 'activate', key, deviceId: devA }, st, priv, pub, now + 10);
-t('activating the same device again does not use a seat', r1b.ok && st.act.length === 1);
-const r2 = await handleRequest({ action: 'activate', key: key.toLowerCase(), deviceId: devB }, st, priv, pub, now);
-t('activation on device B (2 seats)', r2.ok);
-const r3 = await handleRequest({ action: 'activate', key, deviceId: devC }, st, priv, pub, now);
-t('third device is refused when seats are full', !r3.ok && r3.error === 'seats-full');
-const tokA = r1.ok ? r1.token! : '';
-const d1 = await handleRequest({ action: 'deactivate', token: tokA }, st, priv, pub, now + DAY);
-t('deactivating device A frees a seat', d1.ok && st.act.length === 1);
-const r4 = await handleRequest({ action: 'activate', key, deviceId: devC }, st, priv, pub, now + DAY);
-t('device C can activate after that', r4.ok);
-const ref = await handleRequest({ action: 'refresh', token: tokA }, st, priv, pub, now + 2 * DAY);
-t('refresh is refused for a deactivated device', !ref.ok && ref.error === 'not-activated');
-const tokC = r4.ok ? r4.token! : '';
-const refC = await handleRequest({ action: 'refresh', token: tokC }, st, priv, pub, now + 20 * DAY);
-const pC = refC.ok ? await verifyToken(refC.token!, pub) : null;
-t('refresh extends the offline grace', !!pC && pC.rby === now + 20 * DAY + OFFLINE_GRACE_DAYS * DAY);
-st.lic[0].status = 'revoked';
-const refR = await handleRequest({ action: 'refresh', token: tokC }, st, priv, pub, now + 21 * DAY);
-t('revoked licence stops refreshing', !refR.ok && refR.error === 'revoked');
-st.lic[0].status = 'active';
-const exp = await handleRequest({ action: 'refresh', token: tokC }, st, priv, pub, now + 400 * DAY);
-t('expired subscription stops refreshing', !exp.ok && exp.error === 'expired');
-const unk = await handleRequest({ action: 'activate', key: newLicenseKey(), deviceId: devA }, st, priv, pub, now);
-t('unknown key is refused', !unk.ok && unk.error === 'unknown-key');
-
-// trials
-const tr = await handleRequest({ action: 'trial', email: 'New@Firm.com', deviceId: devA }, st, priv, pub, now);
-const pt = tr.ok ? await verifyToken(tr.token!, pub) : null;
-t('trial gives 14 days', !!pt && pt.plan === 'trial' && pt.exp === now + TRIAL_DAYS * DAY);
-const tr2 = await handleRequest({ action: 'trial', email: 'other@firm.com', deviceId: devA }, st, priv, pub, now + 20 * DAY);
-t('a second trial on the same device after it ended is refused', !tr2.ok && tr2.error === 'trial-used');
-const tr3 = await handleRequest({ action: 'trial', email: 'new@firm.com', deviceId: devB }, st, priv, pub, now + 3 * DAY);
-const pt3 = tr3.ok ? await verifyToken(tr3.token!, pub) : null;
-t('same email on another device continues the same trial (no reset)', !!pt3 && pt3.exp === now + TRIAL_DAYS * DAY);
-const bad = await handleRequest({ action: 'trial', email: 'nope', deviceId: devC }, st, priv, pub, now);
-t('trial needs a valid email', !bad.ok && bad.error === 'bad-email');
+// status file for the periodic online check
+const st = await makeStatus(['SS-2026-0001', ' SS-2026-0001 ', 'SS-2026-0007'], priv, day);
+const rs = await readStatus(st, pub);
+t('status file lists cancelled licence numbers (duplicates removed)', !!rs && rs.r.length === 2 && rs.r.includes('SS-2026-0001') && rs.d === day);
+t('status file has no names in it', !Buffer.from(st.slice(4).split('.')[0], 'base64url').toString().includes('Firm'));
+const fakeSt = await makeStatus([], strangerKey, day);
+t('a fake status file is rejected', (await readStatus(fakeSt, pub)) === null);
+void hex;
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

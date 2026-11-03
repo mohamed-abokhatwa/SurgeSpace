@@ -11,13 +11,15 @@
     "test": "tsx tests/engine.test.ts && tsx tests/license.test.ts",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "licence-tool": "node scripts/build-licence-tool.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.2.7",
     "@fontsource/ibm-plex-sans": "5.2.8",
     "@noble/ed25519": "3.1.0",
     "@tauri-apps/api": "2.12.3",
+    "@tauri-apps/plugin-opener": "2.7.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "read-excel-file": "^9.3.14"

@@ -1,25 +1,31 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { activate, BUY_URL, deactivate, DEMO, demoKey, getLicence, planLabel, refresh, startTrial, storePurchase, subscribeLicence } from './licence';
+import { useState, useSyncExternalStore } from 'react';
+import { dayToDate } from './core';
+import { checkOnline, DEMO, demoCode, enterCode, getLicence, LICENCE_EMAIL, openExternal, planLabel, removeCode, requestEmail, startTrial, subscribeLicence } from './licence';
 
 export const useLicence = () => useSyncExternalStore(subscribeLicence, getLicence);
 
-const fmtDate = (s: number | null | undefined) => (s ? new Date(s * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'No end date');
+const date = (d: number | null | undefined) => (d === null || d === undefined ? 'No end date' : dayToDate(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }));
+
+async function copy(text: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+}
 
 export function LicenceDialog({ reason, onClose }: { reason?: string; onClose: () => void }) {
   const lic = useLicence();
-  const [key, setKey] = useState('');
-  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [demo, setDemo] = useState<string | null>(null);
-  useEffect(() => { if (DEMO) void demoKey().then(setDemo); }, []);
-  const run = async (f: () => Promise<{ ok: boolean; message?: string }>, okText: string) => {
+  const [copied, setCopied] = useState('');
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const run = async (f: () => Promise<{ ok: boolean; message: string }>) => {
     setBusy(true); setMsg(null);
-    try { const r = await f(); setMsg({ ok: r.ok, text: r.ok ? r.message ?? okText : r.message ?? 'Something went wrong.' }); }
-    finally { setBusy(false); }
+    try { const r = await f(); setMsg({ ok: r.ok, text: r.message }); } finally { setBusy(false); }
   };
+  const doCopy = async (what: string, text: string) => { if (await copy(text)) { setCopied(what); setTimeout(() => setCopied(''), 1800); } };
+  const mail = requestEmail(lic.machineId);
+  const mailto = `mailto:${mail.to}?subject=${encodeURIComponent(mail.subject)}&body=${encodeURIComponent(mail.body)}`;
   const p = lic.payload;
-  const licensed = lic.plan !== 'free';
+
   return (
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Licence" style={{ width: 'min(680px, 100%)' }}>
@@ -30,54 +36,61 @@ export function LicenceDialog({ reason, onClose }: { reason?: string; onClose: (
         {reason && <div className="hint" style={{ marginTop: 10, borderStyle: 'solid', borderColor: 'var(--accent)', color: 'var(--text)' }}>{reason}</div>}
 
         <div className="card" style={{ marginTop: 12, boxShadow: 'none' }}>
-          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'flex-start' }}>
             <div>
               <div className="small muted">Current plan</div>
               <div style={{ fontSize: 20, fontWeight: 700 }}>{planLabel(lic)}</div>
             </div>
-            {licensed && lic.source !== 'store' && p && (
+            {lic.source === 'code' && p && (
               <div className="small" style={{ textAlign: 'right' }}>
-                <div>{p.name ?? p.email}</div>
-                <div className="muted">{p.plan === 'trial' ? `Trial ends ${fmtDate(p.exp)}` : `Valid until ${fmtDate(p.exp)}`} · {p.seats} device{p.seats > 1 ? 's' : ''}</div>
-                <div className="muted">Next online check before {fmtDate(p.rby)}</div>
+                <div><b>{p.n}</b></div>
+                <div className="muted">Licence {p.l} · valid until {date(p.e)}</div>
+                {lic.lastCheck !== undefined && <div className="muted">Last online check {date(lic.lastCheck)}</div>}
               </div>
             )}
-            {lic.source === 'store' && <div className="small muted">Managed by the Microsoft Store</div>}
           </div>
           {lic.notice && <div className="small" style={{ color: 'var(--bad)', marginTop: 8 }}>{lic.notice}</div>}
         </div>
 
-        {lic.source === 'store' ? (
-          <div style={{ marginTop: 14 }}>
-            {lic.plan === 'free' || lic.plan === 'trial' ? (
-              <button className="btn primary" disabled={busy} onClick={() => run(async () => ({ ok: true, message: await storePurchase() }), 'Done')}>Get SurgeSpace Pro in the Microsoft Store</button>
-            ) : <p className="small muted">Manage or cancel the subscription in the Microsoft Store app, under Library → Subscriptions.</p>}
-          </div>
-        ) : licensed ? (
-          <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-            <button className="btn" disabled={busy} onClick={() => run(async () => ({ ok: await refresh(), message: 'Licence checked.' }), 'Licence checked.')}>Check licence now</button>
-            <button className="btn" disabled={busy} onClick={() => run(deactivate, 'Deactivated.')}>Deactivate this device</button>
-            {lic.plan === 'trial' && <a className="btn primary" href={BUY_URL} target="_blank" rel="noreferrer">Buy a licence</a>}
-          </div>
-        ) : (
-          <div className="grid2" style={{ marginTop: 14, alignItems: 'stretch' }}>
-            <form className="card" style={{ boxShadow: 'none', display: 'flex', flexDirection: 'column', gap: 8 }} onSubmit={(e) => { e.preventDefault(); void run(() => startTrial(email), 'Trial started.'); }}>
-              <b>Try Pro free for 14 days</b>
-              <span className="small muted">Every feature, no card needed. One trial per person and per computer.</span>
-              <label className="field"><span>Work email</span><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" autoComplete="email" /></label>
-              <button className="btn primary" disabled={busy} type="submit">Start trial</button>
-            </form>
-            <form className="card" style={{ boxShadow: 'none', display: 'flex', flexDirection: 'column', gap: 8 }} onSubmit={(e) => { e.preventDefault(); void run(() => activate(key), 'Licence activated.'); }}>
-              <b>Activate a licence key</b>
-              <span className="small muted">The key from your purchase email. A licence covers 2 computers.</span>
-              <label className="field"><span>Licence key</span><input required value={key} onChange={(e) => setKey(e.target.value)} placeholder="SSPC-XXXXX-XXXXX-XXXXX-XXXXX" className="mono" spellCheck={false} autoComplete="off" /></label>
-              <div className="row" style={{ gap: 8 }}>
-                <button className="btn primary" disabled={busy} type="submit">Activate</button>
-                <a className="btn ghost" href={BUY_URL} target="_blank" rel="noreferrer">Buy a licence</a>
+        <div className="label" style={{ marginTop: 16 }}>Machine ID of this computer</div>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <code className="machine-id" style={{ userSelect: 'all' }}>{lic.machineId || '…'}</code>
+          <button className="btn small" onClick={() => doCopy('id', lic.machineId)}>{copied === 'id' ? 'Copied' : 'Copy'}</button>
+        </div>
+
+        {lic.source !== 'code' && (
+          <ol className="steps">
+            <li>
+              <b>Send the Machine ID</b> to <span className="mono" style={{ userSelect: 'all' }}>{LICENCE_EMAIL}</span> with your name or company and the licence you want.
+              <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                <button className="btn small" onClick={() => void openExternal(mailto)}>Open email</button>
+                <button className="btn small ghost" onClick={() => doCopy('mail', `To: ${mail.to}\nSubject: ${mail.subject}\n\n${mail.body}`)}>{copied === 'mail' ? 'Copied' : 'Copy email text'}</button>
               </div>
-            </form>
-          </div>
+            </li>
+            <li>
+              <b>Paste the activation code</b> from the reply:
+              <form onSubmit={(e) => { e.preventDefault(); void run(() => enterCode(code)); }} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                <textarea rows={3} value={code} onChange={(e) => setCode(e.target.value)} placeholder="SSA-…" spellCheck={false} aria-label="Activation code" />
+                <div><button className="btn primary" disabled={busy || !code.trim()} type="submit">Activate</button></div>
+              </form>
+            </li>
+          </ol>
         )}
+
+        <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          {lic.source === 'none' && !lic.trialUsed && (
+            <button className="btn" disabled={busy} onClick={() => void run(startTrial)}>Start 14-day free trial</button>
+          )}
+          {lic.source === 'code' && <button className="btn" disabled={busy} onClick={() => void run(() => checkOnline(true))}>Check licence now</button>}
+          {lic.source === 'code' && (confirmRemove ? (
+            <>
+              <span className="small">Remove the licence from this computer? You will need a new code to activate it again.</span>
+              <button className="btn small" onClick={() => { setConfirmRemove(false); void removeCode().then(() => setMsg({ ok: true, text: 'Licence removed from this computer.' })); }}>Yes, remove</button>
+              <button className="btn small ghost" onClick={() => setConfirmRemove(false)}>Cancel</button>
+            </>
+          ) : <button className="btn ghost" onClick={() => setConfirmRemove(true)}>Remove from this computer</button>)}
+          {lic.source === 'code' && <span className="small muted">Moving to a new computer? Send the new Machine ID to {LICENCE_EMAIL}.</span>}
+        </div>
         {msg && <div className="small" style={{ marginTop: 10, color: msg.ok ? 'var(--good)' : 'var(--bad)' }} role="status">{msg.text}</div>}
 
         <table className="grid" style={{ marginTop: 16 }}>
@@ -88,13 +101,16 @@ export function LicenceDialog({ reason, onClose }: { reason?: string; onClose: (
             <tr><td>Automatic surge vessel and air valve sizing</td><td>—</td><td>✓</td></tr>
             <tr><td>Uncertainty (worst-case) analysis</td><td>—</td><td>✓</td></tr>
             <tr><td>Export to EPANET and CSV</td><td>—</td><td>✓</td></tr>
-            <tr><td>Works offline</td><td>✓</td><td>✓ (online check every 30 days)</td></tr>
           </tbody>
         </table>
 
-        {DEMO && lic.source !== 'store' && (
+        {DEMO && (
           <div className="hint" style={{ marginTop: 12 }}>
-            Preview build: licences are handled by a demo server inside this browser, so you can try every step. Demo key: <span className="mono" style={{ userSelect: 'all' }}>{demo ?? '…'}</span>
+            Preview build: there is no real signing key yet, so you can make a demo code for this computer here, as the licence tool would.
+            <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+              <button className="btn small" onClick={() => void demoCode(12).then(setCode)}>Make a 1-year demo code</button>
+              <button className="btn small ghost" onClick={() => void demoCode(0).then(setCode)}>No end date</button>
+            </div>
           </div>
         )}
       </div>

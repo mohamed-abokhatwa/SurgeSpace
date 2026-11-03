@@ -1,64 +1,59 @@
 # SurgeSpace: desktop apps and licensing
 
-## How licensing works
+## Licensing process (same as Engineering Workspace, kept separate from it)
 
-| Where the user runs SurgeSpace | How they pay | How the app knows |
-|---|---|---|
-| Windows (Microsoft Store only) | Store subscription add-on "SurgeSpace Pro" (with a free trial set in Partner Center) | Windows Store licence, read by the app (`src-tauri/src/lib.rs`) |
-| Mac (download from engspace.app) | Licence key bought on the website | Signed token from the SurgeSpace licence server |
-| Browser (engspace.app/surgespace) | Same licence key | Same signed token |
+1. The user opens **Licence** (the plan badge next to the SurgeSpace name) and sees the computer's **Machine ID**,
+   e.g. `SS-7K3Q-M9XD-2WPA-H4TN`. "Open email" prepares a message to licence@engspace.app.
+2. You open **tools/licence-tool.html** on your own computer, paste the Machine ID, choose the plan and duration,
+   and press *Make activation code*. "Copy reply email" gives a ready answer with the code and instructions.
+3. The user pastes the code in SurgeSpace and presses *Activate*. It works only on that computer, until its last day.
+4. **Periodic online check:** every 3 days (when online) SurgeSpace downloads
+   `https://lic.engspace.app/surgespace/status.txt`. If the licence number is listed as cancelled, the licence stops.
+   SurgeSpace keeps working offline for up to 30 days without a successful check, then falls back to Free until it
+   can connect. (The 3 and 30 days are set in `src/license/publicKey.ts`.)
 
-Plans: **Free** (examples at any size; own models up to 25 pipes; no auto-sizing, uncertainty or export), **Trial** (14 days of Pro, email required, one per person and per computer), **Pro** (everything, 2 computers per key), **Enterprise** (same features, more seats).
+Plans: **Free** (examples at any size, own models up to 25 pipes, no auto-sizing, uncertainty or export),
+**Trial** (14 days, started in the app, once per computer), **Pro** and **Enterprise** (everything).
 
-Licence keys look like `SSPC-XXXXX-XXXXX-XXXXX-XXXXX`; a check character catches typing mistakes. When a key is activated, the server returns a token signed with an Ed25519 key and bound to that computer. The app checks the token itself, so it works offline. It refreshes the token quietly every 7 days and must be online at least once every 30 days. A cancelled or expired licence therefore stops within 30 days at most. The server stores only a SHA-256 hash of each key.
+Why codes cannot be faked: each code is signed with your private key (Ed25519). The app contains only the public
+key, which can check a code but cannot make one, so the app can be taken apart without anyone being able to
+make codes. Editing a code (for example its end date) breaks the signature. Winding the computer clock back does
+not extend a licence or trial: the app remembers the latest date it has seen.
 
-Files:
-- `supabase/functions/_shared/licenseCore.ts`: token signing and checking, keys, plan features, and all server rules. The app and the server share this file.
-- `supabase/functions/licence/index.ts`: the licence server (Supabase Edge Function).
-- `supabase/migrations/20261103000000_licensing.sql`: tables `ss_licenses`, `ss_activations` and `ss_trials`. Only the server can read them.
-- `src/license/`: the licence state in the app and the Licence dialog.
-- `scripts/licence-admin.ts`: create the signing key, issue, revoke and list licences.
-- `tests/license.test.ts`: 26 tests, run with `npm test`.
+## One-time setup
 
-Builds without a licence server configured (such as the preview) use a demo licence server inside the browser, so every step can be tried.
+1. Open `tools/licence-tool.html` (double-click; it works offline in Chrome or Edge).
+2. Press **Create a new signing key**. A file `surgespace-signing-key.txt` downloads. Keep it safe, with a backup
+   copy (e.g. encrypted USB stick and your password manager). Never email it. Anyone with it can make licences.
+3. Send the **public key** shown in the tool to your developer. It goes in `src/license/publicKey.ts`
+   (`PUBLIC_KEY`). Until then the app runs in demo mode, where it can make demo codes for itself.
+4. Check that `LICENCE_EMAIL` and `STATUS_URL` in the same file are right.
+5. On lic.engspace.app create the folder `surgespace/` and upload `status.txt` from the tool (*Make status file
+   for the website*). The server must send the header `Access-Control-Allow-Origin: *` for that file, so the
+   app can read it.
 
-## Your steps
+## Day to day
 
-### 1. Licence server (about 15 minutes, once)
+- **New licence:** paste the Machine ID → *Make activation code* → *Copy reply email* → send.
+- **Renewal:** make a new code for the same Machine ID with the new duration; the customer pastes it.
+- **New computer:** make a code for the new Machine ID, and cancel the old licence if needed.
+- **Cancel (refund, misuse):** *Cancel* in the register → *Make status file* → upload `status.txt` to the website.
+- **Backup:** *Export CSV* regularly. The register lives in the tool's browser storage on that computer.
 
-1. Choose the Supabase project. A new "engspace" project is cleanest, and it can later hold the website accounts too.
-2. Create the signing key on your own computer and keep the secret file safe:
-   ```bash
-   npx tsx scripts/licence-admin.ts keygen surgespace-licence.key
-   ```
-3. Deploy:
-   ```bash
-   supabase link --project-ref <ref>
-   supabase db push
-   supabase secrets set LICENSE_PRIVATE_KEY=$(cat surgespace-licence.key)
-   supabase functions deploy licence --no-verify-jwt
-   ```
-4. Set the build variables, in GitHub → Settings → Secrets and variables → Actions → Variables, and in `.env.production` for web builds:
-   - `VITE_LICENSE_API` = `https://<ref>.supabase.co/functions/v1/licence`
-   - `VITE_LICENSE_PUBKEY` = the public key printed in step 2
-   - `VITE_BUY_URL` = your purchase page, for example `https://engspace.app/surgespace`
-5. Issue a licence:
-   ```bash
-   SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… npx tsx scripts/licence-admin.ts issue --email client@firm.com --name "Firm Ltd" --seats 2 --years 1
-   ```
-   Later, a payment provider's webhook can call the same insert automatically. Paddle and Lemon Squeezy act as merchant of record and handle VAT and sales tax worldwide.
+## Desktop apps
 
-### 2. Microsoft Store (Windows)
+- **Windows:** Microsoft Store only, listed as a free app. The workflow `.github/workflows/desktop.yml` builds the
+  `.msix` package, which you upload in Partner Center. The Store signs it. Set the GitHub variables
+  `MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER` and `MSIX_PUBLISHER_DISPLAY` from Partner Center → Product identity.
+- **Mac:** universal DMG (Apple silicon and Intel). It is signed and notarized when the Apple secrets are set in
+  GitHub (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`,
+  `APPLE_TEAM_ID`); without them it builds an unsigned test DMG. Host it on engspace.app.
+- On the desktop, the licence is also saved in the app's data folder, so it survives updates and reinstalling.
 
-1. Register in Partner Center (https://partner.microsoft.com) as a company or individual developer.
-2. Reserve the name **SurgeSpace**. Under Product identity, copy *Package/Identity/Name*, *Publisher* (CN=…) and *Publisher display name* into the GitHub variables `MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER` and `MSIX_PUBLISHER_DISPLAY`.
-3. Pricing: set the app to **Free**. Create an add-on of type **Subscription** called "SurgeSpace Pro", monthly or yearly, with a free trial (for example 14 days). Put its Store ID (for example `9NXXXXXXXXXX`) in the GitHub variable `STORE_PRO_ADDON_ID`.
-4. Run the "Desktop builds" workflow. Download `SurgeSpace-MicrosoftStore` and upload the `.msix` in Partner Center. The Store signs it, so you don't need a code-signing certificate.
+## Files
 
-### 3. Mac
-
-1. Join the Apple Developer Program, then create a "Developer ID Application" certificate.
-2. Add the GitHub secrets `APPLE_CERTIFICATE` (the .p12 as base64), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`.
-3. Run the workflow and download `SurgeSpace-macOS` (a universal DMG for Apple silicon and Intel). Host it on engspace.app.
-
-Without the Apple secrets the workflow still builds an unsigned DMG for testing. macOS will warn when opening it.
+- `src/license/core.ts`: Machine ID, signed activation codes and status file (shared by the app and the tool).
+- `src/license/licence.ts`, `LicenceDialog.tsx`: licence state, trial, online check and the Licence dialog.
+- `src/license/publicKey.ts`: public key, licence email, status file address, check intervals.
+- `tools/licence-tool/`: the licence tool source; `npm run licence-tool` rebuilds `tools/licence-tool.html`.
+- `tests/license.test.ts`: 19 tests (`npm test`).

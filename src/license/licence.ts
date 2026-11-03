@@ -1,184 +1,186 @@
-// SurgeSpace licence client.
-//  • Web and Mac: licence keys. The licence server signs a token bound to this device; the app checks it offline
-//    and refreshes it quietly every 7 days (it keeps working up to 30 days offline).
-//  • Windows (Microsoft Store build): the Store's own licence (free app + "SurgeSpace Pro" subscription add-on).
-//  • No licence server configured (preview builds): an in-browser demo server so the whole flow can be tried.
+// SurgeSpace licence state in the app. Fully offline: a licence is an activation code made for this computer's
+// Machine ID; the trial is 14 days kept on this computer. See core.ts for the process.
 import * as ed from '@noble/ed25519';
-import {
-  checkToken, DAY, features, fromHex, handleRequest, hashKey, hex, newLicenseKey,
-  type Features, type LicensePayload, type LicenseStore, type Plan, type Request, type Response,
-} from '../../supabase/functions/_shared/licenseCore';
+import { checkCode, features, fromHex, hex, machineIdFrom, makeCode, readStatus, today, TRIAL_DAYS, type CodePayload, type Features, type Plan } from './core';
+import { CHECK_EVERY_DAYS, LICENCE_EMAIL, OFFLINE_DAYS, PUBLIC_KEY, STATUS_URL } from './publicKey';
 
-const API = import.meta.env.VITE_LICENSE_API as string | undefined;
-const PUBKEY = import.meta.env.VITE_LICENSE_PUBKEY as string | undefined;
-export const BUY_URL = (import.meta.env.VITE_BUY_URL as string | undefined) ?? 'https://engspace.app/surgespace';
-export const STORE_PRO_ADDON = (import.meta.env.VITE_STORE_PRO_ADDON as string | undefined) ?? '';
-export const DEMO = !API;
+export const DEMO = !PUBLIC_KEY;
+export { LICENCE_EMAIL };
 
 export interface LicenceState {
   plan: Plan;
-  source: 'key' | 'store' | 'demo' | 'none';
+  source: 'code' | 'trial' | 'none';
   features: Features;
-  /** Licensee and dates for the dialog. */
-  payload?: LicensePayload;
-  /** Days left in a trial or before a subscription ends. */
-  daysLeft?: number;
-  /** Something the user should know (expired, offline too long …). */
+  machineId: string;
+  payload?: CodePayload;
+  /** Days left (licence or trial); null = no end date. */
+  daysLeft?: number | null;
+  /** Trial already used on this computer. */
+  trialUsed: boolean;
+  /** Last successful online check (day number), when online checks are on. */
+  lastCheck?: number;
   notice?: string;
   checking: boolean;
 }
 
-const TOKEN_KEY = 'surgespace.licence';
-const DEVICE_KEY = 'surgespace.device';
-const ls = {
-  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
-  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
-  del: (k: string) => { try { localStorage.removeItem(k); } catch { /* storage blocked */ } },
-};
-const nowS = () => Math.floor(Date.now() / 1000);
-
-// ── desktop bridge (Tauri) ───────────────────────────────────────────────
+// ── storage: browser storage, plus a file in the app's data folder on the desktop app ──
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const core = await import('@tauri-apps/api/core');
   return core.invoke<T>(cmd, args);
 }
-interface StoreLicence { active: boolean; isTrial: boolean; trialDaysLeft: number; proActive: boolean; proIsTrial: boolean; proExpires: number | null }
-interface Platform { store: boolean; deviceId?: string; deviceName?: string }
-let platformP: Promise<Platform> | null = null;
-const platform = (): Promise<Platform> =>
-  (platformP ??= isTauri()
-    ? invoke<Platform>('licence_platform').catch((): Platform => ({ store: false }))
-    : Promise.resolve<Platform>({ store: false }));
-
-// ── device id: random, kept by this browser profile (desktop: derived from the machine id by the app) ──
-async function device(): Promise<{ id: string; name: string }> {
-  const p = await platform();
-  if (p.deviceId) return { id: p.deviceId, name: p.deviceName ?? 'Desktop' };
-  let id = ls.get(DEVICE_KEY);
-  if (!id) { id = hex(crypto.getRandomValues(new Uint8Array(16))); ls.set(DEVICE_KEY, id); }
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-  const name = /Mac/.test(ua) ? 'Mac · browser' : /Windows/.test(ua) ? 'Windows · browser' : 'Browser';
-  return { id, name };
+const local = {
+  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* blocked */ } },
+  del: (k: string) => { try { localStorage.removeItem(k); } catch { /* blocked */ } },
+};
+async function get(k: string): Promise<string | null> {
+  if (isTauri()) { try { const v = await invoke<string | null>('kv_get', { key: k }); if (v) return v; } catch { /* fall back */ } }
+  return local.get(k);
 }
-
-// ── demo licence server (only when no real server is configured) ─────────
-const DEMO_KEY = 'surgespace.demo';
-interface DemoDb { sk: string; lic: Parameters<LicenseStore['upsertActivation']>[0][]; licenses: { id: string; key_hash: string; plan: 'pro'; seats: number; email: string; name: string; expires_at: number; status: 'active' }[]; trials: { id: string; email: string; device_id: string; started_at: number }[]; demoKey: string }
-async function demoDb(): Promise<DemoDb> {
-  const raw = ls.get(DEMO_KEY);
-  if (raw) return JSON.parse(raw);
-  const demoKey = newLicenseKey();
-  const db: DemoDb = {
-    sk: hex(ed.utils.randomSecretKey()), lic: [], trials: [], demoKey,
-    licenses: [{ id: 'demo', key_hash: await hashKey(demoKey), plan: 'pro', seats: 2, email: 'demo@engspace.app', name: 'Demo licence', expires_at: nowS() + 365 * DAY, status: 'active' }],
-  };
-  ls.set(DEMO_KEY, JSON.stringify(db));
-  return db;
+async function put(k: string, v: string | null) {
+  if (v === null) local.del(k); else local.set(k, v);
+  if (isTauri()) { try { await invoke('kv_set', { key: k, value: v }); } catch { /* browser storage still has it */ } }
 }
-export async function demoKey() { return DEMO ? (await demoDb()).demoKey : null; }
-async function demoPublicKey() { return ed.getPublicKeyAsync(fromHex((await demoDb()).sk)); }
-async function demoCall(req: Request): Promise<Response> {
-  const db = await demoDb();
-  const save = () => ls.set(DEMO_KEY, JSON.stringify(db));
-  const store: LicenseStore = {
-    licenseByHash: async (h) => db.licenses.find((l) => l.key_hash === h) ?? null,
-    licenseById: async (id) => db.licenses.find((l) => l.id === id) ?? null,
-    activations: async (id) => db.lic.filter((a) => a.license_id === id),
-    upsertActivation: async (a) => { db.lic = [...db.lic.filter((x) => !(x.license_id === a.license_id && x.device_id === a.device_id)), a]; save(); },
-    removeActivation: async (id, d) => { db.lic = db.lic.filter((x) => !(x.license_id === id && x.device_id === d)); save(); },
-    trialFor: async (e, d) => db.trials.find((x) => x.email === e || x.device_id === d) ?? null,
-    createTrial: async (t) => { db.trials.push(t); save(); },
-  };
-  const sk = fromHex(db.sk);
-  return handleRequest(req, store, sk, await ed.getPublicKeyAsync(sk), nowS());
-}
+const K = { code: 'surgespace.code', trial: 'surgespace.trial', seen: 'surgespace.seen', device: 'surgespace.device', demo: 'surgespace.demoKey', checked: 'surgespace.checked' };
+/** Online check only for real (non-demo) builds with a status address. */
+const ONLINE = !DEMO && !!STATUS_URL;
 
-async function call(req: Request): Promise<Response> {
-  if (DEMO) return demoCall(req);
-  try {
-    const r = await fetch(API!, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req) });
-    return (await r.json()) as Response;
-  } catch {
-    return { ok: false, error: 'offline', message: 'Could not reach the licence server. Check the internet connection and try again.' };
+// ── Machine ID ───────────────────────────────────────────────────────────
+let midP: Promise<string> | null = null;
+export const machineId = () => (midP ??= (async () => {
+  if (isTauri()) {
+    try { return machineIdFrom(fromHex(await invoke<string>('device_id'))); } catch { /* fall back */ }
   }
+  let d = local.get(K.device);
+  if (!d) { d = hex(crypto.getRandomValues(new Uint8Array(16))); local.set(K.device, d); }
+  return machineIdFrom(fromHex(d));
+})());
+
+/** Today, but never earlier than the latest day the app has seen (setting the clock back does not extend a licence). */
+async function safeToday(): Promise<number> {
+  const seen = Number(await get(K.seen)) || 0;
+  const d = Math.max(today(), seen);
+  if (d > seen) await put(K.seen, String(d));
+  return d;
 }
-const publicKey = async () => (DEMO ? demoPublicKey() : fromHex(PUBKEY ?? ''));
+
+// ── keys: the real public key, or a demo pair kept in this browser ───────
+async function demoPrivate(): Promise<Uint8Array> {
+  let k = local.get(K.demo);
+  if (!k) { k = hex(ed.utils.randomSecretKey()); local.set(K.demo, k); }
+  return fromHex(k);
+}
+const publicKey = async () => (DEMO ? ed.getPublicKeyAsync(await demoPrivate()) : fromHex(PUBLIC_KEY));
+/** Demo builds only: make a code for this computer, as the licence tool would. */
+export async function demoCode(months: number): Promise<string> {
+  if (!DEMO) throw new Error('Not a demo build');
+  const d = today();
+  return makeCode({ m: (await machineId()).replace(/^SS-/, '').replace(/-/g, ''), p: 'pro', n: 'Demo licence', l: 'DEMO-1', i: d, e: months > 0 ? d + Math.round(months * 30.44) - 1 : null }, await demoPrivate());
+}
 
 // ── state ────────────────────────────────────────────────────────────────
-let state: LicenceState = { plan: 'free', source: 'none', features: features('free'), checking: true };
+let state: LicenceState = { plan: 'free', source: 'none', features: features('free'), machineId: '', trialUsed: false, checking: true };
 const subs = new Set<() => void>();
 const set = (s: Partial<LicenceState>) => { state = { ...state, ...s }; subs.forEach((f) => f()); };
 export const getLicence = () => state;
 export const subscribeLicence = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 
-async function applyToken(token: string | null, quietRefresh = true): Promise<void> {
-  if (!token) { set({ plan: 'free', source: 'none', features: features('free'), payload: undefined, daysLeft: undefined, checking: false }); return; }
-  const dev = await device();
-  const r = await checkToken(token, await publicKey(), dev.id, nowS());
-  if (!r.ok) {
-    const notice = r.reason === 'expired' ? (r.payload?.plan === 'trial' ? 'Your 14-day trial has ended.' : 'Your licence has expired.')
-      : r.reason === 'offline-too-long' ? 'SurgeSpace needs to check your licence online (it has been offline for more than 30 days).'
-      : r.reason === 'other-device' ? 'This licence was activated on another device.' : 'The stored licence is not valid.';
-    // offline too long: try to refresh before giving up
-    if (r.reason === 'offline-too-long' && quietRefresh) { if (await refresh()) return; }
-    set({ plan: 'free', source: 'none', features: features('free'), payload: r.payload, notice, daysLeft: undefined, checking: false });
-    return;
+async function evaluate(): Promise<void> {
+  const mid = await machineId();
+  const day = await safeToday();
+  const trialStart = Number(await get(K.trial)) || 0;
+  const trialUsed = trialStart > 0;
+  const code = await get(K.code);
+  let notice: string | undefined;
+  if (code) {
+    const r = await checkCode(code, await publicKey(), mid, day);
+    const last = Number(await get(K.checked)) || 0;
+    if (r.ok && ONLINE && last && day - last > OFFLINE_DAYS) {
+      notice = `SurgeSpace needs to check your licence online (last check ${day - last} days ago). Connect to the internet and press "Check licence now".`;
+    } else if (r.ok) {
+      set({ plan: r.payload.p, source: 'code', features: features(r.payload.p), machineId: mid, payload: r.payload, daysLeft: r.daysLeft, trialUsed, lastCheck: last || undefined, notice: undefined, checking: false });
+      return;
+    } else notice = r.message;
   }
-  const p = r.payload;
-  set({ plan: p.plan, source: DEMO ? 'demo' : 'key', features: features(p.plan), payload: p, daysLeft: p.exp ? Math.max(0, Math.ceil((p.exp - nowS()) / DAY)) : undefined, notice: undefined, checking: false });
-  if (r.needsRefresh && quietRefresh) void refresh();
+  if (trialUsed) {
+    const left = trialStart + TRIAL_DAYS - day;
+    if (left > 0) { set({ plan: 'trial', source: 'trial', features: features('trial'), machineId: mid, payload: undefined, daysLeft: left, trialUsed, notice, checking: false }); return; }
+    notice ??= 'Your 14-day trial has ended. Send your Machine ID to get a licence.';
+  }
+  set({ plan: 'free', source: 'none', features: features('free'), machineId: mid, payload: undefined, daysLeft: undefined, trialUsed, notice, checking: false });
 }
 
-async function applyStore(): Promise<void> {
+/** Downloads the signed status file and drops a cancelled licence. Returns a message for the dialog. */
+export async function checkOnline(force = false): Promise<{ ok: boolean; message: string }> {
+  if (!ONLINE) return { ok: true, message: 'Online checks are off in this build.' };
+  const code = await get(K.code);
+  if (!code) return { ok: true, message: 'No licence on this computer.' };
+  const day = await safeToday();
+  const last = Number(await get(K.checked)) || 0;
+  if (!force && last && day - last < CHECK_EVERY_DAYS) return { ok: true, message: 'Checked recently.' };
+  let text: string;
   try {
-    const s = await invoke<StoreLicence>('store_licence', { proAddon: STORE_PRO_ADDON });
-    const plan: Plan = s.proActive ? (s.proIsTrial ? 'trial' : 'pro') : 'free';
-    set({ plan, source: 'store', features: features(plan), daysLeft: s.proExpires ? Math.max(0, Math.ceil((s.proExpires - nowS()) / DAY)) : undefined, notice: undefined, checking: false, payload: undefined });
-  } catch (e) {
-    set({ plan: 'free', source: 'store', features: features('free'), notice: `Could not read the Microsoft Store licence (${(e as Error).message ?? e}).`, checking: false });
+    const r = await fetch(`${STATUS_URL}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(String(r.status));
+    text = await r.text();
+  } catch {
+    return { ok: false, message: 'Could not reach the licence site. SurgeSpace keeps working offline and will try again later.' };
   }
+  const st = await readStatus(text, await publicKey());
+  if (!st) return { ok: false, message: 'The licence site answered with something unexpected. Try again later.' };
+  const r = await checkCode(code, await publicKey(), await machineId(), day);
+  if (r.payload && st.r.includes(r.payload.l)) {
+    await put(K.code, null);
+    await evaluate();
+    set({ notice: `Licence ${r.payload.l} has been cancelled. Contact Engineering Workspace (${LICENCE_EMAIL}).` });
+    return { ok: false, message: 'This licence has been cancelled.' };
+  }
+  await put(K.checked, String(day));
+  await evaluate();
+  return { ok: true, message: 'Licence checked online: it is valid.' };
 }
 
-/** Call once at start-up. */
-export async function initLicence(): Promise<void> {
-  if ((await platform()).store) return applyStore();
-  return applyToken(ls.get(TOKEN_KEY));
+/** Call once at start-up: reads the stored licence, then checks online in the background when it is due. */
+export async function initLicence() {
+  await evaluate();
+  if (ONLINE) void checkOnline();
 }
 
-async function take(r: Response): Promise<Response> {
-  if (r.ok && r.token) { ls.set(TOKEN_KEY, r.token); await applyToken(r.token, false); }
-  return r;
+/** Checks and stores a pasted activation code. */
+export async function enterCode(code: string): Promise<{ ok: boolean; message: string }> {
+  const r = await checkCode(code, await publicKey(), await machineId(), await safeToday());
+  if (!r.ok) return { ok: false, message: r.message };
+  await put(K.code, code.replace(/\s+/g, ''));
+  await put(K.checked, String(await safeToday())); // the offline allowance starts from activation
+  await evaluate();
+  if (ONLINE) void checkOnline(true);
+  return { ok: true, message: `Licence activated for ${r.payload.n}${r.daysLeft === null ? '' : `, valid until ${new Date((r.payload.e! + 1) * 86_400_000 - 1).toLocaleDateString()}`}.` };
 }
-export async function activate(key: string): Promise<Response> {
-  const d = await device();
-  return take(await call({ action: 'activate', key, deviceId: d.id, deviceName: d.name }));
+export async function startTrial(): Promise<{ ok: boolean; message: string }> {
+  if (Number(await get(K.trial))) return { ok: false, message: 'The trial has already been used on this computer.' };
+  await put(K.trial, String(await safeToday()));
+  await evaluate();
+  return { ok: true, message: 'Your 14-day trial has started. Every feature is unlocked.' };
 }
-export async function startTrial(email: string): Promise<Response> {
-  const d = await device();
-  return take(await call({ action: 'trial', email, deviceId: d.id, deviceName: d.name }));
+/** Removes the activation code from this computer (for example before replacing the computer). */
+export async function removeCode(): Promise<void> {
+  await put(K.code, null);
+  await evaluate();
 }
-/** Quiet background refresh; true when a fresh token was stored. */
-export async function refresh(): Promise<boolean> {
-  const token = ls.get(TOKEN_KEY);
-  if (!token) return false;
-  const r = await call({ action: 'refresh', token });
-  if (r.ok && r.token) { await take(r); return true; }
-  // a definite "no" from the server ends the licence on this device; being offline does not
-  if (!r.ok && r.error !== 'offline' && r.error !== 'server') { ls.del(TOKEN_KEY); set({ plan: 'free', source: 'none', features: features('free'), notice: r.message, payload: undefined }); }
-  return false;
-}
-export async function deactivate(): Promise<Response> {
-  const token = ls.get(TOKEN_KEY);
-  const r = token ? await call({ action: 'deactivate', token }) : { ok: true as const };
-  if (r.ok) { ls.del(TOKEN_KEY); set({ plan: 'free', source: 'none', features: features('free'), payload: undefined, daysLeft: undefined, notice: undefined }); }
-  return r;
-}
-/** Microsoft Store build: open the Store purchase dialog for the Pro add-on. */
-export async function storePurchase(): Promise<string> {
-  const status = await invoke<string>('store_purchase', { storeId: STORE_PRO_ADDON });
-  await applyStore();
-  return status;
-}
+
 export const planLabel = (s: LicenceState) =>
   s.plan === 'free' ? 'Free' : s.plan === 'trial' ? `Trial · ${s.daysLeft ?? 0} day${s.daysLeft === 1 ? '' : 's'} left` : s.plan === 'pro' ? 'Pro' : 'Enterprise';
+
+/** Email the user can send, ready to paste. */
+export const requestEmail = (mid: string) => ({
+  to: LICENCE_EMAIL,
+  subject: `SurgeSpace licence request · ${mid}`,
+  body: `Hello,\n\nPlease send me a SurgeSpace licence for this computer.\n\nMachine ID: ${mid}\nName / company:\nLicence wanted (e.g. Pro, 1 year):\n\nThank you`,
+});
+
+/** Opens a link outside the app (mail client or browser). */
+export async function openExternal(url: string) {
+  if (isTauri()) { try { const op = await import('@tauri-apps/plugin-opener'); await op.openUrl(url); return; } catch { /* fall back */ } }
+  window.open(url, '_blank', 'noopener');
+}

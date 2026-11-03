@@ -1,5 +1,5 @@
 # Builds the desktop apps on GitHub's machines:
-#   • Windows → SurgeSpace_<version>.msix for the Microsoft Store (licensing through the Store)
+#   • Windows → SurgeSpace_<version>.msix for the Microsoft Store (free listing; licences by email)
 #   • macOS   → universal SurgeSpace.dmg, signed and notarized when the Apple secrets are set
 # Run it from the Actions tab ("Run workflow") or by pushing a tag such as v1.0.0.
 name: Desktop builds
@@ -8,11 +8,6 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
-
-env:
-  VITE_LICENSE_API: ${{ vars.VITE_LICENSE_API }}
-  VITE_LICENSE_PUBKEY: ${{ vars.VITE_LICENSE_PUBKEY }}
-  VITE_BUY_URL: ${{ vars.VITE_BUY_URL }}
 
 jobs:
   test:
@@ -29,8 +24,6 @@ jobs:
   windows-store:
     needs: test
     runs-on: windows-latest
-    env:
-      VITE_STORE_PRO_ADDON: ${{ vars.STORE_PRO_ADDON_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

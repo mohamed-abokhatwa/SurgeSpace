@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SurgeSpace Licence Tool</title>
+<style>
+:root { --bg:#f4f6fa; --panel:#fff; --line:#e2e8f0; --line2:#cbd5e1; --text:#0d1b2c; --muted:#526276; --accent:#e0620c; --good:#15803d; --bad:#dc2626; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg:#07111f; --panel:#0c1a2c; --line:rgba(120,170,230,.14); --line2:rgba(120,170,230,.28); --text:#e6edf6; --muted:#93a4ba; --accent:#ff7a1a; --good:#4ade80; --bad:#f87171; color-scheme: dark; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 14px max(16px, env(safe-area-inset-left)); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+header h1 { font-size: 17px; margin: 0; }
+header .key { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+main { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+section.wide { grid-column: 1 / -1; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin: 0 0 12px; }
+label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+input, select, textarea { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line2); border-radius: 7px; padding: 7px 9px; min-width: 0; }
+textarea { font: 12.5px var(--mono); resize: vertical; width: 100%; }
+.mono { font-family: var(--mono); }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+button { font: inherit; font-weight: 600; border: 1px solid var(--line2); background: var(--panel); color: var(--text); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .5; cursor: default; }
+.ok { color: var(--good); } .bad { color: var(--bad); } .muted { color: var(--muted); } .small { font-size: 12.5px; }
+.out { margin-top: 12px; display: grid; gap: 8px; }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-bottom: 1px solid var(--line); padding: 6px; white-space: nowrap; }
+td { border-bottom: 1px solid var(--line); padding: 6px; white-space: nowrap; }
+tr.cancelled td { color: var(--muted); text-decoration: line-through; }
+tr.cancelled td:last-child { text-decoration: none; }
+.notice { background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SurgeSpace Licence Tool</h1>
+  <span class="small muted">Runs only on this computer. Nothing is sent anywhere.</span>
+  <span class="key" id="keyState">No signing key loaded</span>
+</header>
+<main>
+  <section class="wide" id="keySection">
+    <h2>1 · Signing key</h2>
+    <p class="small">Activation codes are signed with your private key. Create it once, keep the file safe (for example on an encrypted USB stick and in your password manager), and never send it to anyone. SurgeSpace only contains the public key, which can check codes but not make them.</p>
+    <div class="row">
+      <button id="loadKey">Open signing key file…</button>
+      <button id="newKey">Create a new signing key (first time only)</button>
+      <label class="row small" style="flex-direction:row;gap:6px"><input type="checkbox" id="remember"> Remember the key on this computer</label>
+    </div>
+    <div id="pubOut" class="out" hidden>
+      <div class="notice">Public key to put in SurgeSpace (safe to share):<br><b class="mono" id="pubKey" style="user-select:all;word-break:break-all"></b></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2 · Make an activation code</h2>
+    <form id="issue" class="grid">
+      <label style="grid-column:1/-1">Machine ID (from the customer's email)<input id="mid" class="mono" placeholder="SS-XXXX-XXXX-XXXX-XXXX" required autocomplete="off"><span id="midState" class="small"></span></label>
+      <label style="grid-column:1/-1">Licensee (company or person, shown in the app)<input id="name" required></label>
+      <label>Email (for your register)<input id="email" type="email"></label>
+      <label>Licence number<input id="lno" class="mono" required></label>
+      <label>Plan<select id="plan"><option value="pro">Pro</option><option value="enterprise">Enterprise</option></select></label>
+      <label>Duration<select id="dur"><option value="1">1 month</option><option value="3">3 months</option><option value="6">6 months</option><option value="12" selected>1 year</option><option value="24">2 years</option><option value="36">3 years</option><option value="0">No end date</option><option value="date">Until a date…</option></select></label>
+      <label id="untilWrap" hidden>Last valid day<input id="until" type="date"></label>
+      <label style="grid-column:1/-1">Notes (for your register: invoice, payment…)<input id="notes"></label>
+      <div class="row" style="grid-column:1/-1"><button class="primary" type="submit" id="makeBtn">Make activation code</button><span id="issueMsg" class="small"></span></div>
+    </form>
+    <div id="codeOut" class="out" hidden>
+      <label>Activation code<textarea id="code" rows="4" readonly></textarea></label>
+      <div class="row"><button id="copyCode">Copy code</button><button id="copyMail">Copy reply email</button><span id="copyMsg" class="small ok"></span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3 · Check a code</h2>
+    <p class="small muted">Paste a code to see what is inside and whether it was signed with your key.</p>
+    <textarea id="checkIn" rows="4" placeholder="SSA-…"></textarea>
+    <div id="checkOut" class="out small"></div>
+  </section>
+
+  <section class="wide">
+    <h2>4 · Register of issued licences</h2>
+    <div class="row" style="margin-bottom:10px">
+      <input id="search" placeholder="Search name, email, machine, licence…" style="flex:1;min-width:200px">
+      <button id="exportCsv">Export CSV</button>
+      <button id="importCsv">Import CSV…</button>
+      <button id="makeStatus" class="primary">Make status file for the website</button>
+    </div>
+    <p class="small muted">The register is kept in this browser on this computer: export it regularly as a backup. "Cancel" marks a licence as cancelled; then make a new status file and upload it to <span class="mono">lic.engspace.app/surgespace/status.txt</span>. SurgeSpace checks that file every few days and stops a cancelled licence.</p>
+    <div class="tablewrap"><table><thead><tr><th>Licence</th><th>Licensee</th><th>Email</th><th>Machine ID</th><th>Plan</th><th>Issued</th><th>Last day</th><th>Notes</th><th></th></tr></thead><tbody id="reg"></tbody></table></div>
+  </section>
+</main>
+<script>(()=>{var ke=Object.freeze({p:0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffedn,n:0x1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3edn,h:8n,a:0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffecn,d:0x52036cee2b6ffe738cc740797779e89800700a4d4141d8ab75eb4dca135978a3n,Gx:0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51an,Gy:0x6666666666666666666666666666666666666666666666666666666666666658n}),{p:N,n:Z,Gx:ge,Gy:be,a:G,d:W,h:nt}=ke,T=32,st=(...e)=>{"captureStackTrace"in Error&&typeof Error.captureStackTrace=="function"&&Error.captureStackTrace(...e)},h=(e="")=>{let t=new Error(e);throw st(t,h),t},ot=e=>typeof e=="bigint",rt=e=>typeof e=="string",ct=e=>e instanceof Uint8Array||ArrayBuffer.isView(e)&&e.constructor.name==="Uint8Array"&&"BYTES_PER_ELEMENT"in e&&e.BYTES_PER_ELEMENT===1,S=(e,t,n="")=>{let s=ct(e),o=e?.length,r=t!==void 0;if(!s||r&&o!==t){let a=n&&`"${n}" `,f=r?` of length ${t}`:"",d=s?`length=${o}`:`type=${typeof e}`,l=a+"expected Uint8Array"+f+", got "+d;throw s?new RangeError(l):new TypeError(l)}return e},j=e=>new Uint8Array(e),te=e=>Uint8Array.from(e),Ee=(e,t)=>e.toString(16).padStart(t,"0"),Ae=e=>Array.from(S(e)).map(t=>Ee(t,2)).join(""),k={_0:48,_9:57,A:65,F:70,a:97,f:102},Se=e=>{if(e>=k._0&&e<=k._9)return e-k._0;if(e>=k.A&&e<=k.F)return e-(k.A-10);if(e>=k.a&&e<=k.f)return e-(k.a-10)},Le=e=>{let t="hex invalid";if(!rt(e))return h(t);let n=e.length,s=n/2;if(n%2)return h(t);let o=j(s);for(let r=0,a=0;r<s;r++,a+=2){let f=Se(e.charCodeAt(a)),d=Se(e.charCodeAt(a+1));if(f===void 0||d===void 0)return h(t);o[r]=f*16+d}return o},Me=()=>globalThis?.crypto,at=()=>Me()?.subtle??h("crypto.subtle must be defined, consider polyfill"),_=(...e)=>{let t=0;for(let o of e)t+=S(o).length;let n=j(t),s=0;return e.forEach(o=>{n.set(o,s),s+=o.length}),n},it=(e=T)=>Me().getRandomValues(j(e)),D=BigInt,C=(e,t,n,s="bad number: out of range")=>{if(!ot(e))throw new TypeError(s);if(t<=e&&e<n)return e;throw new RangeError(s)},p=(e,t=N)=>{let n=e%t;return n>=0n?n:t+n},xe=(1n<<255n)-1n,c=e=>{e<0n&&h("negative coordinate");let t=(e>>255n)*19n+(e&xe);return t=(t>>255n)*19n+(t&xe),t%N},$e=e=>p(e,Z),lt=(e,t)=>{(e===0n||t<=0n)&&h("no inverse n="+e+" mod="+t);let n=p(e,t),s=t,o=0n,r=1n,a=1n,f=0n;for(;n!==0n;){let d=s/n,l=s%n,u=o-a*d,y=r-f*d;s=n,n=l,o=a,r=f,a=u,f=y}return s===1n?p(o,t):h("no inverse")},Ce=e=>{let t=ht[e];return typeof t!="function"&&h("hashes."+e+" not set"),t},He=e=>S(e,64,"digest");var J=e=>e instanceof E?e:h("Point expected"),Q=2n**256n,E=class e{static BASE;static ZERO;X;Y;Z;T;constructor(t,n,s,o){let r=Q;this.X=C(t,0n,r),this.Y=C(n,0n,r),this.Z=C(s,1n,r),this.T=C(o,0n,r),Object.freeze(this)}static CURVE(){return ke}static fromAffine(t){return new e(t.x,t.y,1n,c(t.x*t.y))}static fromBytes(t,n=!1){let s=W,o=te(S(t,T)),r=t[31];o[31]=r&-129;let a=ne(o);C(a,0n,n?Q:N);let d=c(a*a),l=p(d-1n),u=c(s*d+1n),{isValid:y,value:m}=ft(l,u);y||h("bad point: y not sqrt");let g=(m&1n)===1n,b=(r&128)!==0;return!n&&m===0n&&b&&h("bad point: x==0, isLastByteOdd"),b!==g&&(m=p(-m)),new e(m,a,1n,c(m*a))}static fromHex(t,n){return e.fromBytes(Le(t),n)}get x(){return this.toAffine().x}get y(){return this.toAffine().y}assertValidity(){let t=G,n=W,s=this;if(s.is0())return h("bad point: ZERO");let{X:o,Y:r,Z:a,T:f}=s,d=c(o*o),l=c(r*r),u=c(a*a),y=c(u*u),m=c(d*t),g=c(u*(m+l)),b=p(y+c(n*c(d*l)));if(g!==b)return h("bad point: equation left != right (1)");let $=c(o*r),I=c(a*f);return $!==I?h("bad point: equation left != right (2)"):this}equals(t){let{X:n,Y:s,Z:o}=this,{X:r,Y:a,Z:f}=J(t),d=c(n*f),l=c(r*o),u=c(s*f),y=c(a*o);return d===l&&u===y}is0(){return this.equals(H)}negate(){return new e(p(-this.X),this.Y,this.Z,p(-this.T))}double(){let{X:t,Y:n,Z:s}=this,o=G,r=c(t*t),a=c(n*n),f=c(2n*s*s),d=c(o*r),l=p(t+n),u=p(c(l*l)-r-a),y=p(d+a),m=p(y-f),g=p(d-a),b=c(u*m),$=c(y*g),I=c(u*g),Y=c(m*y);return new e(b,$,Y,I)}add(t){let{X:n,Y:s,Z:o,T:r}=this,{X:a,Y:f,Z:d,T:l}=J(t),u=G,y=W,m=c(n*a),g=c(s*f),b=c(c(r*y)*l),$=c(o*d),I=p(c(p(n+s)*p(a+f))-m-g),Y=p($-b),me=p($+b),he=p(g-c(u*m)),Je=c(I*Y),Qe=c(me*he),et=c(I*he),tt=c(Y*me);return new e(Je,Qe,tt,et)}subtract(t){return this.add(J(t).negate())}multiply(t,n=!0){if(!n&&t===0n||(C(t,1n,Z),!n&&this.is0()))return H;if(t===1n)return this;if(this.equals(L))return xt(t).p;let s=H,o=L;for(let r=this;t>0n;r=r.double(),t>>=1n)t&1n?s=s.add(r):n&&(o=o.add(r));return s}multiplyUnsafe(t){return this.multiply(t,!1)}toAffine(){let{X:t,Y:n,Z:s}=this;if(this.equals(H))return{x:0n,y:1n};let o=lt(s,N);c(s*o)!==1n&&h("invalid inverse");let r=c(t*o),a=c(n*o);return{x:r,y:a}}toBytes(){let{x:t,y:n}=this.toAffine(),s=Pe(n);return s[31]|=t&1n?128:0,s}toHex(){return Ae(this.toBytes())}clearCofactor(){return this.multiply(D(nt),!1)}isSmallOrder(){return this.clearCofactor().is0()}isTorsionFree(){let t=this.multiply(Z/2n,!1).double();return Z%2n&&(t=t.add(this)),t.is0()}},L=new E(ge,be,1n,p(ge*be)),H=new E(0n,1n,1n,0n);E.BASE=L;E.ZERO=H;var Pe=e=>Le(Ee(C(e,0n,Q),64)).reverse(),ne=e=>D("0x"+Ae(te(S(e)).reverse())),w=(e,t)=>{let n=e;for(;t-- >0n;)n=c(n*n);return n},dt=e=>{let t=c(e*e),n=c(t*e),s=c(w(n,2n)*n),o=c(w(s,1n)*e),r=c(w(o,5n)*o),a=c(w(r,10n)*r),f=c(w(a,20n)*a),d=c(w(f,40n)*f),l=c(w(d,80n)*d),u=c(w(l,80n)*d),y=c(w(u,10n)*r);return{pow_p_5_8:c(w(y,2n)*e),b2:n}},we=0x2b8324804fc1df0b2b4d00993dfbd7a72f431806ad2fe478c4ee1b274a0ea0b0n,ft=(e,t)=>{let n=c(t*c(t*t)),s=c(c(n*n)*t),o=dt(c(e*s)).pow_p_5_8,r=c(e*c(n*o)),a=c(t*c(r*r)),f=r,d=c(r*we),l=a===e,u=a===p(-e),y=a===p(-e*we);return l&&(r=f),(u||y)&&(r=d),(p(r)&1n)===1n&&(r=p(-r)),{isValid:l||u,value:r}},X=e=>$e(ne(e)),se=(...e)=>Promise.resolve(Ce("sha512Async")(_(...e))).then(He),ut=(...e)=>He(Ce("sha512")(_(...e))),Be=e=>{let t=te(e),n=t.slice(0,32);n[0]&=248,n[31]&=127,n[31]|=64;let s=t.slice(32,64),o=X(n),r=L.multiply(o),a=r.toBytes();return{head:n,prefix:s,scalar:o,point:r,pointBytes:a}},oe=e=>se(S(e,T)).then(Be),pt=e=>Be(ut(S(e,T))),re=e=>oe(e).then(t=>t.pointBytes);var Ie=e=>se(e.hashable).then(e.finish);var yt=(e,t,n)=>{let{pointBytes:s,scalar:o}=e,r=X(t),a=L.multiply(r).toBytes();return{hashable:_(a,s,n),finish:l=>{let u=$e(r+X(l)*o);return S(_(a,Pe(u)),64)}}},ce=async(e,t)=>{let n=S(e),s=await oe(t),o=await se(s.prefix,n);return Ie(yt(s,o,n))};var _e={zip215:!0},mt=(e,t,n,s=_e)=>{e=S(e,64),t=S(t),n=S(n,T);let{zip215:o=!0}=s,r=e.subarray(0,T),a=ne(e.subarray(T,T*2)),f,d,l,u=Uint8Array.of(),y=!1;try{f=E.fromBytes(n,o),d=E.fromBytes(r,o),l=L.multiply(a,!1),u=_(r,n,t),y=!0}catch{}return{hashable:u,finish:g=>{if(!y||!o&&f.isSmallOrder())return!1;let b=X(g);return d.add(f.multiply(b,!1)).subtract(l).clearCofactor().is0()}}},Oe=async(e,t,n,s=_e)=>Ie(mt(e,t,n,s));var ht={sha512Async:async e=>{let t=at(),n=_(e);return j(await t.digest("SHA-512",n.buffer))},sha512:void 0},gt=e=>(e=e===void 0?it(T):e,S(e,T));var Ke=Object.freeze({getExtendedPublicKeyAsync:oe,getExtendedPublicKey:pt,randomSecretKey:gt}),F=8,bt=256,Re=Math.ceil(bt/F)+1,ee=2**(F-1),St=()=>{let e=[],t=L,n=t;for(let s=0;s<Re;s++){n=t,e.push(n);for(let o=1;o<ee;o++)n=n.add(t),e.push(n);t=n.double()}return e},Te,ve=(e,t)=>{let n=t.negate();return e?n:t},xt=e=>{let t=Te||(Te=St()),n=H,s=L,o=2**F,r=o,a=D(o-1),f=D(F);for(let d=0;d<Re;d++){let l=Number(e&a);e>>=f,l>ee&&(l-=r,e+=1n);let u=d*ee,y=u,m=u+Math.abs(l)-1,g=d%2!==0,b=l<0;l===0?s=s.add(ve(g,t[y])):n=n.add(ve(b,t[m]))}return e!==0n&&h("invalid wnaf"),{p:n,f:s}};var Ye=864e5,O=(e=Date.now())=>Math.floor(e/Ye),le=e=>new Date(e*Ye);var K=new TextEncoder,Tt=new TextDecoder;function V(e){let t="";for(let n of e)t+=String.fromCharCode(n);return btoa(t).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}function Ue(e){let t=e.replace(/-/g,"+").replace(/_/g,"/"),n=atob(t+"=".repeat((4-t.length%4)%4));return Uint8Array.from(n,s=>s.charCodeAt(0))}var ae=e=>Array.from(e,t=>t.toString(16).padStart(2,"0")).join(""),q=e=>Uint8Array.from(e.trim().match(/../g)??[],t=>parseInt(t,16)),ie="0123456789ABCDEFGHJKMNPQRSTVWXYZ",vt=e=>ie[[...e].reduce((t,n)=>(t*31+ie.indexOf(n))%32,7)],kt=e=>e.toUpperCase().replace(/[^0-9A-Z]/g,"").replace(/O/g,"0").replace(/[IL]/g,"1").replace(/U/g,"V");function de(e){let t=kt(e);return t.startsWith("SS")&&t.length===18&&(t=t.slice(2)),t.length!==16||[...t].some(n=>!ie.includes(n))||vt(t.slice(0,15))!==t[15]?null:"SS-"+t.match(/.{4}/g).join("-")}var Et=e=>e.replace(/^SS-/,"").replace(/-/g,"");async function Ze(e,t){let n=V(K.encode(JSON.stringify({v:1,...e}))),s=await ce(K.encode(n),t);return`SSA-${n}.${V(s)}`}async function fe(e,t){let n=e.replace(/\s+/g,"").replace(/^SSA-/,""),[s,o]=n.split(".");if(!s||!o)return null;try{if(!await Oe(Ue(o),K.encode(s),t))return null;let r=JSON.parse(Tt.decode(Ue(s)));return r?.v===1&&typeof r.m=="string"?r:null}catch{return null}}async function Ne(e,t,n,s){let o=await fe(e,t);return o?o.m!==Et(n)?{ok:!1,reason:"other-machine",message:`This code was made for another computer (SS-${o.m.match(/.{4}/g).join("-")}). Send your Machine ID to get a code for this computer.`,payload:o}:o.e!==null&&s>o.e?{ok:!1,reason:"expired",message:`This licence ended on ${le(o.e).toLocaleDateString()}. Contact Engineering Workspace to renew it.`,payload:o}:{ok:!0,payload:o,daysLeft:o.e===null?null:o.e-s+1}:{ok:!1,reason:"invalid",message:'This activation code is not valid. Copy the whole code from the email, from "SSA-" to the end.'}}async function De(){let e=Ke.randomSecretKey();return{privateKey:ae(e),publicKey:ae(await re(e))}}var Xe=async e=>ae(await re(q(e)));async function Fe(e,t,n=O()){let s=V(K.encode(JSON.stringify({v:1,d:n,r:[...new Set(e.map(o=>o.trim()).filter(Boolean))]})));return`SSS-${s}.${V(await ce(K.encode(s),t))}`}var i=e=>document.getElementById(e),Ve="surgespace-tool.register",R="surgespace-tool.key",B={get:e=>{try{return localStorage.getItem(e)}catch{return null}},set:(e,t)=>{try{localStorage.setItem(e,t)}catch{}},del:e=>{try{localStorage.removeItem(e)}catch{}}},A=null,z="",x=JSON.parse(B.get(Ve)??"[]"),ue=()=>B.set(Ve,JSON.stringify(x)),M=e=>e===null?"No end date":le(e).toISOString().slice(0,10),pe=(e,t,n="text/plain")=>{let s=document.createElement("a");s.href=URL.createObjectURL(new Blob([t],{type:n})),s.download=e,s.click(),setTimeout(()=>URL.revokeObjectURL(s.href),2e3)},qe=e=>new Promise(t=>{let n=document.createElement("input");n.type="file",n.accept=e,n.onchange=()=>n.files?.[0]?.text().then(t),n.click()});async function ye(e){let t=e.replace(/[^0-9a-f]/gi,"").toLowerCase();if(t.length!==64){alert("That file does not contain a SurgeSpace signing key.");return}A=q(t),z=await Xe(t),i("remember").checked?B.set(R,t):B.del(R),i("keyState").innerHTML=`<span class="ok">Signing key loaded</span> \xB7 public key ${z.slice(0,8)}\u2026`,i("pubKey").textContent=z,i("pubOut").hidden=!1,i("makeBtn").disabled=!1,We()}i("loadKey").onclick=async()=>{let t=(await qe(".txt,.key")).match(/[0-9a-f]{64}/i);t?await ye(t[0]):alert("No signing key found in that file.")};i("newKey").onclick=async()=>{if(A&&!confirm("A key is already loaded. A new key means codes made with the old key will not work in app builds that use the new public key. Continue?"))return;let e=await De();pe("surgespace-signing-key.txt",`SurgeSpace private signing key \u2014 KEEP SECRET, never send it to anyone.
+Whoever has this file can make SurgeSpace licences.
+
+Private key: ${e.privateKey}
+Public key (goes in the app): ${e.publicKey}
+Created: ${new Date().toISOString()}
+`),await ye(e.privateKey),alert('The key file "surgespace-signing-key.txt" was downloaded. Keep it safe and make a backup copy. Send only the PUBLIC key to your developer.')};i("remember").onchange=e=>{e.target.checked&&A?B.set(R,Array.from(A,n=>n.toString(16).padStart(2,"0")).join("")):B.del(R)};var ze=()=>{let e=new Date().getFullYear(),t=x.filter(n=>n.l.startsWith(`SS-${e}-`)).map(n=>Number(n.l.split("-")[2])||0);return`SS-${e}-${String((t.length?Math.max(...t):0)+1).padStart(4,"0")}`};i("lno").value=ze();i("makeBtn").disabled=!0;i("mid").oninput=()=>{let e=i("mid").value,t=de(e),n=t?x.filter(s=>s.mid===t&&!s.cancelled):[];i("midState").innerHTML=e?t?`<span class="ok">Valid: ${t}</span>${n.length?` \xB7 <span class="muted">already has ${n.map(s=>s.l).join(", ")}</span>`:""}`:'<span class="bad">Not a valid Machine ID (check for a typing mistake)</span>':""};i("dur").onchange=()=>{i("untilWrap").hidden=i("dur").value!=="date"};var v=null;i("issue").onsubmit=async e=>{e.preventDefault();let t=i("issueMsg");if(!A){t.innerHTML='<span class="bad">Load the signing key first.</span>';return}let n=de(i("mid").value);if(!n){t.innerHTML='<span class="bad">Check the Machine ID.</span>';return}let s=i("lno").value.trim();if(x.some(l=>l.l===s)){t.innerHTML=`<span class="bad">Licence number ${s} is already in the register.</span>`;return}let o=O(),r=i("dur").value,a;if(r==="date"){let l=i("until").valueAsDate;if(!l){t.innerHTML='<span class="bad">Pick the last valid day.</span>';return}a=Math.floor(l.getTime()/864e5)}else if(r==="0")a=null;else{let l=new Date;l.setUTCMonth(l.getUTCMonth()+Number(r)),a=Math.floor(l.getTime()/864e5)-1}let f={m:n.replace(/^SS-/,"").replace(/-/g,""),p:i("plan").value,n:i("name").value.trim(),l:s,i:o,e:a},d=await Ze(f,A);v={l:s,n:f.n,email:i("email").value.trim(),mid:n,p:f.p,i:o,e:a,notes:i("notes").value.trim(),code:d},x.unshift(v),ue(),i("code").value=d,i("codeOut").hidden=!1,t.innerHTML=`<span class="ok">Code made for ${n}, valid until ${M(a)}.</span>`,i("lno").value=ze(),U()};var Ge=async(e,t)=>{try{await navigator.clipboard.writeText(e),i("copyMsg").textContent=t}catch{i("copyMsg").textContent="Select the text and copy it manually."}setTimeout(()=>i("copyMsg").textContent="",2e3)};i("copyCode").onclick=()=>Ge(i("code").value,"Code copied");i("copyMail").onclick=()=>v&&Ge(`Subject: Your SurgeSpace licence ${v.l}
+
+Hello,
+
+Thank you for choosing SurgeSpace. Here is your activation code for the computer with Machine ID ${v.mid}:
+
+${v.code}
+
+To activate: open SurgeSpace, click the plan badge next to the SurgeSpace name (top left), paste the code under "Paste the activation code" and press Activate.
+
+Licence: ${v.l}
+Licensee: ${v.n}
+Plan: ${v.p==="pro"?"Pro":"Enterprise"}
+Valid until: ${M(v.e)}
+
+The code works only on that computer. If you move to a new computer, reply with its Machine ID.
+
+Best regards,
+Engineering Workspace
+https://engspace.app`,"Reply email copied");async function We(){let e=i("checkIn").value.trim(),t=i("checkOut");if(!e){t.innerHTML="";return}if(!A){t.innerHTML='<span class="bad">Load the signing key to check codes.</span>';return}let n=q(z),s=await fe(e,n);if(!s){t.innerHTML='<span class="bad">Not a valid code for your key (edited, incomplete or made with another key).</span>';return}let o=`SS-${s.m.match(/.{4}/g).join("-")}`,r=await Ne(e,n,o,O()),a=x.find(f=>f.l===s.l);t.innerHTML=`<div class="${r.ok?"ok":"bad"}">${r.ok?"Valid code":r.message}</div>
+    <div>Licence <b>${s.l}</b> \xB7 ${s.n} \xB7 ${s.p}</div><div>Machine ${o}</div><div>Issued ${M(s.i)} \xB7 last day ${M(s.e)}</div>
+    ${a?`<div class="muted">In register${a.cancelled?" \u2014 CANCELLED":""}${a.email?` \xB7 ${a.email}`:""}</div>`:'<div class="muted">Not in this register.</div>'}`}i("checkIn").oninput=()=>{We()};var P=e=>e.replace(/[&<>"]/g,t=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[t]);function U(){let e=i("search").value.toLowerCase(),t=x.filter(s=>!e||[s.l,s.n,s.email,s.mid,s.notes].join(" ").toLowerCase().includes(e)),n=O();i("reg").innerHTML=t.map(s=>`<tr class="${s.cancelled?"cancelled":""}">
+    <td class="mono">${P(s.l)}</td><td>${P(s.n)}</td><td>${P(s.email)}</td><td class="mono">${P(s.mid)}</td><td>${s.p}</td><td>${M(s.i)}</td>
+    <td class="${s.e!==null&&s.e<n?"bad":""}">${M(s.e)}</td><td>${P(s.notes)}</td>
+    <td><button data-l="${P(s.l)}" data-act="copy">Code</button> <button data-l="${P(s.l)}" data-act="${s.cancelled?"restore":"cancel"}">${s.cancelled?"Restore":"Cancel"}</button></td></tr>`).join("")||'<tr><td colspan="9" class="muted">No licences yet.</td></tr>'}i("reg").onclick=e=>{let t=e.target.closest("button");if(!t)return;let n=x.find(s=>s.l===t.dataset.l);if(n){if(t.dataset.act==="copy"){navigator.clipboard.writeText(n.code).catch(()=>prompt("Copy the code:",n.code));return}t.dataset.act==="cancel"&&!confirm(`Cancel licence ${n.l} (${n.n})? It stops after the next status file is uploaded and the app checks it.`)||(n.cancelled=t.dataset.act==="cancel",ue(),U())}};i("search").oninput=U;var At=e=>`"${String(e??"").replace(/"/g,'""')}"`,Lt=["l","n","email","mid","p","i","e","notes","cancelled","code"];i("exportCsv").onclick=()=>pe(`surgespace-licences-${new Date().toISOString().slice(0,10)}.csv`,["licence,licensee,email,machine_id,plan,issued,last_day,notes,cancelled,code",...x.map(e=>Lt.map(t=>At(t==="i"?M(e.i):t==="e"?M(e.e):e[t])).join(","))].join(`
+`),"text/csv");i("importCsv").onclick=async()=>{let t=(await qe(".csv")).split(/\r?\n/).slice(1).filter(Boolean).map(o=>[...o.matchAll(/"((?:[^"]|"")*)"|([^,]+)|(?<=,|^)(?=,|$)/g)].map(r=>(r[1]??r[2]??"").replace(/""/g,'"'))),n=o=>o==="No end date"||!o?null:Math.floor(new Date(o).getTime()/864e5),s=0;for(let o of t)!o[0]||x.some(r=>r.l===o[0])||(x.push({l:o[0],n:o[1],email:o[2],mid:o[3],p:o[4],i:n(o[5])??O(),e:n(o[6]),notes:o[7],cancelled:o[8]==="true",code:o[9]}),s++);ue(),U(),alert(`${s} licence(s) added.`)};i("makeStatus").onclick=async()=>{if(!A){alert("Load the signing key first.");return}let e=x.filter(t=>t.cancelled).map(t=>t.l);pe("status.txt",await Fe(e,A)),alert(`status.txt made (${e.length} cancelled licence${e.length===1?"":"s"}). Upload it to lic.engspace.app/surgespace/status.txt, replacing the old one.`)};U();var je=B.get(R);je&&(i("remember").checked=!0,ye(je));})();
+/*! Bundled license information:
+
+@noble/ed25519/index.js:
+  (*! noble-ed25519 - MIT License (c) 2019 Paul Miller (paulmillr.com) *)
+*/
+</script>
+</body>
+</html>

@@ -14,7 +14,7 @@
       { "label": "main", "title": "SurgeSpace", "width": 1440, "height": 900, "minWidth": 1024, "minHeight": 640, "center": true }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost https://*.supabase.co"
+      "csp": "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost https://lic.engspace.app"
     }
   },
   "bundle": {

@@ -134,3 +134,5 @@ svg text { font-family: var(--sans); }
 .plan-badge.pro, .plan-badge.enterprise { border-color: var(--good); color: var(--good); }
 .plan-badge.trial { border-color: var(--accent); color: var(--accent); }
 a.btn { text-decoration: none; color: inherit; } a.btn.primary { color: #fff; }
+.machine-id { font: 600 17px var(--mono); letter-spacing: 0.06em; padding: 6px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line-2); }
+.steps { margin: 12px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 12px; font-size: 13.5px; }
