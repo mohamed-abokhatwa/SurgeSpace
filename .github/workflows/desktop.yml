@@ -38,7 +38,11 @@ jobs:
         run: |
           $v = (Get-Content package.json | ConvertFrom-Json).version
           if ($v -eq '0.0.0') { $v = '1.0.0' }
-          ./msix/pack.ps1 -IdentityName "${{ vars.MSIX_IDENTITY_NAME }}" -Publisher "${{ vars.MSIX_PUBLISHER }}" -PublisherDisplay "${{ vars.MSIX_PUBLISHER_DISPLAY }}" -Version "$v.${{ github.run_number }}"
+          # Until the Partner Center values are set as repository variables, build a test package with placeholders.
+          $id = if ("${{ vars.MSIX_IDENTITY_NAME }}") { "${{ vars.MSIX_IDENTITY_NAME }}" } else { "EngineeringWorkspace.SurgeSpace.Test" }
+          $pub = if ("${{ vars.MSIX_PUBLISHER }}") { "${{ vars.MSIX_PUBLISHER }}" } else { "CN=SurgeSpaceTest" }
+          $disp = if ("${{ vars.MSIX_PUBLISHER_DISPLAY }}") { "${{ vars.MSIX_PUBLISHER_DISPLAY }}" } else { "Engineering Workspace" }
+          ./msix/pack.ps1 -IdentityName $id -Publisher $pub -PublisherDisplay $disp -Version "$v.${{ github.run_number }}"
       - uses: actions/upload-artifact@v4
         with: { name: SurgeSpace-MicrosoftStore, path: msix/*.msix }
 
