@@ -38,9 +38,9 @@ jobs:
         run: |
           $v = (Get-Content package.json | ConvertFrom-Json).version
           if ($v -eq '0.0.0') { $v = '1.0.0' }
-          # Until the Partner Center values are set as repository variables, build a test package with placeholders.
-          $id = if ("${{ vars.MSIX_IDENTITY_NAME }}") { "${{ vars.MSIX_IDENTITY_NAME }}" } else { "EngineeringWorkspace.SurgeSpace.Test" }
-          $pub = if ("${{ vars.MSIX_PUBLISHER }}") { "${{ vars.MSIX_PUBLISHER }}" } else { "CN=SurgeSpaceTest" }
+          # Partner Center → Product identity (repository variables override these).
+          $id = if ("${{ vars.MSIX_IDENTITY_NAME }}") { "${{ vars.MSIX_IDENTITY_NAME }}" } else { "EngineeringWorkspace.SurgeSpace" }
+          $pub = if ("${{ vars.MSIX_PUBLISHER }}") { "${{ vars.MSIX_PUBLISHER }}" } else { "CN=7383AB48-1669-4729-94F1-696779C5DEAF" }
           $disp = if ("${{ vars.MSIX_PUBLISHER_DISPLAY }}") { "${{ vars.MSIX_PUBLISHER_DISPLAY }}" } else { "Engineering Workspace" }
           ./msix/pack.ps1 -IdentityName $id -Publisher $pub -PublisherDisplay $disp -Version "$v.${{ github.run_number }}"
       - uses: actions/upload-artifact@v4

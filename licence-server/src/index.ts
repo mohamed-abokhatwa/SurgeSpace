@@ -7,6 +7,7 @@ import { adminRoute, appRoute, type Ctx } from '../../src/license/server/logic';
 import { fromHex } from '../../src/license/core';
 import { d1Store, type D1Like } from './d1Store';
 import { ADMIN_HTML } from './admin';
+import { PRIVACY_HTML, SUPPORT_HTML } from './pages';
 
 export interface Env {
   DB: D1Like;
@@ -39,6 +40,8 @@ export default {
     if (req.method === 'GET' && (path === '/' || path === '')) {
       return new Response(ADMIN_HTML.replace(/__BASE__/g, base), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'" } });
     }
+    if (req.method === 'GET' && (path === '/privacy' || path === '/support'))
+      return new Response(path === '/privacy' ? PRIVACY_HTML : SUPPORT_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=3600' } });
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
 
     const ctx: Ctx = {

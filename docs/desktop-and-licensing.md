@@ -69,8 +69,8 @@ Your website's licence form can post to `https://surgespace-licences.engspace.ap
 ## Desktop apps
 
 - **Windows**: Microsoft Store, free listing. `.github/workflows/desktop.yml` builds the `.msix`; upload it in Partner
-  Center (the Store signs it). Set the GitHub variables `MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER` and
-  `MSIX_PUBLISHER_DISPLAY` from Partner Center → Product identity.
+  Center (the Store signs it). Identity (Partner Center): `EngineeringWorkspace.SurgeSpace`, `CN=7383AB48-1669-4729-94F1-696779C5DEAF`,
+  Engineering Workspace; Store ID 9NFRBFGTQBSK. These are in the workflow.
 - **Mac**: universal DMG. It is signed and notarized when the Apple secrets are set in GitHub (`APPLE_CERTIFICATE`,
   `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`).
 - On the desktop the licence is also kept in the app's data folder, so it survives updates and reinstalling. The
