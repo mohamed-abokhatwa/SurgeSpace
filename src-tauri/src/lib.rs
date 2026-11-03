@@ -16,6 +16,12 @@ fn device_id() -> String {
     digest.iter().take(16).map(|b| format!("{b:02x}")).collect()
 }
 
+/// Computer name, shown on the seller's admin page next to the licence.
+#[tauri::command]
+fn host_name() -> String {
+    gethostname::gethostname().to_string_lossy().into_owned()
+}
+
 fn store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -31,7 +37,7 @@ fn read_store(app: &tauri::AppHandle) -> BTreeMap<String, String> {
 
 /// Only the licence keys are accepted, so the web view cannot use this as general file storage.
 fn allowed(key: &str) -> bool {
-    matches!(key, "surgespace.code" | "surgespace.trial" | "surgespace.seen" | "surgespace.checked")
+    matches!(key, "surgespace.code" | "surgespace.key" | "surgespace.trial" | "surgespace.seen" | "surgespace.checked")
 }
 
 #[tauri::command]
@@ -60,7 +66,7 @@ fn kv_set(app: tauri::AppHandle, key: String, value: Option<String>) -> Result<(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![device_id, kv_get, kv_set])
+        .invoke_handler(tauri::generate_handler![device_id, host_name, kv_get, kv_set])
         .run(tauri::generate_context!())
         .expect("error while running SurgeSpace");
 }

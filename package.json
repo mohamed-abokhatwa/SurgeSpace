@@ -11,8 +11,7 @@
     "test": "tsx tests/engine.test.ts && tsx tests/license.test.ts",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build",
-    "licence-tool": "node scripts/build-licence-tool.mjs"
+    "desktop:build": "tauri build"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.2.7",

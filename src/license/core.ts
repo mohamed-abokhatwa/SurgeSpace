@@ -1,31 +1,34 @@
-// SurgeSpace licensing core — shared by the app, the licence tool and the command-line script.
+// SurgeSpace licensing core, shared by the app and the licence server (lic.engspace.app/surgespace).
 //
-// Process (offline, by email):
-//   1. The app shows this computer's Machine ID, e.g. SS-7K3Q-M9XD-2WPA-H4TN.
-//   2. The user emails it to Engineering Workspace.
-//   3. Engineering Workspace makes an activation code in the licence tool (needs the private signing key).
-//   4. The user pastes the code into the app. The app checks it with the public key: it is valid only on that
-//      machine and until its end date. Codes cannot be forged without the private key, which never ships in the app.
+//   • The seller issues a licence code (SSL-XXXX-XXXX-XXXX) on the server's admin page.
+//   • The app sends the code and its Machine ID; the server binds the computer and returns a KEY: a small
+//     Ed25519-signed record (machine, plan, licensee, dates). The app checks the key itself with the public key,
+//     so it works offline; the key runs at most 60 days ahead and moves forward at each daily check-in.
+//   • Evaluations (trials) are keys of plan "trial" issued by the server, one per computer.
 import * as ed from '@noble/ed25519';
 
-export type Plan = 'free' | 'trial' | 'pro' | 'enterprise';
-export type PaidPlan = 'pro' | 'enterprise';
+export type Plan = 'free' | 'trial' | 'personal' | 'company';
+export type PaidPlan = 'personal' | 'company';
 
 /** What an activation code contains. Short field names keep the code short. */
 export interface CodePayload {
   v: 1;
   /** Machine ID without the "SS-" prefix and dashes (16 characters). */
   m: string;
-  p: PaidPlan;
+  p: PaidPlan | 'trial';
   /** Licensee (company or person). */
   n: string;
   /** Licence number, for your records and support. */
   l: string;
   /** Issued, days since 1970-01-01 (UTC). */
   i: number;
-  /** Last valid day, days since 1970-01-01; null = no end date. */
+  /** Last day this key is valid (days since 1970-01-01); null = no end. At most 60 days ahead for licences. */
   e: number | null;
+  /** Last day of the licence that was sold (shown to the user); null = perpetual. */
+  x?: number | null;
 }
+/** How far ahead a licence key runs; daily check-ins move it forward until the licence's end. */
+export const KEY_DAYS = 60;
 
 export const TRIAL_DAYS = 14;
 export const DAY_MS = 86_400_000;
@@ -108,9 +111,9 @@ export type CodeCheck =
 /** Full check of a code for this machine on day `day`. */
 export async function checkCode(code: string, publicKey: Uint8Array, machineId: string, day: number): Promise<CodeCheck> {
   const p = await readCode(code, publicKey);
-  if (!p) return { ok: false, reason: 'invalid', message: 'This activation code is not valid. Copy the whole code from the email, from "SSA-" to the end.' };
-  if (p.m !== midKey(machineId)) return { ok: false, reason: 'other-machine', message: `This code was made for another computer (SS-${p.m.match(/.{4}/g)!.join('-')}). Send your Machine ID to get a code for this computer.`, payload: p };
-  if (p.e !== null && day > p.e) return { ok: false, reason: 'expired', message: `This licence ended on ${dayToDate(p.e).toLocaleDateString()}. Contact Engineering Workspace to renew it.`, payload: p };
+  if (!p) return { ok: false, reason: 'invalid', message: 'The stored licence key is not valid.' };
+  if (p.m !== midKey(machineId)) return { ok: false, reason: 'other-machine', message: `This code was made for another computer (SS-${p.m.match(/.{4}/g)!.join('-')}). Activate the licence again on this computer.`, payload: p };
+  if (p.e !== null && day > p.e) return { ok: false, reason: 'expired', message: p.p === 'trial' ? 'The evaluation has ended.' : (p.x !== undefined && p.x !== null && day > p.x) ? `This licence ended on ${dayToDate(p.x).toLocaleDateString()}. Contact Engineering Workspace to renew it.` : 'SurgeSpace could not check the licence online for a long time. Connect to the internet so it can check in.', payload: p };
   return { ok: true, payload: p, daysLeft: p.e === null ? null : p.e - day + 1 };
 }
 
@@ -121,29 +124,18 @@ export async function newKeyPair() {
 }
 export const publicKeyOf = async (privateKeyHex: string) => hex(await ed.getPublicKeyAsync(fromHex(privateKeyHex)));
 
-// ── online status file (periodic check) ──────────────────────────────────
-// A small signed file you upload to the licence site (e.g. https://lic.engspace.app/surgespace/status.txt).
-// It lists cancelled licence numbers only (no names or emails). The app downloads it every few days; the
-// signature means nobody can replace it with a fake one.
-export interface StatusFile {
-  v: 1;
-  /** Day the file was made (days since 1970). */
-  d: number;
-  /** Cancelled licence numbers. */
-  r: string[];
+/** Licence codes: SSL-XXXX-XXXX-XXXX (what the seller gives the customer). */
+export function newLicenceCode(random: Uint8Array = crypto.getRandomValues(new Uint8Array(11))): string {
+  const body = Array.from(random.slice(0, 11), (b) => B32[b % 32]).join('');
+  return 'SSL-' + (body + check(body)).match(/.{4}/g)!.join('-');
 }
-export async function makeStatus(revoked: string[], privateKey: Uint8Array, day = today()): Promise<string> {
-  const body = b64url(enc.encode(JSON.stringify({ v: 1, d: day, r: [...new Set(revoked.map((x) => x.trim()).filter(Boolean))] } satisfies StatusFile)));
-  return `SSS-${body}.${b64url(await ed.signAsync(enc.encode(body), privateKey))}`;
+export function normaliseLicenceCode(input: string): string | null {
+  // strip the prefix before correcting look-alike letters (the L in "SSL" would otherwise become a 1)
+  const s = clean(input.trim().replace(/^ssl[\s-]*/i, ''));
+  if (s.length !== 12 || [...s].some((c) => !B32.includes(c)) || check(s.slice(0, 11)) !== s[11]) return null;
+  return 'SSL-' + s.match(/.{4}/g)!.join('-');
 }
-export async function readStatus(text: string, publicKey: Uint8Array): Promise<StatusFile | null> {
-  const [body, sig] = text.replace(/\s+/g, '').replace(/^SSS-/, '').split('.');
-  if (!body || !sig) return null;
-  try {
-    if (!(await ed.verifyAsync(fromB64url(sig), enc.encode(body), publicKey))) return null;
-    const s = JSON.parse(dec.decode(fromB64url(body))) as StatusFile;
-    return s?.v === 1 && Array.isArray(s.r) ? s : null;
-  } catch {
-    return null;
-  }
+/** One-way code for a computer (evaluations are stored by this, never by the Machine ID). */
+export async function machineHash(machineId: string): Promise<string> {
+  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode('surgespace-eval:' + machineId)))).slice(0, 32);
 }

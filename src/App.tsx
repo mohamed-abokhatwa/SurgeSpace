@@ -11,7 +11,7 @@ import { MapView, surgeScale, type ColorMode, type Selection } from './ui/MapVie
 import { Timeline } from './ui/Timeline';
 import { ChecksView, EventPanel, Inspector, ModelPanel, ProtectionPanel, SettingsPanel } from './ui/panels';
 import { ProfileView } from './ui/ProfileView';
-import { LicenceDialog, useLicence } from './license/LicenceDialog';
+import { LicenceDialog, TellUsDialog, useLicence } from './license/LicenceDialog';
 import { initLicence, planLabel } from './license/licence';
 import { defaultRoute, download, findPath, fmt, pressureColor } from './ui/util';
 
@@ -40,6 +40,7 @@ export default function App() {
   const licRef = useRef(lic);
   licRef.current = lic;
   const [licReason, setLicReason] = useState<string | null | undefined>(undefined); // undefined = dialog closed
+  const [tellUs, setTellUs] = useState(false);
   useEffect(() => { void initLicence(); }, []);
   /** True when the plan includes the feature; otherwise opens the licence dialog with the reason. */
   const allowed = (ok: boolean, reason: string) => { if (!ok) setLicReason(reason); return ok; };
@@ -260,6 +261,7 @@ export default function App() {
             </div>
           )}
         </div>
+        <button className="btn ghost" onClick={() => setTellUs(true)} title="Questions, ideas or problems">Tell us</button>
         <button className="btn" onClick={() => setImporting(true)}>Import</button>
         <button className="btn" onClick={() => download(`${net.name.replace(/[^\w-]+/g, '_')}.surge.json`, JSON.stringify(net, null, 1), 'application/json')} title="Save project">Save</button>
         <button className="btn" onClick={() => {
@@ -413,6 +415,7 @@ export default function App() {
           </div>
         </section>
       </div>
+      {tellUs && <TellUsDialog where={`${side} · ${bottom} · ${net.name}`} onClose={() => setTellUs(false)} />}
       {licReason !== undefined && <LicenceDialog reason={licReason ?? undefined} onClose={() => setLicReason(undefined)} />}
       {importing && <ImportDialog onClose={() => setImporting(false)} onImport={(n, notes) => { setImporting(false); load(n, notes); }} />}
       {toast && (

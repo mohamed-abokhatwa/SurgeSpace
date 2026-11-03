@@ -1,29 +1,36 @@
-// SurgeSpace licence state in the app. Fully offline: a licence is an activation code made for this computer's
-// Machine ID; the trial is 14 days kept on this computer. See core.ts for the process.
+// SurgeSpace licence state in the app (same model as Engineering Workspace):
+//  • the user enters a licence code; the server binds this computer and returns a signed key
+//  • the key runs up to 60 days ahead and moves forward at the daily check-in (so the app works offline)
+//  • evaluations are tracked by the server per computer; "ask for more time" adds 7 days the first time
 import * as ed from '@noble/ed25519';
-import { checkCode, features, fromHex, hex, machineIdFrom, makeCode, readStatus, today, TRIAL_DAYS, type CodePayload, type Features, type Plan } from './core';
-import { CHECK_EVERY_DAYS, LICENCE_EMAIL, OFFLINE_DAYS, PUBLIC_KEY, STATUS_URL } from './publicKey';
+import { checkCode, features, fromHex, hex, machineIdFrom, normaliseLicenceCode, today, type CodePayload, type Features, type Plan } from './core';
+import { CHECKIN_HOURS, CONTACT_EMAIL, LICENCE_API, PUBLIC_KEY } from './publicKey';
+import { adminRoute, appRoute, type Ctx } from './server/logic';
+import { emptyData, memoryStore, type MemoryData } from './server/memoryStore';
 
 export const DEMO = !PUBLIC_KEY;
-export { LICENCE_EMAIL };
+export { CONTACT_EMAIL };
+export const APP_VERSION = '1.0.0';
 
 export interface LicenceState {
   plan: Plan;
-  source: 'code' | 'trial' | 'none';
+  source: 'licence' | 'trial' | 'none';
   features: Features;
   machineId: string;
   payload?: CodePayload;
-  /** Days left (licence or trial); null = no end date. */
+  /** Licence code on this computer. */
+  code?: string;
+  /** Days left of the licence (or evaluation); null = perpetual. */
   daysLeft?: number | null;
-  /** Trial already used on this computer. */
   trialUsed: boolean;
-  /** Last successful online check (day number), when online checks are on. */
-  lastCheck?: number;
+  trialEnded: boolean;
+  lastCheckin?: string;
   notice?: string;
   checking: boolean;
 }
+type Result = { ok: boolean; message: string };
 
-// ── storage: browser storage, plus a file in the app's data folder on the desktop app ──
+// ── storage (browser storage + a file in the app's data folder on the desktop) ──
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const core = await import('@tauri-apps/api/core');
@@ -42,22 +49,26 @@ async function put(k: string, v: string | null) {
   if (v === null) local.del(k); else local.set(k, v);
   if (isTauri()) { try { await invoke('kv_set', { key: k, value: v }); } catch { /* browser storage still has it */ } }
 }
-const K = { code: 'surgespace.code', trial: 'surgespace.trial', seen: 'surgespace.seen', device: 'surgespace.device', demo: 'surgespace.demoKey', checked: 'surgespace.checked' };
-/** Online check only for real (non-demo) builds with a status address. */
-const ONLINE = !DEMO && !!STATUS_URL;
+const K = { code: 'surgespace.code', key: 'surgespace.key', trial: 'surgespace.trial', seen: 'surgespace.seen', checked: 'surgespace.checked', device: 'surgespace.device' };
 
-// ── Machine ID ───────────────────────────────────────────────────────────
+// ── Machine ID and platform ──────────────────────────────────────────────
 let midP: Promise<string> | null = null;
 export const machineId = () => (midP ??= (async () => {
-  if (isTauri()) {
-    try { return machineIdFrom(fromHex(await invoke<string>('device_id'))); } catch { /* fall back */ }
-  }
+  if (isTauri()) { try { return machineIdFrom(fromHex(await invoke<string>('device_id'))); } catch { /* fall back */ } }
   let d = local.get(K.device);
   if (!d) { d = hex(crypto.getRandomValues(new Uint8Array(16))); local.set(K.device, d); }
   return machineIdFrom(fromHex(d));
 })());
+const platformName = () => {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  return (/Windows/.test(ua) ? 'Windows' : /Mac/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'Other') + (isTauri() ? '' : ' · browser');
+};
+async function hostName(): Promise<string> {
+  if (isTauri()) { try { return await invoke<string>('host_name'); } catch { /* none */ } }
+  return '';
+}
 
-/** Today, but never earlier than the latest day the app has seen (setting the clock back does not extend a licence). */
+/** Today, never earlier than the latest day seen (winding the clock back does not extend a key). */
 async function safeToday(): Promise<number> {
   const seen = Number(await get(K.seen)) || 0;
   const d = Math.max(today(), seen);
@@ -65,119 +76,148 @@ async function safeToday(): Promise<number> {
   return d;
 }
 
-// ── keys: the real public key, or a demo pair kept in this browser ───────
-async function demoPrivate(): Promise<Uint8Array> {
-  let k = local.get(K.demo);
-  if (!k) { k = hex(ed.utils.randomSecretKey()); local.set(K.demo, k); }
-  return fromHex(k);
+// ── server calls (or the same rules inside the app in demo mode) ─────────
+const DEMO_DB = 'surgespace.demoServer';
+interface DemoServer { sk: string; data: MemoryData }
+function demoServer(): DemoServer {
+  const raw = local.get(DEMO_DB);
+  if (raw) return JSON.parse(raw);
+  const s: DemoServer = { sk: hex(ed.utils.randomSecretKey()), data: emptyData() };
+  local.set(DEMO_DB, JSON.stringify(s));
+  return s;
 }
-const publicKey = async () => (DEMO ? ed.getPublicKeyAsync(await demoPrivate()) : fromHex(PUBLIC_KEY));
-/** Demo builds only: make a code for this computer, as the licence tool would. */
-export async function demoCode(months: number): Promise<string> {
-  if (!DEMO) throw new Error('Not a demo build');
-  const d = today();
-  return makeCode({ m: (await machineId()).replace(/^SS-/, '').replace(/-/g, ''), p: 'pro', n: 'Demo licence', l: 'DEMO-1', i: d, e: months > 0 ? d + Math.round(months * 30.44) - 1 : null }, await demoPrivate());
+function demoCtx(): Ctx {
+  const s = demoServer();
+  return { store: memoryStore(s.data, (d) => local.set(DEMO_DB, JSON.stringify({ ...s, data: d }))), privateKey: fromHex(s.sk), now: Date.now(), mail: async () => 'off' };
 }
+/** Demo builds: issue a licence as the seller would on the admin page, and return its code. */
+export async function demoIssue(plan: 'personal' | 'company' = 'personal'): Promise<string> {
+  const r = await adminRoute('/admin/issue', { name: 'Demo customer', email: 'demo@example.com', plan, paid_until: new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10), seats: 2 }, demoCtx());
+  return String(r.body.code ?? '');
+}
+async function call(path: string, body: Record<string, unknown>): Promise<Record<string, unknown> & { ok: boolean; message?: string }> {
+  if (DEMO) return (await appRoute(path, body, demoCtx())).body as never;
+  try {
+    const r = await fetch(LICENCE_API + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return await r.json();
+  } catch {
+    return { ok: false, error: 'offline', message: 'Could not reach the licence server. Check the internet connection and try again.' };
+  }
+}
+const publicKey = async () => (DEMO ? ed.getPublicKeyAsync(fromHex(demoServer().sk)) : fromHex(PUBLIC_KEY));
 
 // ── state ────────────────────────────────────────────────────────────────
-let state: LicenceState = { plan: 'free', source: 'none', features: features('free'), machineId: '', trialUsed: false, checking: true };
+let state: LicenceState = { plan: 'free', source: 'none', features: features('free'), machineId: '', trialUsed: false, trialEnded: false, checking: true };
 const subs = new Set<() => void>();
 const set = (s: Partial<LicenceState>) => { state = { ...state, ...s }; subs.forEach((f) => f()); };
 export const getLicence = () => state;
 export const subscribeLicence = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 
-async function evaluate(): Promise<void> {
+async function evaluate(notice?: string): Promise<void> {
   const mid = await machineId();
   const day = await safeToday();
-  const trialStart = Number(await get(K.trial)) || 0;
-  const trialUsed = trialStart > 0;
-  const code = await get(K.code);
-  let notice: string | undefined;
-  if (code) {
-    const r = await checkCode(code, await publicKey(), mid, day);
-    const last = Number(await get(K.checked)) || 0;
-    if (r.ok && ONLINE && last && day - last > OFFLINE_DAYS) {
-      notice = `SurgeSpace needs to check your licence online (last check ${day - last} days ago). Connect to the internet and press "Check licence now".`;
-    } else if (r.ok) {
-      set({ plan: r.payload.p, source: 'code', features: features(r.payload.p), machineId: mid, payload: r.payload, daysLeft: r.daysLeft, trialUsed, lastCheck: last || undefined, notice: undefined, checking: false });
+  const pub = await publicKey();
+  const code = (await get(K.code)) ?? undefined;
+  const key = await get(K.key);
+  const trial = await get(K.trial);
+  const lastCheckin = (await get(K.checked)) ?? undefined;
+  let trialUsed = !!trial, trialEnded = false;
+  if (key) {
+    const r = await checkCode(key, pub, mid, day);
+    if (r.ok) {
+      const x = r.payload.x;
+      set({ plan: r.payload.p, source: 'licence', features: features(r.payload.p), machineId: mid, payload: r.payload, code, daysLeft: x === null || x === undefined ? null : x - day + 1, trialUsed, trialEnded, lastCheckin, notice, checking: false });
       return;
-    } else notice = r.message;
+    }
+    notice ??= r.message;
   }
-  if (trialUsed) {
-    const left = trialStart + TRIAL_DAYS - day;
-    if (left > 0) { set({ plan: 'trial', source: 'trial', features: features('trial'), machineId: mid, payload: undefined, daysLeft: left, trialUsed, notice, checking: false }); return; }
-    notice ??= 'Your 14-day trial has ended. Send your Machine ID to get a licence.';
+  if (trial) {
+    const r = await checkCode(trial, pub, mid, day);
+    if (r.ok) { set({ plan: 'trial', source: 'trial', features: features('trial'), machineId: mid, payload: r.payload, code, daysLeft: r.daysLeft, trialUsed, trialEnded, lastCheckin, notice, checking: false }); return; }
+    trialEnded = true;
+    notice ??= 'The evaluation has ended. Ask for more time, or request a licence.';
   }
-  set({ plan: 'free', source: 'none', features: features('free'), machineId: mid, payload: undefined, daysLeft: undefined, trialUsed, notice, checking: false });
+  set({ plan: 'free', source: 'none', features: features('free'), machineId: mid, payload: undefined, code, daysLeft: undefined, trialUsed, trialEnded, lastCheckin, notice, checking: false });
 }
 
-/** Downloads the signed status file and drops a cancelled licence. Returns a message for the dialog. */
-export async function checkOnline(force = false): Promise<{ ok: boolean; message: string }> {
-  if (!ONLINE) return { ok: true, message: 'Online checks are off in this build.' };
+/** Daily check-in: refreshes the licence key (or the evaluation), and picks up extensions or cancellations. */
+export async function checkIn(force = false): Promise<Result> {
+  const last = Date.parse((await get(K.checked)) ?? '') || 0;
+  if (!force && Date.now() - last < CHECKIN_HOURS * 3600_000) return { ok: true, message: 'Checked recently.' };
+  const machine = await machineId();
+  const info = { machine, hostname: await hostName(), platform: platformName(), version: APP_VERSION };
   const code = await get(K.code);
-  if (!code) return { ok: true, message: 'No licence on this computer.' };
-  const day = await safeToday();
-  const last = Number(await get(K.checked)) || 0;
-  if (!force && last && day - last < CHECK_EVERY_DAYS) return { ok: true, message: 'Checked recently.' };
-  let text: string;
-  try {
-    const r = await fetch(`${STATUS_URL}?t=${Date.now()}`, { cache: 'no-store' });
-    if (!r.ok) throw new Error(String(r.status));
-    text = await r.text();
-  } catch {
-    return { ok: false, message: 'Could not reach the licence site. SurgeSpace keeps working offline and will try again later.' };
-  }
-  const st = await readStatus(text, await publicKey());
-  if (!st) return { ok: false, message: 'The licence site answered with something unexpected. Try again later.' };
-  const r = await checkCode(code, await publicKey(), await machineId(), day);
-  if (r.payload && st.r.includes(r.payload.l)) {
-    await put(K.code, null);
+  if (code) {
+    const r = await call('/checkin', { ...info, code });
+    if (!r.ok) { await evaluate(); return { ok: false, message: r.message ?? 'Check-in failed.' }; }
+    if (r.state === 'active' && typeof r.key === 'string') {
+      await put(K.key, r.key); await put(K.checked, new Date().toISOString());
+      await evaluate();
+      return { ok: true, message: 'Licence checked: it is valid.' };
+    }
+    if (r.state === 'revoked' || r.state === 'freed' || r.state === 'unknown') {
+      await put(K.key, null);
+      if (r.state !== 'freed') await put(K.code, null);
+      await put(K.checked, new Date().toISOString());
+      await evaluate(String(r.message ?? 'The licence is no longer valid on this computer.'));
+      return { ok: false, message: String(r.message ?? 'The licence is no longer valid.') };
+    }
+  } else if (await get(K.trial)) {
+    const r = await call('/trial', info);
+    if (r.ok && typeof r.key === 'string') { await put(K.trial, r.key); await put(K.checked, new Date().toISOString()); }
     await evaluate();
-    set({ notice: `Licence ${r.payload.l} has been cancelled. Contact Engineering Workspace (${LICENCE_EMAIL}).` });
-    return { ok: false, message: 'This licence has been cancelled.' };
+    return { ok: !!r.ok, message: r.ok ? `Evaluation runs to ${r.ends}.` : r.message ?? '' };
   }
-  await put(K.checked, String(day));
-  await evaluate();
-  return { ok: true, message: 'Licence checked online: it is valid.' };
+  return { ok: true, message: '' };
 }
 
-/** Call once at start-up: reads the stored licence, then checks online in the background when it is due. */
+/** Call once at start-up. */
 export async function initLicence() {
   await evaluate();
-  if (ONLINE) void checkOnline();
+  void checkIn();
 }
 
-/** Checks and stores a pasted activation code. */
-export async function enterCode(code: string): Promise<{ ok: boolean; message: string }> {
-  const r = await checkCode(code, await publicKey(), await machineId(), await safeToday());
-  if (!r.ok) return { ok: false, message: r.message };
-  await put(K.code, code.replace(/\s+/g, ''));
-  await put(K.checked, String(await safeToday())); // the offline allowance starts from activation
+export async function activate(codeIn: string): Promise<Result> {
+  const code = normaliseLicenceCode(codeIn);
+  if (!code) return { ok: false, message: 'That is not a SurgeSpace licence code (SSL-XXXX-XXXX-XXXX). Check it and try again.' };
+  const machine = await machineId();
+  const r = await call('/activate', { code, machine, hostname: await hostName(), platform: platformName(), version: APP_VERSION });
+  if (!r.ok || typeof r.key !== 'string') return { ok: false, message: r.message ?? 'Activation failed.' };
+  const check = await checkCode(r.key, await publicKey(), machine, await safeToday());
+  if (!check.ok) return { ok: false, message: 'The licence server answered with a key this app cannot verify. Update SurgeSpace or contact support.' };
+  await put(K.code, code); await put(K.key, r.key); await put(K.checked, new Date().toISOString());
   await evaluate();
-  if (ONLINE) void checkOnline(true);
-  return { ok: true, message: `Licence activated for ${r.payload.n}${r.daysLeft === null ? '' : `, valid until ${new Date((r.payload.e! + 1) * 86_400_000 - 1).toLocaleDateString()}`}.` };
+  return { ok: true, message: `Licence activated for ${r.name}${r.until ? `, until ${r.until}` : ''}.` };
 }
-export async function startTrial(): Promise<{ ok: boolean; message: string }> {
-  if (Number(await get(K.trial))) return { ok: false, message: 'The trial has already been used on this computer.' };
-  await put(K.trial, String(await safeToday()));
+export async function startTrial(): Promise<Result> {
+  const r = await call('/trial', { machine: await machineId(), platform: platformName(), version: APP_VERSION });
+  if (!r.ok || typeof r.key !== 'string') return { ok: false, message: r.message ?? 'Could not start the evaluation.' };
+  await put(K.trial, r.key); await put(K.checked, new Date().toISOString());
   await evaluate();
-  return { ok: true, message: 'Your 14-day trial has started. Every feature is unlocked.' };
+  return r.ended ? { ok: false, message: 'The evaluation on this computer has already ended. Ask for more time, or request a licence.' } : { ok: true, message: `Your evaluation runs to ${r.ends}. Every feature is unlocked.` };
 }
-/** Removes the activation code from this computer (for example before replacing the computer). */
-export async function removeCode(): Promise<void> {
-  await put(K.code, null);
+export async function askMoreTime(note: string, replyTo: string): Promise<Result> {
+  const r = await call('/trial/more', { machine: await machineId(), note, reply_to: replyTo });
+  if (r.ok && typeof r.key === 'string') await put(K.trial, r.key);
+  await evaluate();
+  return { ok: !!r.ok, message: r.message ?? '' };
+}
+export async function requestLicence(f: { kind: string; name: string; company: string; email: string; note: string }): Promise<Result> {
+  const r = await call('/request', { ...f, machine: await machineId(), source: `app ${APP_VERSION} · ${platformName()}` });
+  return { ok: !!r.ok, message: r.message ?? '' };
+}
+export async function sendFeedback(f: { message: string; detail: string; reply_to: string; level: string; where: string }): Promise<Result> {
+  const r = await call('/feedback', { ...f, build: `${APP_VERSION} ${platformName()}` });
+  return { ok: !!r.ok, message: r.message ?? '' };
+}
+/** Removes the licence from this computer only (the seller frees the seat on the server). */
+export async function removeLicence(): Promise<void> {
+  await put(K.key, null); await put(K.code, null);
   await evaluate();
 }
 
 export const planLabel = (s: LicenceState) =>
-  s.plan === 'free' ? 'Free' : s.plan === 'trial' ? `Trial · ${s.daysLeft ?? 0} day${s.daysLeft === 1 ? '' : 's'} left` : s.plan === 'pro' ? 'Pro' : 'Enterprise';
-
-/** Email the user can send, ready to paste. */
-export const requestEmail = (mid: string) => ({
-  to: LICENCE_EMAIL,
-  subject: `SurgeSpace licence request · ${mid}`,
-  body: `Hello,\n\nPlease send me a SurgeSpace licence for this computer.\n\nMachine ID: ${mid}\nName / company:\nLicence wanted (e.g. Pro, 1 year):\n\nThank you`,
-});
+  s.plan === 'free' ? 'Free' : s.plan === 'trial' ? `Evaluation · ${s.daysLeft ?? 0} day${s.daysLeft === 1 ? '' : 's'} left` : s.plan === 'personal' ? 'Personal' : 'Company';
 
 /** Opens a link outside the app (mail client or browser). */
 export async function openExternal(url: string) {

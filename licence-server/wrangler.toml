@@ -1,0 +1,16 @@
+# SurgeSpace licence server. Its own Worker and D1 database, separate from Engineering Workspace's.
+name = "surgespace-licence"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Served under lic.engspace.app/surgespace/* (a more specific route than Engineering Workspace's, so the two never mix).
+routes = [{ pattern = "lic.engspace.app/surgespace*", zone_name = "engspace.app" }]
+
+[vars]
+BASE = "/surgespace"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "surgespace-licences"
+database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+migrations_dir = "migrations"
