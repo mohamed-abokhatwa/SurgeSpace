@@ -36,13 +36,14 @@ jobs:
       - name: Package MSIX
         shell: pwsh
         run: |
-          $v = (Get-Content package.json | ConvertFrom-Json).version
-          if ($v -eq '0.0.0') { $v = '1.0.0' }
+          # Store rule: the last of the four numbers must be 0, so the build number goes third (1.0.<run>.0)
+          $parts = (Get-Content package.json | ConvertFrom-Json).version.Split('.')
+          $v = "$($parts[0]).$($parts[1]).${{ github.run_number }}"
           # Partner Center → Product identity (repository variables override these).
           $id = if ("${{ vars.MSIX_IDENTITY_NAME }}") { "${{ vars.MSIX_IDENTITY_NAME }}" } else { "EngineeringWorkspace.SurgeSpace" }
           $pub = if ("${{ vars.MSIX_PUBLISHER }}") { "${{ vars.MSIX_PUBLISHER }}" } else { "CN=7383AB48-1669-4729-94F1-696779C5DEAF" }
           $disp = if ("${{ vars.MSIX_PUBLISHER_DISPLAY }}") { "${{ vars.MSIX_PUBLISHER_DISPLAY }}" } else { "Engineering Workspace" }
-          ./msix/pack.ps1 -IdentityName $id -Publisher $pub -PublisherDisplay $disp -Version "$v.${{ github.run_number }}"
+          ./msix/pack.ps1 -IdentityName $id -Publisher $pub -PublisherDisplay $disp -Version "$v.0"
       - uses: actions/upload-artifact@v4
         with: { name: SurgeSpace-MicrosoftStore, path: msix/*.msix }
 
