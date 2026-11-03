@@ -76,7 +76,7 @@ export function ImportDialog({ onClose, onImport }: { onClose: () => void; onImp
               <button className="btn small" onClick={() => readFile('.xlsx', (f) => xlsx(f).catch(fail))}>Upload Excel (.xlsx)</button>
               <button className="btn small" onClick={() => readFile('.csv,.txt', (f) => f.text().then(setNodesText))}>Nodes CSV…</button>
               <button className="btn small" onClick={() => readFile('.csv,.txt', (f) => f.text().then(setPipesText))}>Pipes CSV…</button>
-              <button className="btn small ghost" onClick={() => { download('surgelite-nodes-template.csv', NODE_TEMPLATE.replace(/\t/g, ',')); download('surgelite-pipes-template.csv', PIPE_TEMPLATE.replace(/\t/g, ',')); }}>Download templates</button>
+              <button className="btn small ghost" onClick={() => { download('surgespace-nodes-template.csv', NODE_TEMPLATE.replace(/\t/g, ',')); download('surgespace-pipes-template.csv', PIPE_TEMPLATE.replace(/\t/g, ',')); }}>Download templates</button>
             </div>
             <div className="grid2">
               <label className="field"><span>Nodes ({Math.max(parseTable(nodesText).length - 1, 0)} rows)</span><textarea rows={9} value={nodesText} onChange={(e) => setNodesText(e.target.value)} /></label>
@@ -88,7 +88,7 @@ export function ImportDialog({ onClose, onImport }: { onClose: () => void; onImp
 
         {tab === 'profile' && (
           <div>
-            <p className="small muted">Paste a long-section (chainage and pipe level, optionally diameter in mm). SurgeLite keeps every point, puts nodes at high and low points, adds air valves at the high points, and builds the source and delivery ends.</p>
+            <p className="small muted">Paste a long-section (chainage and pipe level, optionally diameter in mm). SurgeSpace keeps every point, puts nodes at high and low points, adds air valves at the high points, and builds the source and delivery ends.</p>
             <textarea rows={8} value={profText} onChange={(e) => setProfText(e.target.value)} />
             <div className="grid2" style={{ marginTop: 8 }}>
               <label className="field"><span>Upstream end</span>

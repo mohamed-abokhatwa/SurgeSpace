@@ -1,4 +1,4 @@
-// SurgeLite against Bentley HAMMER (engine 08.11.06.113) on the BWSN-1 network ("Tnet3" in the TSNet repository,
+// SurgeSpace against Bentley HAMMER (engine 08.11.06.113) on the BWSN-1 network ("Tnet3" in the TSNet repository,
 // which ships the HAMMER project and its text report). Event, from the HAMMER database: PUMP-172's speed is forced
 // linearly from 100 % to 0 over 2 s; wave speed 1200 m/s in every pipe; 20 s; steady friction.
 // Compared: steady heads, and the maximum and minimum head HAMMER reports at every pipe end.
@@ -34,7 +34,7 @@ pipeInfo.forEach((p, k) => {
 });
 const ext = summary.map((c) => ({ key: c[0], pipe: c[0].split(':')[0], node: c[0].split(':')[1], maxH: +c[3] * FT, minH: +c[4] * FT }));
 
-// SurgeLite model from the same network
+// SurgeSpace model from the same network
 const { network: net } = parseInp(readFileSync(inpPath, 'utf8'), 'Tnet3');
 const e = JSON.parse(readFileSync(t0Path, 'utf8')).epanet;
 for (const n of net.nodes) {
@@ -80,7 +80,7 @@ const big = (a: number[]) => Math.max(...a);
 const top = (key: 'maxH' | 'minH', sign: number) => rows.reduce((b, r) => (sign * r[key] > sign * b[key] ? r : b), rows[0]);
 
 console.log(`Network: ${net.nodes.length} nodes, ${net.pipes.length} pipes, ${net.pumps.length} pumps, ${net.valves.length} valves; ${rows.length} pipe ends compared`);
-console.log(`SurgeLite: dt ${res.dt.toExponential(3)} s, ${res.reaches} reaches, wave speeds changed by at most ${(res.maxAdjust * 100).toFixed(2)} %, ${(ms / 1000).toFixed(1)} s`);
+console.log(`SurgeSpace: dt ${res.dt.toExponential(3)} s, ${res.reaches} reaches, wave speeds changed by at most ${(res.maxAdjust * 100).toFixed(2)} %, ${(ms / 1000).toFixed(1)} s`);
 console.log(`HAMMER:    dt 0.002 s (user-set), wave speed adjustment limit 50 %; its log warns the adjustments "deviate excessively"`);
 console.log(`steady head      : mean |diff| ${dSteady.mean.toFixed(2)} m, 95th pct ${dSteady.p95.toFixed(2)} m, worst ${dSteady.max.toFixed(2)} m`);
 console.log(`maximum head     : mean |diff| ${dMax.mean.toFixed(2)} m, 95th pct ${dMax.p95.toFixed(2)} m, worst ${dMax.max.toFixed(2)} m   (largest rise in HAMMER ${big(rise).toFixed(1)} m)`);
@@ -91,8 +91,8 @@ const within = (d: number) => {
 };
 console.log(`pipe ends where both max and min agree within 1 m: ${within(1)}, within 2 m: ${within(2)}, within 3 m: ${within(3)}, within 5 m: ${within(5)}`);
 const hiH = top('maxH', 1), loH = top('minH', -1);
-console.log(`network max head : HAMMER ${hiH.maxH.toFixed(2)} m at ${hiH.key}; SurgeLite there ${hiH.maxS.toFixed(2)} m`);
-console.log(`network min head : HAMMER ${loH.minH.toFixed(2)} m at ${loH.key}; SurgeLite there ${loH.minS.toFixed(2)} m`);
+console.log(`network max head : HAMMER ${hiH.maxH.toFixed(2)} m at ${hiH.key}; SurgeSpace there ${hiH.maxS.toFixed(2)} m`);
+console.log(`network min head : HAMMER ${loH.minH.toFixed(2)} m at ${loH.key}; SurgeSpace there ${loH.minS.toFixed(2)} m`);
 if (process.env.LIST) {
   rows.sort((a, b) => Math.abs(b.maxS - b.maxH) + Math.abs(b.minS - b.minH) - Math.abs(a.maxS - a.maxH) - Math.abs(a.minS - a.minH));
   for (const r of rows.slice(0, Number(process.env.LIST))) console.log(`${r.key.padEnd(26)} h0 ${r.h0H.toFixed(1)}/${r.h0S.toFixed(1)}  max ${r.maxH.toFixed(1)}/${r.maxS.toFixed(1)}  min ${r.minH.toFixed(1)}/${r.minS.toFixed(1)}`);

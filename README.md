@@ -1,4 +1,4 @@
-# SurgeLite
+# SurgeSpace
 
 Surge (water hammer) analysis for pipelines and networks, in the browser.
 

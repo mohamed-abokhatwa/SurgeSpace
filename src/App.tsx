@@ -11,6 +11,8 @@ import { MapView, surgeScale, type ColorMode, type Selection } from './ui/MapVie
 import { Timeline } from './ui/Timeline';
 import { ChecksView, EventPanel, Inspector, ModelPanel, ProtectionPanel, SettingsPanel } from './ui/panels';
 import { ProfileView } from './ui/ProfileView';
+import { LicenceDialog, useLicence } from './license/LicenceDialog';
+import { initLicence, planLabel } from './license/licence';
 import { defaultRoute, download, findPath, fmt, pressureColor } from './ui/util';
 
 type SideTab = 'model' | 'event' | 'protection' | 'settings';
@@ -31,7 +33,16 @@ const Logo = () => (
 export default function App() {
   const [net, setNetRaw] = useState<Network>(() => EXAMPLES[0].make());
   const [stale, setStale] = useState(true);
-  const setNet = useCallback((f: (n: Network) => Network) => { setNetRaw(f); setStale(true); }, []);
+  // built-in examples run on every plan; editing one makes it the user's own model
+  const isExample = useRef(true);
+  const setNet = useCallback((f: (n: Network) => Network) => { setNetRaw(f); setStale(true); isExample.current = false; }, []);
+  const lic = useLicence();
+  const licRef = useRef(lic);
+  licRef.current = lic;
+  const [licReason, setLicReason] = useState<string | null | undefined>(undefined); // undefined = dialog closed
+  useEffect(() => { void initLicence(); }, []);
+  /** True when the plan includes the feature; otherwise opens the licence dialog with the reason. */
+  const allowed = (ok: boolean, reason: string) => { if (!ok) setLicReason(reason); return ok; };
   const [result, setResult] = useState<TransientResult | null>(null);
   const [checks, setChecks] = useState<Check[]>([]);
   const [unc, setUnc] = useState<UncertaintyOut | null>(null);
@@ -59,6 +70,11 @@ export default function App() {
   }, [theme]);
 
   const run = useCallback(async (n: Network = net) => {
+    const f = licRef.current.features;
+    if (!isExample.current && n.pipes.length > f.maxPipes) {
+      setLicReason(`This model has ${n.pipes.length} pipes. The Free plan runs your own models up to ${f.maxPipes} pipes (built-in examples run at any size). Start a free trial or activate a licence to run it.`);
+      return;
+    }
     setBusy('Running…');
     setPlaying(false);
     try {
@@ -109,7 +125,8 @@ export default function App() {
     return () => cancelAnimationFrame(raf);
   }, [playing, result, speed]);
 
-  const load = (n: Network, notes: string[] = []) => {
+  const load = (n: Network, notes: string[] = [], example = false) => {
+    isExample.current = example;
     setNetRaw(n);
     setStale(true);
     setResult(null);
@@ -135,6 +152,7 @@ export default function App() {
   }, [result]);
 
   const doUncertainty = async () => {
+    if (!allowed(lic.features.uncertainty, 'Uncertainty (worst-case) analysis is part of SurgeSpace Pro.')) return;
     setBusy('Uncertainty runs…');
     try {
       const out = await call<{ uncertainty: UncertaintyOut; checks: Check[] }>({ type: 'uncertainty', net }, (m) => setBusy(m));
@@ -143,6 +161,7 @@ export default function App() {
     } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
   };
   const doSize = async (node: string) => {
+    if (!allowed(lic.features.protectionSizing, 'Automatic surge vessel sizing is part of SurgeSpace Pro.')) return;
     setBusy('Sizing surge vessel…');
     try {
       const out = await call<{ sizing: VesselSizing }>({ type: 'sizeVessel', net, node }, (m) => setBusy(`Sizing surge vessel · ${m}`));
@@ -150,6 +169,7 @@ export default function App() {
     } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
   };
   const doAir = async () => {
+    if (!allowed(lic.features.protectionSizing, 'Automatic air valve sizing is part of SurgeSpace Pro.')) return;
     setBusy('Sizing air valves…');
     try {
       const out = await call<{ airValves: AirValveSuggestion[] }>({ type: 'airValves', net }, (m) => setBusy(m));
@@ -221,7 +241,8 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand"><Logo /> SurgeLite <small>beta</small></div>
+        <div className="brand"><Logo /> SurgeSpace</div>
+        <button className={`plan-badge ${lic.plan}`} onClick={() => setLicReason(null)} title="Licence">{lic.checking ? '…' : planLabel(lic)}</button>
         <div className="project-name" title={net.description}>{net.name}</div>
         <div style={{ position: 'relative' }}>
           <button className="btn" onClick={() => setExamplesOpen((v) => !v)}>Examples ▾</button>
@@ -230,7 +251,7 @@ export default function App() {
               {EXAMPLES.map((ex) => {
                 const n = ex.make();
                 return (
-                  <button key={ex.id} className="btn ghost" style={{ width: '100%', justifyContent: 'flex-start', height: 'auto', padding: '8px 10px', flexDirection: 'column', alignItems: 'flex-start' }} onClick={() => { setExamplesOpen(false); load(n); }}>
+                  <button key={ex.id} className="btn ghost" style={{ width: '100%', justifyContent: 'flex-start', height: 'auto', padding: '8px 10px', flexDirection: 'column', alignItems: 'flex-start' }} onClick={() => { setExamplesOpen(false); load(n, [], true); }}>
                     <b>{n.name}</b>
                     <span className="small muted" style={{ whiteSpace: 'normal', textAlign: 'left', fontWeight: 400 }}>{n.description}</span>
                   </button>
@@ -244,7 +265,7 @@ export default function App() {
         <button className="btn" onClick={() => {
           const i = document.createElement('input');
           i.type = 'file'; i.accept = '.json';
-          i.onchange = () => i.files?.[0]?.text().then((t) => { try { load(JSON.parse(t)); } catch { setToast(['That file is not a SurgeLite project.']); } });
+          i.onchange = () => i.files?.[0]?.text().then((t) => { try { load(JSON.parse(t)); } catch { setToast(['That file is not a SurgeSpace project.']); } });
           i.click();
         }} title="Open project">Open</button>
         <button className="btn ghost" onClick={() => setTheme(theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto')} title="Theme">{theme === 'auto' ? '◐' : theme === 'dark' ? '☾' : '☀'}</button>
@@ -325,7 +346,7 @@ export default function App() {
                   {bottom === 'checks' && <ChecksView checks={checks} onFocus={(c) => { if (c.where?.pipe) select({ type: 'pipe', id: c.where.pipe }); else if (c.where?.node) select({ type: 'node', id: c.where.node }); setMode(c.title.toLowerCase().includes('minimum') || c.title.toLowerCase().includes('column') ? 'min' : 'max'); }} />}
                   {bottom === 'uncertainty' && (
                     <div>
-                      <p className="small muted" style={{ marginTop: 0 }}>Inputs are never exact. SurgeLite re-runs the case with wave speed ±10 %, valve stroke ±20 % or pump inertia ±15 %, and at half the time step when the water column separates, then reports the worst case. The profile and map show the worst-case envelope once this has run.</p>
+                      <p className="small muted" style={{ marginTop: 0 }}>Inputs are never exact. SurgeSpace re-runs the case with wave speed ±10 %, valve stroke ±20 % or pump inertia ±15 %, and at half the time step when the water column separates, then reports the worst case. The profile and map show the worst-case envelope once this has run.</p>
                       <button className="btn primary" disabled={!!busy} onClick={doUncertainty}>Run uncertainty analysis</button>
                       {unc && (
                         <>
@@ -355,7 +376,7 @@ export default function App() {
                       </div>
                       <div className="label">How this engine goes beyond a standard MOC solver</div>
                       <table className="grid">
-                        <thead><tr><th>Topic</th><th>Typical fixed-grid MOC (HAMMER defaults)</th><th>SurgeLite</th></tr></thead>
+                        <thead><tr><th>Topic</th><th>Typical fixed-grid MOC (HAMMER defaults)</th><th>SurgeSpace</th></tr></thead>
                         <tbody>
                           <tr><td>Pipe geometry</td><td>Lengths or wave speeds stretched to fit the time step; warning only above 75 %</td><td>Lengths kept; wave speeds within {(net.settings.maxAdjust * 100).toFixed(1)} % (this run: {(result.maxAdjust * 100).toFixed(3)} %); very short pipes as rigid columns</td></tr>
                           <tr><td>Column separation</td><td>Vapour cavity at computing points</td><td>Discrete gas cavity model (free gas {net.settings.gasFraction}), closed-form at every section</td></tr>
@@ -376,8 +397,9 @@ export default function App() {
                         </tbody>
                       </table>
                       <div className="row" style={{ gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-                        <button className="btn small" onClick={() => download(`${net.name.replace(/[^\w-]+/g, '_')}.inp`, toInp(net))}>Export EPANET (.inp)</button>
+                        <button className="btn small" onClick={() => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${net.name.replace(/[^\w-]+/g, '_')}.inp`, toInp(net))}>Export EPANET (.inp)</button>
                         <button className="btn small" onClick={() => {
+                          if (!allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.')) return;
                           const rows = ['pipe,chainage_m,elevation_m,steady_head_m,max_head_m,min_head_m,max_pressure_m,min_pressure_m,cavity_L'];
                           for (const e of result.envelopes) for (let i = 0; i < e.s.length; i++) rows.push([e.id, e.s[i].toFixed(2), e.z[i].toFixed(3), e.hSteady[i].toFixed(3), e.hMax[i].toFixed(3), e.hMin[i].toFixed(3), (e.hMax[i] - e.z[i]).toFixed(3), (e.hMin[i] - e.z[i]).toFixed(3), (e.cavMax[i] * 1000).toFixed(2)].join(','));
                           download(`${net.name.replace(/[^\w-]+/g, '_')}-envelopes.csv`, rows.join('\n'), 'text/csv');
@@ -391,6 +413,7 @@ export default function App() {
           </div>
         </section>
       </div>
+      {licReason !== undefined && <LicenceDialog reason={licReason ?? undefined} onClose={() => setLicReason(undefined)} />}
       {importing && <ImportDialog onClose={() => setImporting(false)} onImport={(n, notes) => { setImporting(false); load(n, notes); }} />}
       {toast && (
         <div className="card small" style={{ position: 'fixed', right: 16, bottom: 16, maxWidth: 420, zIndex: 60 }}>

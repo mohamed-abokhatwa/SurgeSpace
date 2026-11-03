@@ -1,4 +1,4 @@
-// Compares SurgeLite's steady state with EPANET 2.2 (via WNTR) on real networks.
+// Compares SurgeSpace's steady state with EPANET 2.2 (via WNTR) on real networks.
 // Demands and pump on/off states are taken from EPANET's own t = 0 solution, so the comparison isolates the solver.
 import { readFileSync } from 'fs';
 import { parseInp } from '../src/engine/inp';

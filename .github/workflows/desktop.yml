@@ -1,0 +1,75 @@
+# Builds the desktop apps on GitHub's machines:
+#   • Windows → SurgeSpace_<version>.msix for the Microsoft Store (licensing through the Store)
+#   • macOS   → universal SurgeSpace.dmg, signed and notarized when the Apple secrets are set
+# Run it from the Actions tab ("Run workflow") or by pushing a tag such as v1.0.0.
+name: Desktop builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+env:
+  VITE_LICENSE_API: ${{ vars.VITE_LICENSE_API }}
+  VITE_LICENSE_PUBKEY: ${{ vars.VITE_LICENSE_PUBKEY }}
+  VITE_BUY_URL: ${{ vars.VITE_BUY_URL }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npx tsx tests/engine.test.ts
+      - run: npx tsx tests/license.test.ts
+
+  windows-store:
+    needs: test
+    runs-on: windows-latest
+    env:
+      VITE_STORE_PRO_ADDON: ${{ vars.STORE_PRO_ADDON_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - run: npm ci
+      - run: npx tauri build --no-bundle
+      - name: Package MSIX
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json | ConvertFrom-Json).version
+          if ($v -eq '0.0.0') { $v = '1.0.0' }
+          ./msix/pack.ps1 -IdentityName "${{ vars.MSIX_IDENTITY_NAME }}" -Publisher "${{ vars.MSIX_PUBLISHER }}" -PublisherDisplay "${{ vars.MSIX_PUBLISHER_DISPLAY }}" -Version "$v.${{ github.run_number }}"
+      - uses: actions/upload-artifact@v4
+        with: { name: SurgeSpace-MicrosoftStore, path: msix/*.msix }
+
+  macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: 'aarch64-apple-darwin,x86_64-apple-darwin' }
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - run: npm ci
+      - name: Build, sign and notarize
+        run: npx tauri build --target universal-apple-darwin
+        env:
+          # Leave these secrets unset for an unsigned test build.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - uses: actions/upload-artifact@v4
+        with: { name: SurgeSpace-macOS, path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg }

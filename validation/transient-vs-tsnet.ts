@@ -1,6 +1,6 @@
-// Compares SurgeLite transients with TSNet (open-source MOC, Univ. of Texas) on a real EPANET network.
+// Compares SurgeSpace transients with TSNet (open-source MOC, Univ. of Texas) on a real EPANET network.
 // Both codes run the same .inp file: a gate valve inserted in the busiest main is closed linearly over 2 s.
-// TSNet's adjusted wave speeds are used in SurgeLite too, and friction is held at steady values as TSNet does,
+// TSNet's adjusted wave speeds are used in SurgeSpace too, and friction is held at steady values as TSNet does,
 // so any difference comes from the solvers themselves.
 // Usage: npx tsx validation/transient-vs-tsnet.ts <name>_valve.inp <name>_tsnet.json
 import { readFileSync } from 'fs';
@@ -39,7 +39,7 @@ const res = runTransient(net, { constantFriction: true, noCavitation: true, fram
 const ms = performance.now() - t0;
 if (!res.ok) throw new Error('run failed');
 console.log(`${net.nodes.length} nodes, ${net.pipes.length} pipes, ${net.pumps.length} pumps, ${net.valves.length} valves`);
-console.log(`SurgeLite: dt ${res.dt.toExponential(3)} s, ${res.reaches} reaches, max wave-speed adjustment ${(res.maxAdjust * 100).toFixed(2)} %, ${ms.toFixed(0)} ms`);
+console.log(`SurgeSpace: dt ${res.dt.toExponential(3)} s, ${res.reaches} reaches, max wave-speed adjustment ${(res.maxAdjust * 100).toFixed(2)} %, ${ms.toFixed(0)} ms`);
 console.log(`TSNet:     dt ${ref.dt.toExponential(3)} s`);
 if (res.rigidPipes.length) console.log(`rigid pipes: ${res.rigidPipes.length}`);
 
@@ -54,7 +54,7 @@ const rows: string[] = [];
 let worstPeak = 0, rmsAll = 0, nAll = 0;
 for (const [id, hRef] of Object.entries(ref.heads)) {
   const mine = res.nodeHead[id];
-  if (!mine) { rows.push(`${id}: missing in SurgeLite`); continue; }
+  if (!mine) { rows.push(`${id}: missing in SurgeSpace`); continue; }
   const h0r = hRef[0];
   const h0m = mine[0];
   let amp = 0, se = 0, maxR = -Infinity, maxM = -Infinity, minR = Infinity, minM = Infinity;
@@ -72,7 +72,7 @@ for (const [id, hRef] of Object.entries(ref.heads)) {
   rmsAll += (rms / Math.max(amp, 1e-6)) ** 2; nAll++;
   rows.push(`${id.padEnd(6)} steady ${h0r.toFixed(2).padStart(7)} vs ${h0m.toFixed(2).padStart(7)} m | rise ${maxR.toFixed(2).padStart(7)} vs ${maxM.toFixed(2).padStart(7)} | drop ${minR.toFixed(2).padStart(7)} vs ${minM.toFixed(2).padStart(7)} | RMS ${rms.toFixed(2)} m (${((rms / amp) * 100).toFixed(1)} % of surge)`);
 }
-console.log('node   steady head TSNet vs SurgeLite | surge rise (m) | surge drop (m) | RMS difference over the run');
+console.log('node   steady head TSNet vs SurgeSpace | surge rise (m) | surge drop (m) | RMS difference over the run');
 rows.forEach((r) => console.log(r));
 console.log(`worst peak difference ${(worstPeak * 100).toFixed(1)} % of that node's surge; mean RMS ${(Math.sqrt(rmsAll / nAll) * 100).toFixed(1)} %`);
 if (process.env.TRACE) {

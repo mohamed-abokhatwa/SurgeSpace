@@ -1,4 +1,4 @@
-// SurgeLite network model. SI units throughout the engine: m, s, m³/s, m (head), kg·m², Pa.
+// SurgeSpace network model. SI units throughout the engine: m, s, m³/s, m (head), kg·m², Pa.
 
 export const G = 9.80665;
 export const RHO = 998.2; // water at 20 °C, kg/m³
@@ -125,7 +125,7 @@ export interface Settings {
   friction: 'DW' | 'HW';
   /** Simulation length, s. */
   duration: number;
-  /** Maximum allowed wave-speed adjustment (fraction). SurgeLite default 0.005 (0.5 %). */
+  /** Maximum allowed wave-speed adjustment (fraction). SurgeSpace default 0.005 (0.5 %). */
   maxAdjust: number;
   /** Upper limit on computational reaches (performance). */
   maxReaches: number;

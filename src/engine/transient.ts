@@ -1,4 +1,4 @@
-// SurgeLite transient engine: method of characteristics on exact geometry.
+// SurgeSpace transient engine: method of characteristics on exact geometry.
 //
 // What it does better than a plain fixed-grid MOC:
 //  • Exact geometry: the time step is chosen so every pipe's wave speed is adjusted by less than
