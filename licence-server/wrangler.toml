@@ -1,16 +1,16 @@
-# SurgeSpace licence server. Its own Worker and D1 database, separate from Engineering Workspace's.
+# SurgeSpace licence server. Its own Worker, D1 database and hostname, so it can never affect
+# Engineering Workspace (Worker "engspace-licences" on lic.engspace.app).
 name = "surgespace-licence"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
-
-# Served under lic.engspace.app/surgespace/* (a more specific route than Engineering Workspace's, so the two never mix).
-routes = [{ pattern = "lic.engspace.app/surgespace*", zone_name = "engspace.app" }]
+workers_dev = false
+routes = [{ pattern = "surgespace-licences.engspace.app", custom_domain = true }]
 
 [vars]
-BASE = "/surgespace"
+BASE = ""
 
 [[d1_databases]]
 binding = "DB"
 database_name = "surgespace-licences"
-database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+database_id = "5139398f-6eda-47d0-ab25-4dcd5a0bccc2"
 migrations_dir = "migrations"

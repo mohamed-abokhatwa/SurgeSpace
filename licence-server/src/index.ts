@@ -1,4 +1,4 @@
-// SurgeSpace licence server — Cloudflare Worker at lic.engspace.app/surgespace (its own Worker and D1 database).
+// SurgeSpace licence server — Cloudflare Worker at surgespace-licences.engspace.app (its own Worker, D1 database and hostname).
 //   App:   POST /activate /checkin /trial /trial/more /request /feedback
 //   Admin: GET  /               the admin page
 //          GET|POST /admin/*    needs the header x-admin-token (secret ADMIN_TOKEN)
@@ -32,7 +32,7 @@ function sameToken(a: string, b: string) {
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    const base = (env.BASE ?? '/surgespace').replace(/\/$/, '');
+    const base = (env.BASE ?? '').replace(/\/$/, '');
     if (!url.pathname.startsWith(base)) return new Response('Not found', { status: 404 });
     const path = url.pathname.slice(base.length) || '/';
 

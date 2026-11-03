@@ -1,4 +1,4 @@
-// SurgeSpace licensing core, shared by the app and the licence server (lic.engspace.app/surgespace).
+// SurgeSpace licensing core, shared by the app and the licence server (surgespace-licences.engspace.app).
 //
 //   • The seller issues a licence code (SSL-XXXX-XXXX-XXXX) on the server's admin page.
 //   • The app sends the code and its Machine ID; the server binds the computer and returns a KEY: a small

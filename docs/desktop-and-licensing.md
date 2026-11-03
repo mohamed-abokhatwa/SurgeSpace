@@ -2,7 +2,7 @@
 
 SurgeSpace licensing works like Engineering Workspace's, on its own server and database (nothing is shared):
 
-| You (admin page, lic.engspace.app/surgespace/) | The customer (SurgeSpace app) |
+| You (admin page, https://surgespace-licences.engspace.app/) | The customer (SurgeSpace app) |
 |---|---|
 | **Issue a licence**: name, email, personal or company (seats), paid until or perpetual → code `SSL-XXXX-XXXX-XXXX` | Licence → enters the code → **Activate**. The server records the computer (Machine ID, computer name, platform, version). |
 | **Extend**: new end date. No new code needed. | The app checks in once a day and picks the new date up. |
@@ -20,7 +20,14 @@ cannot be forged or edited. Winding the clock back does not extend a key.
 Plans in the app: **Free** (examples at any size, own models up to 25 pipes, no auto-sizing, uncertainty or export),
 **Evaluation**, **Personal** and **Company** (everything).
 
-## Deploy the licence server (once, about 15 minutes)
+## Live setup
+
+- Server: Worker **surgespace-licence**, D1 database **surgespace-licences**, address
+  **https://surgespace-licences.engspace.app** (admin page at the root). It is separate from Engineering Workspace's
+  Worker `engspace-licences` on lic.engspace.app, which is not touched.
+- The admin token and signing key are Worker secrets. To redeploy after code changes: `cd licence-server && npm run deploy`.
+
+## Deploy from scratch (reference)
 
 You need the Cloudflare account that hosts engspace.app. In `licence-server/`:
 
@@ -49,14 +56,14 @@ cd .. && npx tsx -e "import {publicKeyOf} from './src/license/core'; publicKeyOf
 It goes in `src/license/publicKey.ts` (`PUBLIC_KEY`). Until then the app runs in demo mode, with the server rules running
 inside the app.
 
-The Worker is served at `lic.engspace.app/surgespace*`. That route is more specific than Engineering Workspace's, so the
-two never mix. Open `https://lic.engspace.app/surgespace/` and enter the admin token.
+The Worker has its own hostname (custom domain in `wrangler.toml`), so it never shares a hostname with Engineering
+Workspace. Open the admin page and enter the admin token.
 
 Optional email notifications (licence requests, "more time" requests that wait for you, Tell us messages) use
 [Resend](https://resend.com): `wrangler secret put RESEND_API_KEY`, `MAIL_TO` (your inbox) and `MAIL_FROM`
 (a verified sender, e.g. `SurgeSpace <licence@engspace.app>`).
 
-Your website's licence form can post to `https://lic.engspace.app/surgespace/request` with JSON
+Your website's licence form can post to `https://surgespace-licences.engspace.app/request` with JSON
 `{ kind: "personal" | "company" | "question", name, company, email, note, source: "website" }`.
 
 ## Desktop apps
