@@ -319,6 +319,27 @@ export function MapView({
       ctx.restore();
     }
 
+    // check valves in pipes: a filled arrow near the start of the pipe pointing the allowed way, dark when shut
+    for (const p of net.pipes) {
+      if (!p.checkValve) continue;
+      const a = geo.pos.get(p.from), b = geo.pos.get(p.to);
+      if (!a || !b) continue;
+      const ax = X(a.x), ay = Y(a.y), bx = X(b.x), by = Y(b.y);
+      const len = Math.hypot(bx - ax, by - ay) || 1;
+      const off = Math.min(22, len * 0.3);
+      const cx = ax + ((bx - ax) * off) / len, cy = ay + ((by - ay) * off) / len;
+      const ang = Math.atan2(by - ay, bx - ax);
+      const cv = result?.checkValves?.[p.id];
+      const shut = !!cv && live && cv.opening[f0] < 0.01;
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
+      ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-4, -5); ctx.lineTo(-4, 5); ctx.closePath();
+      ctx.fillStyle = shut ? theme.bad : theme.panel; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(5, -5); ctx.lineTo(5, 5);
+      ctx.strokeStyle = sel?.type === 'pipe' && sel.id === p.id ? theme.accent : theme.text; ctx.lineWidth = 1.4; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-4, -5); ctx.lineTo(-4, 5); ctx.closePath(); ctx.stroke();
+      ctx.restore();
+    }
+
     // nodes
     const many = net.nodes.length > 400;
     const showLabels = net.nodes.length < 70 || geo.typical * s > 70;
@@ -396,7 +417,46 @@ export function MapView({
         ctx.fillStyle = flowing ? (dev === n.relief ? theme.bad : theme.accent) : theme.panel; ctx.fill(); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(vx, vy - 5); ctx.lineTo(vx, vy - 12); ctx.moveTo(vx - 3, vy - 9); ctx.lineTo(vx, vy - 12); ctx.lineTo(vx + 3, vy - 9); ctx.stroke();
       }
+      // discharge to atmosphere / rupture disk: nozzle pointing down, lit while discharging
+      if (n.outlet) {
+        const o = result?.outlets?.[n.id];
+        const flowing = !!o && live && o.flow[f0] > 1e-5;
+        const ox2 = x + 10, oy2 = y + 6;
+        ctx.strokeStyle = n.outlet.trigger === 'pressure' ? theme.bad : theme.cyan; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ox2, oy2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ox2 - 4, oy2); ctx.lineTo(ox2 + 4, oy2); ctx.lineTo(ox2 + 2, oy2 + 6); ctx.lineTo(ox2 - 2, oy2 + 6); ctx.closePath();
+        ctx.fillStyle = flowing ? ctx.strokeStyle : theme.panel; ctx.fill(); ctx.stroke();
+        if (n.outlet.trigger === 'pressure' && !flowing) { ctx.beginPath(); ctx.moveTo(ox2 - 4, oy2 + 3); ctx.lineTo(ox2 + 4, oy2 + 3); ctx.stroke(); }
+        if (flowing) for (let k = 0; k < 3; k++) { const u = ((now / 400) + k / 3) % 1; ctx.beginPath(); ctx.arc(ox2 + (k - 1) * 2, oy2 + 8 + u * 8, 1.2, 0, Math.PI * 2); ctx.fillStyle = theme.cyan; ctx.globalAlpha = 1 - u; ctx.fill(); ctx.globalAlpha = 1; }
+      }
       if (showLabels || isSel) { ctx.fillStyle = theme.muted; ctx.fillText(n.id, x + 7, y + 14); }
+    }
+
+    // slams (check valve or air valve closing on moving water): red burst for a second after each one
+    if (result && live && result.slams?.length) {
+      ctx.font = '600 11px IBM Plex Sans, system-ui';
+      for (const sl of result.slams) {
+        const age = tNow - sl.t;
+        if (age < 0 || age > 1.2 || sl.joukowsky < 0.5) continue;
+        const pp = geo.pos.get(sl.node) ?? geo.pos.get(net.pipes.find((q) => q.id === sl.id)?.from ?? '') ?? (() => { const pu = net.pumps.find((q) => q.id === sl.id); return pu ? geo.pos.get(pu.to) : undefined; })();
+        if (!pp) continue;
+        const x = X(pp.x), y = Y(pp.y), u = age / 1.2;
+        for (let k = 0; k < 2; k++) {
+          const uu = Math.min(1, u * 1.6 + k * 0.25);
+          ctx.beginPath(); ctx.arc(x, y, 6 + uu * 34, 0, Math.PI * 2);
+          ctx.strokeStyle = theme.bad; ctx.globalAlpha = (1 - uu) * 0.9; ctx.lineWidth = 3 - k; ctx.stroke();
+        }
+        ctx.globalAlpha = Math.max(0, 1 - u);
+        for (let k = 0; k < 8; k++) {
+          const a2 = (k * Math.PI) / 4, r1 = 7 + u * 6, r2 = 12 + u * 14;
+          ctx.beginPath(); ctx.moveTo(x + Math.cos(a2) * r1, y + Math.sin(a2) * r1); ctx.lineTo(x + Math.cos(a2) * r2, y + Math.sin(a2) * r2); ctx.strokeStyle = theme.bad; ctx.lineWidth = 2; ctx.stroke();
+        }
+        const label = `${sl.kind === 'airValve' ? 'Air-valve' : 'Check-valve'} slam +${sl.joukowsky.toFixed(0)} m`;
+        const tw2 = ctx.measureText(label).width + 10;
+        ctx.fillStyle = theme.bad; ctx.beginPath(); ctx.roundRect(x + 14, y - 34, tw2, 18, 4); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.fillText(label, x + 19, y - 21);
+        ctx.globalAlpha = 1;
+      }
     }
 
     // event pulse: rings spread from the valve or pump when the event starts
@@ -420,7 +480,7 @@ export function MapView({
         }
       }
     }
-  }, [theme, size, geo, result, envMap, sScale, lut, pumpGroups, net.valves, net.nodes, net.event, net.pumps, net.settings.minPressure]);
+  }, [theme, size, geo, result, envMap, sScale, lut, pumpGroups, net.valves, net.nodes, net.event, net.pumps, net.pipes, net.settings.minPressure]);
 
   // redraw on any change; keep animating while flow dashes or live playback are on.
   // In the envelope modes the picture does not depend on time, so playback does not trigger redraws.

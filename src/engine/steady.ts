@@ -2,6 +2,8 @@
 // Gives the initial heads and flows for the transient.
 import { pipeR, pumpCurve, valveKv } from './hydraulics';
 import { area, type Network } from './types';
+import { valveArea } from './devices';
+import { prepareNetwork } from './prepare';
 
 export interface SteadyResult {
   heads: Map<string, number>;
@@ -9,6 +11,8 @@ export interface SteadyResult {
   iterations: number;
   converged: boolean;
   warnings: string[];
+  /** Relative flow area of every valve in this steady state (control valves: the opening that meets the set point). */
+  openings: Map<string, number>;
 }
 
 interface Link {
@@ -19,7 +23,62 @@ interface Link {
   ref: number;
 }
 
-export function solveSteady(net: Network): SteadyResult {
+export function solveSteady(netIn: Network): SteadyResult {
+  const net = prepareNetwork(netIn);
+  const areas = new Map(net.valves.map((v) => [v.id, valveArea(v, v.opening)] as [string, number]));
+  const ctl = net.valves.filter((v) => v.control && v.opening > 0);
+  if (!ctl.length) return solveFixed(net, areas);
+  // control valves: find each opening that meets its set point (the residual rises with the opening), sweeping
+  // over the valves until the openings settle
+  const idx = new Map(net.nodes.map((n) => [n.id, n]));
+  const resid = (r: SteadyResult, v: (typeof ctl)[number]) => {
+    const c = v.control!;
+    if (c.type === 'PRV') return r.heads.get(v.to)! - idx.get(v.to)!.elev - c.set;
+    if (c.type === 'PSV') return c.set - (r.heads.get(v.from)! - idx.get(v.from)!.elev);
+    return (r.flows.get(v.id) ?? 0) - c.set;
+  };
+  const note = new Map<string, string>();
+  for (let sweep = 0; sweep < 12; sweep++) {
+    let moved = 0;
+    for (const v of ctl) {
+      const at = (a: number) => { areas.set(v.id, a); return resid(solveFixed(net, areas), v); };
+      const old = areas.get(v.id)!;
+      const tol = v.control!.type === 'FCV' ? 1e-7 : 1e-5;
+      let a: number;
+      const rOpen = at(1);
+      if (rOpen <= tol) { a = 1; note.set(v.id, 'fully open: it cannot reach its set point'); }
+      else if (at(0) >= -tol) { a = 0; note.set(v.id, 'closed: the set point is already exceeded with the valve shut'); }
+      else {
+        note.delete(v.id);
+        // Illinois false position on u = log10(area) over [−7, 0]
+        let lo = -7, hi = 0, flo = at(1e-7), fhi = rOpen, side = 0, u = 0;
+        if (flo >= 0) { a = 1e-7; }
+        else {
+          for (let k = 0; k < 60; k++) {
+            u = (lo * fhi - hi * flo) / (fhi - flo);
+            if (!(u > lo && u < hi)) u = (lo + hi) / 2;
+            const f = at(10 ** u);
+            if (Math.abs(f) < tol || hi - lo < 1e-10) break;
+            if (f < 0) { lo = u; flo = f; if (side === -1) fhi /= 2; side = -1; }
+            else { hi = u; fhi = f; if (side === 1) flo /= 2; side = 1; }
+          }
+          a = 10 ** u;
+        }
+      }
+      areas.set(v.id, a);
+      moved = Math.max(moved, Math.abs(Math.log10(Math.max(a, 1e-9)) - Math.log10(Math.max(old, 1e-9))));
+    }
+    if (moved < 1e-5) break;
+  }
+  const r = solveFixed(net, areas);
+  for (const [id, why] of note) {
+    const v = ctl.find((x) => x.id === id)!;
+    r.warnings.push(`Control valve ${v.owner ?? id} (${v.control!.type}) is ${why}.`);
+  }
+  return r;
+}
+
+function solveFixed(net: Network, areas: Map<string, number>): SteadyResult {
   const warnings: string[] = [];
   const idx = new Map(net.nodes.map((n, i) => [n.id, i]));
   const N = net.nodes.length;
@@ -51,7 +110,7 @@ export function solveSteady(net: Network): SteadyResult {
   const closed = links.map((l) => {
     if (l.kind === 'pipe') return !!net.pipes[l.ref].closed;
     if (l.kind === 'pump') return !net.pumps[l.ref].on;
-    return net.valves[l.ref].opening <= 0;
+    return !(areas.get(net.valves[l.ref].id)! > 0);
   });
   const demand = net.nodes.map((n) => (n.kind === 'reservoir' ? 0 : n.demand ?? 0));
   const curves = net.pumps.map((p) => pumpCurve(p));
@@ -82,7 +141,7 @@ export function solveSteady(net: Network): SteadyResult {
         p[k] = 1 / dh;
         y[k] = p[k] * r * q * Math.abs(q);
       } else if (l.kind === 'valve') {
-        const kv = valveKv(net.valves[l.ref], net.valves[l.ref].opening);
+        const kv = valveKv(net.valves[l.ref], areas.get(net.valves[l.ref].id)!);
         const dh = Math.max(2 * kv * Math.abs(q), 1e-7);
         p[k] = 1 / dh;
         y[k] = p[k] * kv * q * Math.abs(q);
@@ -138,7 +197,7 @@ export function solveSteady(net: Network): SteadyResult {
         if (!closed[k] && Q[k] < -1e-6) {
           closed[k] = true;
           statusChanged = true;
-        } else if (closed[k] && H[l.i] > H[l.j] + 1e-3) {
+        } else if (closed[k] && areas.get(l.id)! > 0 && H[l.i] > H[l.j] + 1e-3) {
           closed[k] = false;
           statusChanged = true;
           Q[k] = 1e-3;
@@ -164,6 +223,7 @@ export function solveSteady(net: Network): SteadyResult {
     iterations: it,
     converged,
     warnings,
+    openings: new Map(areas),
   };
 }
 

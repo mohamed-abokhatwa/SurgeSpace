@@ -7,6 +7,7 @@ import type { Network } from './engine/types';
 import { call, cancelAll } from './ui/client';
 import { HistoryView } from './ui/HistoryView';
 import { ImportDialog } from './ui/ImportDialog';
+import { ReportDialog } from './ui/ReportDialog';
 import { MapView, surgeScale, type ColorMode, type Selection } from './ui/MapView';
 import { Timeline } from './ui/Timeline';
 import { ChecksView, EventPanel, Inspector, ModelPanel, ProtectionPanel, SettingsPanel } from './ui/panels';
@@ -61,6 +62,7 @@ export default function App() {
   const [side, setSide] = useState<SideTab>('model');
   const [bottom, setBottom] = useState<BottomTab>('profile');
   const [importing, setImporting] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [toast, setToast] = useState<string[] | null>(null);
   const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>('auto');
   const [examplesOpen, setExamplesOpen] = useState(false);
@@ -270,6 +272,7 @@ export default function App() {
           i.onchange = () => i.files?.[0]?.text().then((t) => { try { load(JSON.parse(t)); } catch { setToast(['That file is not a SurgeSpace project.']); } });
           i.click();
         }} title="Open project">Open</button>
+        <button className="btn" disabled={!result} title={result ? 'Detailed report (print or save as PDF)' : 'Run first'} onClick={() => allowed(lic.features.exportFiles, 'The detailed report is part of SurgeSpace Pro.') && setReporting(true)}>Report</button>
         <button className="btn ghost" onClick={() => setTheme(theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto')} title="Theme">{theme === 'auto' ? '◐' : theme === 'dark' ? '☾' : '☀'}</button>
         <button className="btn primary" disabled={!!busy} onClick={() => run()}>{busy ? 'Running…' : stale && result ? '▶ Run (changed)' : '▶ Run'}</button>
       </header>
@@ -384,7 +387,9 @@ export default function App() {
                           <tr><td>Column separation</td><td>Vapour cavity at computing points</td><td>Discrete gas cavity model (free gas {net.settings.gasFraction}), closed-form at every section</td></tr>
                           <tr><td>Wave damping</td><td>Steady or quasi-steady friction by default</td><td>{net.settings.unsteadyFriction ? 'Unsteady friction on (Brunone–Vítkovský, Vardy coefficient)' : 'Quasi-steady (unsteady friction off in Settings)'}</td></tr>
                           <tr><td>Uncertainty</td><td>One deterministic run</td><td>Worst-case envelope over wave speed, stroke, inertia and time step</td></tr>
-                          <tr><td>Protection devices</td><td>Hydropneumatic tank, air valves, surge tanks, relief and anticipation valves</td><td>The same, plus horizontal/spherical tanks, bladder pre-charge, dip tube, connection inertia, non-return valve with bypass, three-stage anti-slam and manufacturer-curve air valves, and "treat as junction"</td></tr>
+                          <tr><td>Protection devices</td><td>Hydropneumatic tank, air valves, surge tanks, relief and anticipation valves</td><td>The same, plus horizontal/spherical tanks, bladder pre-charge, dip tube, connection inertia, non-return valve with bypass, three-stage anti-slam and manufacturer-curve air valves, "treat as junction", rupture disks and timed outlets</td></tr>
+                          <tr><td>Valves and check valves</td><td>Check valves on pipes and pumps; valve types; PRV / PSV / FCV</td><td>Check valves on pipes, pumps and valves that close ideally, after a delay, at a reverse velocity or by the manufacturer's dynamic characteristic, with slam detection; gate, globe, ball, butterfly, needle or manufacturer valve curves; operating curves; PRV / PSV / FCV locked or active</td></tr>
+                          <tr><td>Report</td><td>Printed tables and graphs</td><td>One-click detailed report (summary, inputs, all node and pipe results, devices, slams, checks, time histories) to PDF</td></tr>
                           <tr><td>Protection design</td><td>Trial and error</td><td>Automatic vessel and air valve sizing</td></tr>
                         </tbody>
                       </table>
@@ -407,6 +412,7 @@ export default function App() {
                           for (const e of result.envelopes) for (let i = 0; i < e.s.length; i++) rows.push([e.id, e.s[i].toFixed(2), e.z[i].toFixed(3), e.hSteady[i].toFixed(3), e.hMax[i].toFixed(3), e.hMin[i].toFixed(3), (e.hMax[i] - e.z[i]).toFixed(3), (e.hMin[i] - e.z[i]).toFixed(3), (e.cavMax[i] * 1000).toFixed(2)].join(','));
                           download(`${net.name.replace(/[^\w-]+/g, '_')}-envelopes.csv`, rows.join('\n'), 'text/csv');
                         }}>Export envelopes (.csv)</button>
+                        <button className="btn small" onClick={() => allowed(lic.features.exportFiles, 'The detailed report is part of SurgeSpace Pro.') && setReporting(true)}>Detailed report (PDF)</button>
                       </div>
                     </div>
                   )}
@@ -418,6 +424,8 @@ export default function App() {
       </div>
       {tellUs && <TellUsDialog where={`${side} · ${bottom} · ${net.name}`} onClose={() => setTellUs(false)} />}
       {licReason !== undefined && <LicenceDialog reason={licReason ?? undefined} onClose={() => setLicReason(undefined)} />}
+      {reporting && result && <ReportDialog net={net} result={result} checks={checks} route={route} nodes={histNodes} version={__APP_VERSION__}
+        onSaveInfo={(info) => setNetRaw((n) => ({ ...n, report: info }))} onClose={() => setReporting(false)} />}
       {importing && <ImportDialog onClose={() => setImporting(false)} onImport={(n, notes) => { setImporting(false); load(n, notes); }} />}
       {toast && (
         <div className="card small" style={{ position: 'fixed', right: 16, bottom: 16, maxWidth: 420, zIndex: 60 }}>

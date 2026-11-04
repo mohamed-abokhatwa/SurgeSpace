@@ -1,0 +1,53 @@
+[TITLE]
+Control valve test: PRV, PSV, FCV
+
+[JUNCTIONS]
+;ID  Elev  Demand
+A1  10  0
+A2  10  0
+A3  5   35
+B1  40  0
+B2  40  0
+B3  0   25
+C1  20  0
+C2  20  0
+C3  15  0
+
+[RESERVOIRS]
+R1  120
+R2  30
+
+[PIPES]
+;ID  N1  N2  Length  Diam  Rough  Minor  Status
+PA1  R1  A1  1500  300  0.1  0  OPEN
+PA2  A2  A3  800   250  0.1  0  OPEN
+PB1  R1  B1  1200  250  0.1  0  OPEN
+PB2  B2  B3  900   200  0.1  0  OPEN
+PC1  R1  C1  1000  300  0.1  0  OPEN
+PC2  C2  C3  700   300  0.1  0  OPEN
+PC3  C3  R2  600   300  0.1  0  OPEN
+
+[VALVES]
+;ID  N1  N2  Diam  Type  Setting  Minor
+VA  A1  A2  250  PRV  40   0.5
+VB  B1  B2  200  PSV  60   0.5
+VC  C1  C2  300  FCV  60   0.5
+
+[OPTIONS]
+Units  LPS
+Headloss  D-W
+
+[COORDINATES]
+R1 0 0
+A1 100 0
+A2 110 0
+A3 200 0
+B1 100 100
+B2 110 100
+B3 200 100
+C1 100 -100
+C2 110 -100
+C3 200 -100
+R2 300 -100
+
+[END]

@@ -194,3 +194,65 @@ export function solveDecreasing(f: (x: number) => number, lo: number, hi: number
   void flo;
   return x;
 }
+
+// ── valve characteristics ───────────────────────────────────────────────
+/** Relative flow area (= Cv / Cv fully open) at 0, 10, … 100 % stroke. Gate: the standard gate-valve loss table
+ *  used by TSNet and textbooks. The others are typical inherent curves; use the manufacturer's curve when known. */
+export const VALVE_CURVES: Record<'gate' | 'globe' | 'ball' | 'butterfly' | 'needle', number[]> = {
+  gate: [0, 0.0167, 0.0313, 0.0556, 0.1, 0.17, 0.333, 0.625, 1.25, 2.5, 5].map((v) => Math.sqrt(v / 5)),
+  globe: [0, 0.12, 0.22, 0.33, 0.43, 0.53, 0.63, 0.73, 0.82, 0.91, 1],
+  ball: [0, 0.01, 0.03, 0.06, 0.11, 0.18, 0.28, 0.42, 0.6, 0.8, 1],
+  butterfly: [0, 0.01, 0.04, 0.09, 0.16, 0.26, 0.4, 0.57, 0.75, 0.92, 1],
+  needle: [0, 0.12, 0.24, 0.35, 0.46, 0.56, 0.66, 0.75, 0.84, 0.92, 1],
+};
+
+/** Piecewise-linear interpolation in a [x, y] table (clamped at the ends). */
+export function interpTable(tab: [number, number][], x: number): number {
+  if (!tab.length) return 0;
+  const t = [...tab].sort((a, b) => a[0] - b[0]);
+  if (x <= t[0][0]) return t[0][1];
+  for (let k = 1; k < t.length; k++)
+    if (x <= t[k][0]) return t[k - 1][1] + ((t[k][1] - t[k - 1][1]) * (x - t[k - 1][0])) / Math.max(t[k][0] - t[k - 1][0], 1e-12);
+  return t[t.length - 1][1];
+}
+
+/** Relative flow area of a valve at a stroke (0 closed … 1 open). */
+export function valveArea(v: { law?: string; lawCurve?: [number, number][] }, stroke: number): number {
+  const s = Math.max(0, Math.min(1, stroke));
+  if (!v.law || v.law === 'area') return s;
+  if (v.law === 'curve') return v.lawCurve && v.lawCurve.length >= 2 ? Math.max(0, Math.min(1, interpTable(v.lawCurve, s))) : s;
+  const tab = VALVE_CURVES[v.law as keyof typeof VALVE_CURVES];
+  if (!tab) return s;
+  if (v.law === 'gate') {
+    // interpolate 1/K (as the gate table is defined), then take the root
+    const x = s * 10, i = Math.min(9, Math.floor(x));
+    const a = tab[i] ** 2, b = tab[i + 1] ** 2;
+    return Math.sqrt(a + (b - a) * (x - i));
+  }
+  const x = s * 10, i = Math.min(9, Math.floor(x));
+  return tab[i] + (tab[i + 1] - tab[i]) * (x - i);
+}
+
+// ── control valves ──────────────────────────────────────────────────────
+/** Relative area a control valve needs so that, with flow Q, the head drop across it is dH:
+ *  loss kq·Q²/a² = dH. Returns 1 (fully open) when the set point cannot be reached. */
+export function controlArea(kq: number, Q: number, dH: number): number {
+  if (dH <= 0) return 1;
+  if (Q <= 0) return 0;
+  return Math.min(1, Math.sqrt((kq * Q * Q) / dH));
+}
+
+// ── check valves ────────────────────────────────────────────────────────
+/** Reverse velocity at which a check valve closes, from its dynamic characteristic (deceleration → velocity). */
+export function dynamicReverseVelocity(curve: [number, number][] | undefined, decel: number): number {
+  if (!curve || !curve.length) return 0;
+  return Math.max(0, interpTable(curve, Math.max(decel, 0)));
+}
+
+// ── discharge to atmosphere ─────────────────────────────────────────────
+/** Opening (0–1) of an outlet that started opening at tOpen (−1 = not yet). */
+export function outletOpening(openTime: number | undefined, tOpen: number, t: number): number {
+  if (tOpen < 0 || t < tOpen) return 0;
+  const T = openTime ?? 0;
+  return T <= 0 ? 1 : Math.min(1, (t - tOpen) / T);
+}

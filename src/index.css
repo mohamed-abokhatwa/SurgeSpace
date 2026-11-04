@@ -151,3 +151,7 @@ details.dev > summary > span:first-child { flex: 1; }
 .dev-check { font-size: 12px; gap: 6px; align-items: flex-start; }
 .dev-body .label { margin: 4px 0 0; }
 .inspector { width: 320px; }
+
+/* report preview */
+.report-modal { width: min(1100px, 100%); max-height: 94vh; display: flex; flex-direction: column; }
+.report-frame { width: 100%; flex: 1; min-height: 70vh; border: 1px solid var(--line); border-radius: 8px; background: #fff; }

@@ -1,5 +1,6 @@
 // EPANET .inp import and export. EPANET has no transient data, so wave speeds, pump inertia and devices
 // get sensible defaults the user reviews afterwards.
+import { valveArea } from './devices';
 import { estimateInertia } from './hydraulics';
 import { defaultSettings, type Network, type NetNode, type Pipe, type Pump, type Valve } from './types';
 
@@ -115,8 +116,13 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
   const valves: Valve[] = [];
   for (const r of sec('VALVES')) {
     const type = (r[4] ?? 'TCV').toUpperCase();
-    if (type !== 'TCV' && type !== 'GPV') notes.push(`Valve ${r[0]} (${type}) is modelled as a fixed-opening valve.`);
-    valves.push({ id: r[0], from: r[1], to: r[2], diameter: Number(r[3]) * df, k0: type === 'TCV' ? Math.max(Number(r[5]) || 0.2, 0.05) : Math.max(Number(r[6] ?? 0.2) || 0.2, 0.05), opening: 1 });
+    const setting = Number(r[5]);
+    const ctl = (type === 'PRV' || type === 'PSV' || type === 'FCV') && Number.isFinite(setting)
+      ? { type: type as 'PRV' | 'PSV' | 'FCV', set: type === 'FCV' ? setting * qf : setting * (us ? 0.70307 : 1), active: false }
+      : undefined;
+    if (!ctl && type !== 'TCV' && type !== 'GPV') notes.push(`Valve ${r[0]} (${type}) is modelled as a fixed-opening valve.`);
+    valves.push({ id: r[0], from: r[1], to: r[2], diameter: Number(r[3]) * df, k0: type === 'TCV' ? Math.max(setting || 0.2, 0.05) : Math.max(Number(r[6] ?? 0.2) || 0.2, 0.05), opening: 1, ...(ctl ? { control: ctl } : {}) });
+    if (ctl) notes.push(`Valve ${r[0]} is a ${type} (set ${ctl.type === 'FCV' ? `${(ctl.set * 1000).toFixed(1)} L/s` : `${ctl.set.toFixed(1)} m`}); it is locked at its steady opening during the transient unless you make it active.`);
   }
   // pipes with a check valve become a non-return valve followed by the pipe
   for (const id of cvPipes) {
@@ -161,11 +167,18 @@ export function toInp(net: Network): string {
   L.push('', '[RESERVOIRS]', ';ID  Head');
   for (const n of net.nodes.filter((x) => x.kind === 'reservoir')) L.push(`${n.id}  ${n.head ?? n.elev}`);
   L.push('', '[PIPES]', ';ID  Node1  Node2  Length  Diameter  Roughness  MinorLoss  Status');
-  for (const p of net.pipes) L.push(`${p.id}  ${p.from}  ${p.to}  ${p.length}  ${(p.diameter * 1000).toFixed(1)}  ${p.roughness}  ${p.minorLoss ?? 0}  ${p.closed ? 'CLOSED' : 'OPEN'}`);
+  for (const p of net.pipes) L.push(`${p.id}  ${p.from}  ${p.to}  ${p.length}  ${(p.diameter * 1000).toFixed(1)}  ${p.roughness}  ${p.minorLoss ?? 0}  ${p.closed ? 'CLOSED' : p.checkValve ? 'CV' : 'OPEN'}`);
   L.push('', '[PUMPS]');
   for (const p of net.pumps) L.push(`${p.id}  ${p.from}  ${p.to}  HEAD  C_${p.id}`);
   L.push('', '[VALVES]', ';ID  Node1  Node2  Diameter  Type  Setting  MinorLoss');
-  for (const v of net.valves) L.push(`${v.id}  ${v.from}  ${v.to}  ${(v.diameter * 1000).toFixed(1)}  TCV  ${v.k0}  0`);
+  for (const v of net.valves) {
+    if (v.control) L.push(`${v.id}  ${v.from}  ${v.to}  ${(v.diameter * 1000).toFixed(1)}  ${v.control.type}  ${v.control.type === 'FCV' ? (v.control.set * 1000).toFixed(4) : v.control.set}  ${v.k0}`);
+    else {
+      // a part-open valve is a TCV with the loss at that opening
+      const a = valveArea(v, v.opening);
+      L.push(`${v.id}  ${v.from}  ${v.to}  ${(v.diameter * 1000).toFixed(1)}  TCV  ${a > 0 ? +(v.k0 / (a * a)).toPrecision(6) : 1e12}  0`);
+    }
+  }
   L.push('', '[CURVES]');
   for (const p of net.pumps) for (const [q, h] of p.curve) L.push(`C_${p.id}  ${(q * 1000).toFixed(3)}  ${h}`);
   L.push('', '[STATUS]');

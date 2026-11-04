@@ -18,6 +18,11 @@ export function HistoryView({ net, result, nodes, tNow }: { net: Network; result
   const tanks = Object.entries(result.tanks ?? {});
   const savs = Object.entries(result.savs ?? {});
   const reliefs = Object.entries(result.reliefs ?? {});
+  const outlets = Object.entries(result.outlets ?? {});
+  const cvs = Object.entries(result.checkValves ?? {}).filter(([, c]) => c.mode !== 'ideal' || c.where !== 'pump');
+  // valves that move: event targets and control valves
+  const movingValves = Object.entries(result.valves).filter(([id, v]) => !id.endsWith('-CV') && v.opening.length && Math.max(...v.opening) - Math.min(...v.opening) > 1e-6);
+  const slamLines = (result.slams ?? []).filter((x) => x.joukowsky >= 0.5);
   const now = tNow;
   return (
     <div>
@@ -61,13 +66,43 @@ export function HistoryView({ net, result, nodes, tNow }: { net: Network; result
           ])} xLabel="Time (s)" yLabel="Level (m)" vLine={now} height={170} xUnit="s" />
         </>
       )}
-      {(savs.length > 0 || reliefs.length > 0) && (
+      {cvs.length > 0 && (
+        <>
+          <div className="label">Check valves{slamLines.some((x) => x.kind === 'checkValve') ? ' · slams marked' : ''}</div>
+          <div className="grid2">
+            <Chart series={cvs.map(([id, c], k) => ({ name: `${id} flow`, color: COLORS[(k + 1) % COLORS.length], x: t, y: Array.from(c.flow, (q) => q * 1000) }))} xLabel="Time (s)" yLabel="Flow (L/s)" vLine={now} height={170} yUnit="L/s" xUnit="s" />
+            <Chart series={cvs.map(([id, c], k) => ({ name: `${id} disc open`, color: COLORS[(k + 1) % COLORS.length], x: t, y: Array.from(c.opening, (q) => q * 100) }))} xLabel="Time (s)" yLabel="Disc open (%)" vLine={now} height={170} yUnit="%" xUnit="s" />
+          </div>
+        </>
+      )}
+      {movingValves.length > 0 && (
+        <>
+          <div className="label">Valves</div>
+          <div className="grid2">
+            <Chart series={movingValves.map(([id, v], k) => ({ name: `${id} flow area`, color: COLORS[(k + 3) % COLORS.length], x: t, y: Array.from(v.opening, (q) => q * 100) }))} xLabel="Time (s)" yLabel="Flow area (% of open)" vLine={now} height={170} yUnit="%" xUnit="s" />
+            <Chart series={movingValves.map(([id, v], k) => ({ name: `${id} flow`, color: COLORS[(k + 3) % COLORS.length], x: t, y: Array.from(v.flow, (q) => q * 1000) }))} xLabel="Time (s)" yLabel="Flow (L/s)" vLine={now} height={170} yUnit="L/s" xUnit="s" />
+          </div>
+        </>
+      )}
+      {(savs.length > 0 || reliefs.length > 0 || outlets.length > 0) && (
         <>
           <div className="label">Discharge valves</div>
           <Chart series={[
             ...savs.map(([id, v], k) => ({ name: `${id} anticipation valve`, color: COLORS[(k + 3) % COLORS.length], x: t, y: Array.from(v.flow, (q) => q * 1000) })),
             ...reliefs.map(([id, v], k) => ({ name: `${id} relief valve`, color: COLORS[(k + 4) % COLORS.length], x: t, y: Array.from(v.flow, (q) => q * 1000) })),
+            ...outlets.map(([id, v], k) => ({ name: `${id} ${net.nodes.find((x) => x.id === id)?.outlet?.trigger === 'pressure' ? 'rupture disk' : 'outlet'}`, color: COLORS[(k + 5) % COLORS.length], x: t, y: Array.from(v.flow, (q) => q * 1000) })),
           ]} xLabel="Time (s)" yLabel="Discharge (L/s)" vLine={now} height={170} yUnit="L/s" xUnit="s" />
+        </>
+      )}
+      {slamLines.length > 0 && (
+        <>
+          <div className="label">Slams</div>
+          <table className="grid slams">
+            <thead><tr><th>Time (s)</th><th>Where</th><th>Water stopped (m/s)</th><th>Slam surge a·v/g (m)</th><th>Peak pressure after (m)</th></tr></thead>
+            <tbody>{slamLines.slice(0, 30).map((x, k) => (
+              <tr key={k}><td>{x.t.toFixed(2)}</td><td>{x.kind === 'airValve' ? 'Air valve' : 'Check valve'} {x.id}</td><td>{x.velocity.toFixed(2)}</td><td>{x.joukowsky.toFixed(1)}</td><td>{x.peakPressure.toFixed(1)}</td></tr>
+            ))}</tbody>
+          </table>
         </>
       )}
       {airs.length > 0 && (

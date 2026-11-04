@@ -145,6 +145,7 @@ export interface NetNode {
   relief?: ReliefValve;
   tank?: OpenTank;
   sav?: SurgeAnticipationValve;
+  outlet?: Outlet;
 }
 
 export interface Pipe {
@@ -163,6 +164,60 @@ export interface Pipe {
   /** Optional intermediate profile points: distance from `from` (m) and elevation (m). */
   profile?: { s: number; z: number }[];
   closed?: boolean;
+  /** Check valve at the start of the pipe (flow only from `from` to `to`). */
+  checkValve?: CheckValveSpec;
+}
+
+/** How a check (non-return) valve closes. 'ideal' shuts the instant flow reverses, so it never slams.
+ *  The others let reverse flow build up first, which is what causes check-valve slam:
+ *  'delay' starts closing a set time after the flow reverses; 'velocity' starts closing when the reverse
+ *  velocity reaches a set value; 'dynamic' takes that reverse velocity from the manufacturer's dynamic
+ *  characteristic (reverse velocity at closure vs. deceleration of the flow). */
+export interface CheckValveSpec {
+  mode: 'ideal' | 'delay' | 'velocity' | 'dynamic';
+  /** 'delay' mode: time from flow reversal to the start of closure, s. */
+  delay?: number;
+  /** Time the disc takes to close once it starts, s (0 = instant). */
+  closeTime?: number;
+  /** 'velocity' mode: reverse velocity at which the disc closes, m/s. */
+  reverseVelocity?: number;
+  /** 'dynamic' mode: [deceleration m/s², reverse velocity at closure m/s] from the manufacturer. */
+  dynamic?: [number, number][];
+  /** Head difference needed to open it again, m. */
+  openHead?: number;
+  /** Valve bore, m (defaults to the pipe, valve or pump discharge pipe diameter). */
+  diameter?: number;
+  /** Loss coefficient fully open (a pipe check valve adds this loss; for pumps and valves it shapes the closure). */
+  kOpen?: number;
+}
+
+export type ValveLaw = 'area' | 'gate' | 'globe' | 'ball' | 'butterfly' | 'needle' | 'curve';
+
+/** Control valve that holds a set point (pressure reducing, pressure sustaining, flow control). */
+export interface ControlValve {
+  type: 'PRV' | 'PSV' | 'FCV';
+  /** PRV: downstream pressure head, m. PSV: upstream pressure head, m. FCV: flow, m³/s. */
+  set: number;
+  /** During the transient: true = keeps acting with the response below; false = locked at its steady opening. */
+  active?: boolean;
+  /** Time constant of the valve's response, s. */
+  responseTime?: number;
+  /** Fastest full stroke (closed to open), s. */
+  strokeTime?: number;
+}
+
+/** Discharge to atmosphere at a node: an orifice or blow-off that opens at a set time, or a rupture disk
+ *  that bursts at a set pressure (closed in steady state). */
+export interface Outlet {
+  diameter: number;
+  cd?: number;
+  trigger: 'time' | 'pressure';
+  /** 'time': when it starts to open, s. */
+  time?: number;
+  /** Opening time, s (0 = instant). */
+  openTime?: number;
+  /** 'pressure': bursting pressure head, m. */
+  burstHead?: number;
 }
 
 export interface Pump {
@@ -179,6 +234,8 @@ export interface Pump {
   inertia: number;
   /** Non-return valve on the discharge (prevents reverse flow). */
   checkValve: boolean;
+  /** How the pump's check valve closes (default ideal). */
+  checkSpec?: CheckValveSpec;
   on: boolean;
   /** Constant-power pump (EPANET POWER), kW. The head curve is then H = P / (ρ g Q). */
   power?: number;
@@ -195,8 +252,17 @@ export interface Valve {
   opening: number;
   /** Acts as a non-return valve (closes on reverse flow). */
   check?: boolean;
-  /** How flow area follows the stroke: 'area' (opening = effective area) or 'gate' (standard gate-valve loss table). */
-  law?: 'area' | 'gate';
+  /** How a check valve closes (default ideal). */
+  checkSpec?: CheckValveSpec;
+  /** How flow area follows the stroke: 'area' (opening = effective area), a typical curve for the valve type,
+   *  or 'curve' (the manufacturer's curve in `lawCurve`). */
+  law?: ValveLaw;
+  /** Manufacturer's characteristic: [stroke 0–1, relative flow area or Cv/Cv(open) 0–1]. */
+  lawCurve?: [number, number][];
+  /** Control valve (PRV / PSV / FCV). Its opening is found in the steady state. */
+  control?: ControlValve;
+  /** Set internally for the valve that models a pipe's check valve. */
+  owner?: string;
 }
 
 export type EventKind = 'pumpTrip' | 'valveClose' | 'valveOpen' | 'none';
@@ -212,9 +278,12 @@ export interface TransientEvent {
   finalOpening?: number;
   /** Closure law exponent: 1 = linear area, 2+ = gate-valve-like (most flow cut late). */
   exponent?: number;
+  /** Valve events: operating curve [time from start s, stroke 0–1] (overrides duration / final opening). */
+  curve?: [number, number][];
   /** Pump events: 'trip' = power failure, speed falls by inertia; 'ramp' = controlled stop (VFD), speed
-   *  forced linearly to zero over `duration`. */
-  pumpMode?: 'trip' | 'ramp';
+   *  forced linearly to zero over `duration`; 'start' = pump start, off in steady state and speed raised
+   *  linearly to full over `duration`. */
+  pumpMode?: 'trip' | 'ramp' | 'start';
 }
 
 export interface Settings {
@@ -237,9 +306,20 @@ export interface Settings {
   minPressure: number;
 }
 
+/** Details printed on the report's title page. */
+export interface ReportInfo {
+  projectNo?: string;
+  client?: string;
+  preparedBy?: string;
+  checkedBy?: string;
+  revision?: string;
+  notes?: string;
+}
+
 export interface Network {
   name: string;
   description?: string;
+  report?: ReportInfo;
   nodes: NetNode[];
   pipes: Pipe[];
   pumps: Pump[];

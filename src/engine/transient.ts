@@ -14,8 +14,9 @@
 //    pressure-dependent demands.
 import { frictionF, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpQuadratic, pumpTorqueQuadratic, solveDense, type PumpCurve } from './hydraulics';
 import { solveSteady, type SteadyResult } from './steady';
-import { G, HB, HV, RHO, area, type Network, type NetNode } from './types';
-import { RAIR, TAIR, airValveMassRate, airValveModel, prechargeGas, reliefFlow, savOpening, solveDecreasing, vesselGeometry, waterDepthOf, waterVolumeAt } from './devices';
+import { G, HB, HV, RHO, area, type CheckValveSpec, type Network, type NetNode } from './types';
+import { RAIR, TAIR, airValveMassRate, airValveModel, controlArea, dynamicReverseVelocity, interpTable, outletOpening, prechargeGas, reliefFlow, savOpening, solveDecreasing, valveArea, vesselGeometry, waterDepthOf, waterVolumeAt } from './devices';
+import { prepareNetwork } from './prepare';
 
 export interface PipeEnvelope {
   id: string;
@@ -56,7 +57,15 @@ export interface TransientResult {
   reliefs: Record<string, { flow: Float32Array; maxFlow: number; volume: number }>;
   pumps: Record<string, { speed: Float32Array; flow: Float32Array; reverseFlow: boolean }>;
   airValves: Record<string, { air: Float32Array; mass: Float32Array; maxAir: number }>;
-  valves: Record<string, { opening: Float32Array }>;
+  valves: Record<string, { opening: Float32Array; flow: Float32Array }>;
+  /** Check valves (on pumps, valves and pipes), keyed by the pump, valve or pipe id. */
+  checkValves: Record<string, { where: 'pump' | 'valve' | 'pipe'; mode: CheckValveSpec['mode']; flow: Float32Array; opening: Float32Array; closures: number; maxReverseVelocity: number; reverseVelocityAtClosure: number }>;
+  /** Discharges to atmosphere / rupture disks. */
+  outlets: Record<string, { flow: Float32Array; opening: Float32Array; openedAt: number; maxFlow: number; volume: number }>;
+  /** Slams: check valves closing on reverse flow and air pockets closing at air valves. `joukowsky` is a·v/g for
+   *  the velocity stopped; `rise` is the head jump the model computed at that node at closure (first 3 steps);
+   *  `peak` is the highest head there in the following 2L/a (at most 2 s). */
+  slams: { kind: 'checkValve' | 'airValve'; id: string; node: string; t: number; velocity: number; joukowsky: number; rise: number; peak: number; peakPressure: number }[];
   steady: { heads: Record<string, number>; flows: Record<string, number> };
   warnings: string[];
   runtimeMs: number;
@@ -147,14 +156,30 @@ interface PipeState {
   pipeIndex: number;
 }
 
+/** State of a check valve that does not close ideally (delay / reverse velocity / dynamic characteristic). */
+interface CvState {
+  spec: CheckValveSpec;
+  A: number; // bore area (per unit for merged pumps)
+  kcv: number; // kOpen / (2 g A²)
+  state: 'open' | 'closing' | 'closed';
+  s: number; // disc opening during closure, 1 → 0
+  tRev: number; // time the flow reversed (−1: forward)
+  tStart: number; // time closure started
+  vr: number; // reverse velocity that starts the closure
+  ring: Float64Array; // recent velocities, for the deceleration
+  nRing: number;
+  vLast: number;
+}
+
 type Element =
-  | { kind: 'pump'; idx: number; ids: string[]; m: number; curve: PumpCurve; i: number; j: number; Q: number; alpha: number; alphaSet: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number }
-  | { kind: 'valve'; idx: number; i: number; j: number; Q: number; open: number; closed: boolean; check: boolean; kq: number }
+  | { kind: 'pump'; idx: number; ids: string[]; m: number; curve: PumpCurve; i: number; j: number; Q: number; alpha: number; alphaSet: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; cv?: CvState; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number }
+  | { kind: 'valve'; idx: number; i: number; j: number; Q: number; open: number; base: number; closed: boolean; check: boolean; cv?: CvState; kq: number }
   | { kind: 'rigid'; idx: number; i: number; j: number; Q: number; Qold: number; closed: boolean; check: false; inert: number; pipe: number };
 
 export function runTransient(net: Network, opt: RunOptions = {}): TransientResult {
   const t0 = performance.now();
   const warnings: string[] = [];
+  net = prepareNetwork(net);
   const st = net.settings;
   const steady = opt.steady ?? solveSteady(net);
   // constant-power pumps have no physical curve: use EPANET's one-point curve through the steady duty
@@ -184,7 +209,11 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const travel = openPipes.map((p) => p.length / (p.wavespeed * waveF));
   const stroke = (ev.duration ?? 0) * (opt.strokeFactor ?? 1);
   let dtMax = opt.dtMax ?? 0.05;
-  if ((ev.kind === 'valveClose' || ev.kind === 'valveOpen') && stroke > 0) dtMax = Math.min(dtMax, Math.max(stroke / 20, 1e-3));
+  const evCurve = (ev.kind === 'valveClose' || ev.kind === 'valveOpen') && ev.curve && ev.curve.length >= 2 ? [...ev.curve].sort((a, b) => a[0] - b[0]).map(([tc, sc]) => [tc * (opt.strokeFactor ?? 1), sc] as [number, number]) : null;
+  if (evCurve) {
+    const seg = Math.min(...evCurve.slice(1).map((c, k) => c[0] - evCurve[k][0]).filter((d) => d > 0), Infinity);
+    if (Number.isFinite(seg)) dtMax = Math.min(dtMax, Math.max(seg / 20, 1e-3));
+  } else if ((ev.kind === 'valveClose' || ev.kind === 'valveOpen') && stroke > 0) dtMax = Math.min(dtMax, Math.max(stroke / 20, 1e-3));
   const sel = opt.fixedDt
     ? (() => {
         const fdt = opt.fixedDt!;
@@ -313,7 +342,35 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   // surge anticipation valves
   const savs = nodes.map((n, i) => (n.sav && n.kind !== 'reservoir' ? { node: i, cfg: n.sav, A: area(n.sav.diameter), cd: n.sav.cd ?? 0.6, tTrig: -1, open: 0, openUsed: 0, opened: 0, maxQ: 0, Q: 0 } : null));
   const reliefs = nodes.map((n, i) => (n.relief && n.kind !== 'reservoir' ? { node: i, cfg: n.relief, Q: 0, maxQ: 0, vol: 0 } : null));
-  const airv = nodes.map((n) => (n.airValve && !n.airValve.treatAsJunction && n.kind !== 'reservoir' ? { m: 0, V: 0, model: airValveModel(n.airValve), maxAir: 0 } : null));
+  const airv = nodes.map((n) => (n.airValve && !n.airValve.treatAsJunction && n.kind !== 'reservoir' ? { m: 0, V: 0, model: airValveModel(n.airValve), maxAir: 0, hist: [0, 0, 0, 0] } : null));
+  // discharges to atmosphere / rupture disks (closed in the steady state)
+  const outlets = nodes.map((n, i) => {
+    if (!n.outlet || n.kind === 'reservoir') return null;
+    const o = n.outlet;
+    if (o.trigger === 'pressure' && o.burstHead !== undefined && Hprev[i] - n.elev >= o.burstHead) warnings.push(`Rupture disk at ${n.id}: the steady pressure is already above its bursting pressure.`);
+    return { node: i, cfg: o, A: area(o.diameter), cd: o.cd ?? 0.6, tOpen: o.trigger === 'time' ? Math.max(o.time ?? 0, 0) : -1, open: 0, Q: 0, maxQ: 0, vol: 0 };
+  });
+  // pipes meeting each node (wave speed and area, for slam estimates)
+  const nodePipes: { a: number; A: number; L: number }[][] = nodes.map(() => []);
+  livePipes.forEach((p) => {
+    const rec = { a: p.wavespeed * waveF, A: area(p.diameter), L: p.length };
+    nodePipes[nIdx.get(p.from)!].push(rec);
+    nodePipes[nIdx.get(p.to)!].push(rec);
+  });
+  const slams: TransientResult['slams'] = [];
+  const pendingRise: { k: number; node: number; tEnd: number; h0: number; left: number }[] = [];
+  const startSlam = (kind: 'checkValve' | 'airValve', id: string, node: number, t: number, velocity: number, aWave: number, h0: number) => {
+    if (slams.filter((x) => x.id === id).length >= 50) return;
+    const np = nodePipes[node];
+    const L = np.length ? Math.min(...np.map((x) => x.L / x.a)) : 0.5;
+    slams.push({ kind, id, node: nodes[node].id, t, velocity, joukowsky: (aWave * velocity) / G, rise: 0, peak: h0, peakPressure: h0 - nodes[node].elev });
+    pendingRise.push({ k: slams.length - 1, node, tEnd: t + Math.min(Math.max(2 * L, 0.2), 2), h0, left: 3 });
+  };
+  const makeCv = (spec: CheckValveSpec | undefined, A: number): CvState | undefined => {
+    if (!spec || spec.mode === 'ideal') return undefined;
+    const nw = Math.max(2, Math.round(0.1 / dt));
+    return { spec, A, kcv: (spec.kOpen ?? 1) / (2 * G * A * A), state: 'open', s: 1, tRev: -1, tStart: 0, vr: spec.mode === 'velocity' ? Math.max(spec.reverseVelocity ?? 0.3, 0) : 0, ring: new Float64Array(nw + 1), nRing: 0, vLast: 0 };
+  };
 
   // ── elements (pumps, valves) and clusters ──────────────────────────────
   const elements: Element[] = [];
@@ -321,7 +378,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const pumpGroups = new Map<string, number[]>();
   net.pumps.forEach((p, k) => {
     const trip = ev.kind === 'pumpTrip' && ev.targets.includes(p.id);
-    const key = JSON.stringify([p.from, p.to, p.curve, p.efficiency, p.speed, p.inertia, p.checkValve, p.on, trip]);
+    const key = JSON.stringify([p.from, p.to, p.curve, p.efficiency, p.speed, p.inertia, p.checkValve, p.checkValve ? p.checkSpec ?? null : null, p.on, trip]);
     pumpGroups.set(key, [...(pumpGroups.get(key) ?? []), k]);
     if (trip && !p.on) warnings.push(`Pump ${p.id} is set to trip but is not running.`);
   });
@@ -333,15 +390,21 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const q = ks.reduce((sum, k) => sum + (steady.flows.get(net.pumps[k].id) ?? 0), 0);
     const e: Extract<Element, { kind: 'pump' }> = {
       kind: 'pump', idx: ks[0], ids: ks.map((k) => net.pumps[k].id), m, curve: pumpCurve(p), i: nIdx.get(p.from)!, j: nIdx.get(p.to)!, Q: q, alpha: p.on ? 1 : 0, alphaSet: 1, tripped: false, on: p.on,
-      closed: !p.on || q <= 0, check: p.checkValve, T: 0, I: p.inertia * (opt.inertiaFactor ?? 1), w: omegaRated(p),
+      closed: !p.on || q <= 0, check: p.checkValve && (!p.checkSpec || p.checkSpec.mode === 'ideal'),
+      cv: p.checkValve ? makeCv(p.checkSpec, area(p.checkSpec?.diameter ?? net.pipes.find((x) => x.from === p.to || x.to === p.to)?.diameter ?? 0.3)) : undefined, T: 0, I: p.inertia * (opt.inertiaFactor ?? 1), w: omegaRated(p),
       a, b: b / m, c: c / (m * m), ta: tq.ta, tb: tq.tb / m, tc: tq.tc / (m * m),
     };
     e.T = e.ta * e.alpha ** 2 + e.tb * e.alpha * e.Q + e.tc * e.Q * e.Q;
+    if (e.cv && e.closed) e.cv.state = 'closed';
     elements.push(e);
   }
   net.valves.forEach((v, k) => {
     const A = area(v.diameter);
-    elements.push({ kind: 'valve', idx: k, i: nIdx.get(v.from)!, j: nIdx.get(v.to)!, Q: steady.flows.get(v.id) ?? 0, open: v.opening, closed: v.opening <= 0, check: !!v.check, kq: v.k0 / (2 * G * A * A) });
+    const a0 = steady.openings?.get(v.id) ?? valveArea(v, v.opening);
+    const q = steady.flows.get(v.id) ?? 0;
+    const e: Extract<Element, { kind: 'valve' }> = { kind: 'valve', idx: k, i: nIdx.get(v.from)!, j: nIdx.get(v.to)!, Q: q, open: a0, base: a0, closed: a0 <= 0, check: !!v.check && (!v.checkSpec || v.checkSpec.mode === 'ideal'), cv: v.check ? makeCv(v.checkSpec, area(v.checkSpec?.diameter ?? v.diameter)) : undefined, kq: v.k0 / (2 * G * A * A) };
+    if (e.cv && (e.closed || q <= 0)) { e.cv.state = 'closed'; e.closed = true; }
+    elements.push(e);
   });
   rigidPipes.forEach((p) => {
     const k = net.pipes.indexOf(p);
@@ -412,24 +475,52 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const airOut: TransientResult['airValves'] = {};
   airv.forEach((a, i) => a && (airOut[nodes[i].id] = { air: new Float32Array(nFrames), mass: new Float32Array(nFrames), maxAir: 0 }));
   const valveOut: TransientResult['valves'] = {};
-  elements.forEach((e) => e.kind === 'valve' && (valveOut[net.valves[e.idx].id] = { opening: new Float32Array(nFrames) }));
+  elements.forEach((e) => e.kind === 'valve' && (valveOut[net.valves[e.idx].id] = { opening: new Float32Array(nFrames), flow: new Float32Array(nFrames) }));
+  // check valves: keyed by the pump, valve or pipe they belong to
+  const cvOut: TransientResult['checkValves'] = {};
+  const cvKey = (e: Element) => (e.kind === 'pump' ? e.ids : e.kind === 'valve' ? [net.valves[e.idx].owner ?? net.valves[e.idx].id] : []);
+  elements.forEach((e) => {
+    if (e.kind === 'rigid') return;
+    const has = e.kind === 'pump' ? net.pumps[e.idx].checkValve : !!net.valves[e.idx].check;
+    if (!has) return;
+    const spec = e.kind === 'pump' ? net.pumps[e.idx].checkSpec : net.valves[e.idx].checkSpec;
+    const where = e.kind === 'pump' ? 'pump' : net.valves[e.idx].owner ? 'pipe' : 'valve';
+    for (const id of cvKey(e)) cvOut[id] = { where, mode: spec?.mode ?? 'ideal', flow: new Float32Array(nFrames), opening: new Float32Array(nFrames), closures: 0, maxReverseVelocity: 0, reverseVelocityAtClosure: 0 };
+  });
+  const outletOut: TransientResult['outlets'] = {};
+  outlets.forEach((o) => o && (outletOut[nodes[o.node].id] = { flow: new Float32Array(nFrames), opening: new Float32Array(nFrames), openedAt: -1, maxFlow: 0, volume: 0 }));
   const nodeMax = new Float64Array(NN).fill(-Infinity);
   const nodeMin = new Float64Array(NN).fill(Infinity);
 
-  // Standard gate-valve table: 1/K relative to fully open, at 0, 10, … 100 % stroke (as used by TSNet and textbooks)
-  const GATE = [0, 0.0167, 0.0313, 0.0556, 0.1, 0.17, 0.333, 0.625, 1.25, 2.5, 5].map((v) => v / 5);
-  const gateArea = (stroke01: number) => {
-    const x = Math.max(0, Math.min(1, stroke01)) * 10;
-    const i = Math.min(9, Math.floor(x));
-    return Math.sqrt(GATE[i] + (GATE[i + 1] - GATE[i]) * (x - i));
+  const isValveTarget = (e: Extract<Element, { kind: 'valve' }>) => (ev.kind === 'valveClose' || ev.kind === 'valveOpen') && ev.targets.includes(net.valves[e.idx].id);
+  /** Stroke that gives a relative area (control valves start from their steady opening). */
+  const strokeOf = (v: Network['valves'][number], a: number) => {
+    let lo = 0, hi = 1;
+    for (let k = 0; k < 60; k++) { const m = (lo + hi) / 2; if (valveArea(v, m) < a) lo = m; else hi = m; }
+    return (lo + hi) / 2;
   };
   const valveOpening = (e: Extract<Element, { kind: 'valve' }>, t: number) => {
     const v = net.valves[e.idx];
-    const law = (s01: number) => (v.law === 'gate' ? gateArea(s01) : s01);
-    if ((ev.kind !== 'valveClose' && ev.kind !== 'valveOpen') || !ev.targets.includes(v.id) || t <= ev.start) return law(v.opening);
+    if (!isValveTarget(e) || t <= ev.start) return e.base;
+    const s0 = v.control ? strokeOf(v, e.base) : v.opening;
+    if (evCurve) return valveArea(v, t - ev.start < evCurve[0][0] ? s0 : interpTable(evCurve, t - ev.start));
     const tf = ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1);
     const s = stroke > 0 ? Math.min((t - ev.start) / stroke, 1) : 1;
-    return law(tf + (v.opening - tf) * (1 - s) ** (ev.exponent ?? 1));
+    return valveArea(v, tf + (s0 - tf) * (1 - s) ** (ev.exponent ?? 1));
+  };
+  /** Active control valve: the opening moves toward the one that meets the set point, with its response time
+   *  and stroke-speed limit. */
+  const controlStep = (e: Extract<Element, { kind: 'valve' }>) => {
+    const c = net.valves[e.idx].control!;
+    const zi = nodes[e.i].elev, zj = nodes[e.j].elev;
+    const target = c.type === 'PRV' ? controlArea(e.kq, e.Q, Hprev[e.i] - (c.set + zj))
+      : c.type === 'PSV' ? controlArea(e.kq, e.Q, c.set + zi - Hprev[e.j])
+      : controlArea(e.kq, c.set, Hprev[e.i] - Hprev[e.j]);
+    const tau = Math.max(c.responseTime ?? 3, 1e-6);
+    let d = (target - e.open) * (1 - Math.exp(-dt / tau));
+    const lim = dt / Math.max(c.strokeTime ?? 20, 1e-6);
+    d = Math.max(-lim, Math.min(lim, d));
+    return Math.max(0, Math.min(1, e.open + d));
   };
 
   // ── node residual pieces ───────────────────────────────────────────────
@@ -451,6 +542,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     if (vs) q -= vesselFlow(vs, H);
     const tk = tanks[i];
     if (tk) q -= tankFlow(tk, H);
+    const ou = outlets[i];
+    if (ou && ou.open > 0) q -= ou.cd * ou.A * ou.open * Math.sqrt(2 * G * Math.max(p, 0));
     const av = airv[i];
     if (av) q += airCavityRate(av, H, n);
     else q += (gasVolume(nodeC3[i], H, n.elev) - nodeV[i]) / dt;
@@ -519,7 +612,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   };
 
   /** Closed-form DGCM solve for a plain node (no devices, constant demand). */
-  const plainNode = (i: number) => !nodes[i].relief && !vessels[i] && !airv[i] && !tanks[i] && !savs[i] && demK[i] === 0;
+  const plainNode = (i: number) => !nodes[i].relief && !vessels[i] && !airv[i] && !tanks[i] && !savs[i] && !outlets[i] && demK[i] === 0;
   const dgcm = (sb: number, sc: number, qext: number, z: number, C3: number, Vold: number) => {
     const E = Vold + dt * (sb * (z - HBc + HV) - sc - qext);
     const disc = Math.sqrt(E * E + 4 * dt * sb * C3);
@@ -528,11 +621,17 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   };
 
   // element helpers
+  /** Extra loss of a check valve that is part-way through closing: kOpen·(1/s² − 1), zero when fully open. */
+  const cvLoss = (e: Element) => {
+    if (e.kind === 'rigid' || !e.cv || e.cv.state !== 'closing') return 0;
+    const s2 = Math.max(e.cv.s, 1e-3) ** 2;
+    return (e.cv.kcv * (1 / s2 - 1)) / (e.kind === 'pump' ? e.m * e.m : 1);
+  };
   const elFlowAt = (e: Element, Hi: number, Hj: number, Q: number, alpha: number): number => {
     if (e.closed) return Q; // residual Q = 0
-    if (e.kind === 'valve') return e.kq * Q * Math.abs(Q) - e.open * e.open * (Hi - Hj);
+    if (e.kind === 'valve') return (e.kq + e.open * e.open * cvLoss(e)) * Q * Math.abs(Q) - e.open * e.open * (Hi - Hj);
     if (e.kind === 'rigid') return (e.inert * (Q - e.Qold)) / dt + rigidR(e, Q) * Q * Math.abs(Q) - (Hi - Hj);
-    return Hj - Hi - pumpHeadAt(e.curve, Q / e.m, alpha);
+    return Hj - Hi - pumpHeadAt(e.curve, Q / e.m, alpha) + cvLoss(e) * Q * Math.abs(Q);
   };
 
 
@@ -548,7 +647,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       if (!Number.isFinite(al) || al < 0) al = 0;
       return al;
     };
-    const forcedShut = e.kind === 'valve' ? e.open <= 0 : e.kind === 'pump' ? !e.on : false;
+    const forcedShut = (e.kind === 'valve' ? e.open <= 0 : e.kind === 'pump' ? !e.on : false) || (e.kind !== 'rigid' && e.cv?.state === 'closed');
     const finish = (Q: number, shut: boolean) => {
       if (!isRes[e.i]) Hn[e.i] = headAt(e.i, -Q);
       if (!isRes[e.j]) Hn[e.j] = headAt(e.j, Q);
@@ -560,9 +659,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const res = (Q: number) => {
       const Hi = headAt(e.i, -Q);
       const Hj = headAt(e.j, Q);
-      if (e.kind === 'valve') return e.kq * Q * Math.abs(Q) - e.open * e.open * (Hi - Hj);
+      if (e.kind === 'valve') return (e.kq + e.open * e.open * cvLoss(e)) * Q * Math.abs(Q) - e.open * e.open * (Hi - Hj);
       if (e.kind === 'rigid') return (e.inert * (Q - e.Qold)) / dt + rigidR(e, Q) * Q * Math.abs(Q) - (Hi - Hj);
-      return Hj - Hi - pumpHeadAt(e.curve, Q / e.m, alphaOf(Q));
+      return Hj - Hi - pumpHeadAt(e.curve, Q / e.m, alphaOf(Q)) + cvLoss(e) * Q * Math.abs(Q);
     };
     const hasCheck = e.check;
     if (hasCheck && res(0) >= 0) return finish(0, true); // non-return valve shut: flow would reverse
@@ -795,8 +894,23 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
           pumpOut[id].speed[frame] = e.alpha;
           pumpOut[id].flow[frame] = e.Q / e.m;
         }
-      } else if (e.kind === 'valve') valveOut[net.valves[e.idx].id].opening[frame] = e.open;
-      else if (e.kind === 'rigid') frameFlows[net.pipes[e.pipe].id][frame] = e.Q;
+      } else if (e.kind === 'valve') {
+        const o = valveOut[net.valves[e.idx].id];
+        o.opening[frame] = e.open;
+        o.flow[frame] = e.Q;
+      } else if (e.kind === 'rigid') frameFlows[net.pipes[e.pipe].id][frame] = e.Q;
+      if (e.kind !== 'rigid') for (const id of cvKey(e)) {
+        const o = cvOut[id];
+        if (!o) continue;
+        o.flow[frame] = e.kind === 'pump' ? e.Q / e.m : e.Q;
+        o.opening[frame] = e.closed ? 0 : e.cv ? (e.cv.state === 'closing' ? e.cv.s : 1) : 1;
+      }
+    });
+    outlets.forEach((ou) => {
+      if (!ou) return;
+      const o = outletOut[nodes[ou.node].id];
+      o.flow[frame] = ou.Q;
+      o.opening[frame] = ou.open;
     });
     airv.forEach((a, i) => { if (a) { airOut[nodes[i].id].air[frame] = a.V; airOut[nodes[i].id].mass[frame] = a.m; } });
     frame++;
@@ -808,7 +922,16 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const t = step * dt;
     // events
     elements.forEach((e) => {
-      if (e.kind === 'pump' && ev.kind === 'pumpTrip' && ev.targets.includes(e.ids[0]) && t >= ev.start && e.on) {
+      if (e.kind === 'pump' && ev.kind === 'pumpTrip' && ev.pumpMode === 'start' && ev.targets.includes(e.ids[0]) && t >= ev.start) {
+        // pump start: speed raised linearly to full over the ramp time
+        if (!e.on) {
+          e.on = true;
+          if (!e.check && !e.cv) e.closed = false;
+        }
+        const T = Math.max((ev.duration ?? 0) * (opt.strokeFactor ?? 1), 1e-9);
+        e.alphaSet = Math.min(1, (t - ev.start) / T);
+        e.alpha = e.alphaSet;
+      } else if (e.kind === 'pump' && ev.kind === 'pumpTrip' && ev.targets.includes(e.ids[0]) && t >= ev.start && e.on) {
         if (ev.pumpMode === 'ramp') {
           // controlled stop: speed forced linearly to zero over the ramp time
           const T = Math.max((ev.duration ?? 0) * (opt.strokeFactor ?? 1), 1e-9);
@@ -817,11 +940,37 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         } else if (!e.tripped) e.tripped = true;
       }
       if (e.kind === 'valve') {
-        e.open = valveOpening(e, t);
+        if (isValveTarget(e)) e.open = valveOpening(e, t);
+        else if (net.valves[e.idx].control?.active) e.open = controlStep(e);
         if (e.open <= 0) e.closed = true;
-        else if (e.closed && !e.check) e.closed = false;
+        else if (e.closed && !e.check && e.cv?.state !== 'closed') e.closed = false;
+      }
+      // check valves that close with a delay or on reverse velocity
+      if (e.kind !== 'rigid' && e.cv) {
+        const cv = e.cv;
+        if (cv.state === 'closing') {
+          const T = cv.spec.closeTime ?? 0;
+          cv.s = T > 0 ? 1 - (t - cv.tStart) / T : 0;
+          if (cv.s <= 1e-3) {
+            cv.state = 'closed';
+            cv.s = 0;
+            const v = Math.max(-cv.vLast, 0);
+            for (const id of cvKey(e)) {
+              const o = cvOut[id];
+              o.closures++;
+              o.reverseVelocityAtClosure = Math.max(o.reverseVelocityAtClosure, v);
+            }
+            if (v > 1e-4) {
+              const np = nodePipes[e.j];
+              const aW = np.length ? Math.max(...np.map((x) => x.a)) : 1000;
+              startSlam('checkValve', cvKey(e)[0], e.j, t, v, aW, Hprev[e.j]);
+            }
+          }
+        }
+        if (cv.state === 'closed') e.closed = true;
       }
     });
+    outlets.forEach((ou) => ou && (ou.open = outletOpening(ou.cfg.openTime, ou.tOpen, t)));
     Sc.fill(0);
     Sb.fill(0);
     // interior points + characteristics toward the nodes
@@ -927,16 +1076,89 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         if (sv.tTrig < 0 && (p < sv.cfg.lowSet || (sv.cfg.highSet !== undefined && sv.cfg.highSet > 0 && p > sv.cfg.highSet))) { sv.tTrig = t; sv.opened++; }
         sv.open = sv.tTrig >= 0 ? savOpening(sv.cfg, t + dt - sv.tTrig) : 0;
       }
+      const ou = outlets[i];
+      if (ou) {
+        const p = H - nodes[i].elev;
+        const q0 = ou.Q;
+        ou.Q = ou.cd * ou.A * ou.open * Math.sqrt(2 * G * Math.max(p, 0));
+        ou.maxQ = Math.max(ou.maxQ, ou.Q);
+        ou.vol += ((ou.Q + q0) / 2) * dt;
+        if (ou.tOpen < 0 && ou.cfg.trigger === 'pressure' && ou.cfg.burstHead !== undefined && p >= ou.cfg.burstHead) ou.tOpen = t;
+      }
       const av = airv[i];
       if (av) {
         const s2 = airState(av, H, nodes[i]);
+        const hadAir = av.m > 0;
         av.m = s2.m;
         av.V = s2.V;
         av.maxAir = Math.max(av.maxAir, av.V);
+        if (hadAir && av.m <= 0) {
+          // the air pocket has closed: the water columns that were filling it stop at once (air-valve slam)
+          // filling rate from the last whole steps (the air runs out part-way through this one)
+          const L4 = av.hist.length;
+          let filled = 0;
+          while (filled < L4 && av.hist[L4 - 1 - filled] > 0) filled++;
+          const n = Math.min(filled - 1, 3);
+          const rate = n >= 1 ? (av.hist[L4 - 1 - n] - av.hist[L4 - 1]) / (n * dt) : av.hist[L4 - 1] / dt;
+          const np = nodePipes[i];
+          const Asum = np.reduce((sum, x) => sum + x.A, 0);
+          const aW = Asum > 0 ? np.reduce((sum, x) => sum + x.a * x.A, 0) / Asum : 1000;
+          if (Asum > 0 && rate > 0) startSlam('airValve', nodes[i].id, i, t, rate / Asum, aW, Hprev[i]);
+        }
+        av.hist.shift();
+        av.hist.push(av.V);
       } else nodeV[i] = gasVolume(nodeC3[i], H, nodes[i].elev);
       nodeMax[i] = Math.max(nodeMax[i], H);
       nodeMin[i] = Math.min(nodeMin[i], H);
     }
+    for (const pr of pendingRise) {
+      const sl = slams[pr.k];
+      // the jump: the closure can fall part-way through a step, so take the first three steps
+      if (pr.left > 0) { sl.rise = Math.max(sl.rise, Hn[pr.node] - pr.h0); pr.left--; }
+      if (t <= pr.tEnd + 1e-12) { sl.peak = Math.max(sl.peak, Hn[pr.node]); sl.peakPressure = sl.peak - nodes[pr.node].elev; }
+    }
+    while (pendingRise.length && t > pendingRise[0].tEnd && pendingRise[0].left <= 0) pendingRise.shift();
+    // check valves: reversal, start of closure, reopening
+    elements.forEach((e) => {
+      if (e.kind === 'rigid' || !e.cv) return;
+      const cv = e.cv;
+      const V = e.Q / (cv.A * (e.kind === 'pump' ? e.m : 1));
+      if (cv.state === 'closed') {
+        const alpha = e.kind === 'pump' ? e.alpha : 0;
+        const lift = e.kind === 'pump' ? pumpHeadAt(e.curve, 0, alpha) : 0;
+        const can = e.kind === 'pump' ? e.on && alpha > 0.01 : e.open > 0;
+        if (can && Hn[e.i] + lift - Hn[e.j] > (cv.spec.openHead ?? 1e-3)) {
+          cv.state = 'open';
+          cv.s = 1;
+          cv.tRev = -1;
+          cv.nRing = 0;
+          e.closed = false;
+        }
+        return;
+      }
+      for (const id of cvKey(e)) cvOut[id].maxReverseVelocity = Math.max(cvOut[id].maxReverseVelocity, -V);
+      cv.vLast = V;
+      if (cv.state !== 'open') return;
+      // recent velocities (about 0.1 s) give the deceleration for the dynamic characteristic
+      const nr = cv.ring.length;
+      if (cv.nRing < nr) cv.ring[cv.nRing++] = V;
+      else { cv.ring.copyWithin(0, 1); cv.ring[nr - 1] = V; }
+      if (V <= 0 && cv.tRev < 0) {
+        const vp = cv.nRing >= 2 ? cv.ring[cv.nRing - 2] : V;
+        cv.tRev = vp > V ? t - (dt * -V) / (vp - V) : t; // where the velocity crossed zero
+        if (cv.spec.mode === 'dynamic') {
+          const span = (cv.nRing - 1) * dt;
+          const decel = span > 0 ? (cv.ring[0] - V) / span : 0;
+          cv.vr = dynamicReverseVelocity(cv.spec.dynamic, decel);
+        }
+      } else if (V > 1e-9 && cv.tRev >= 0) cv.tRev = -1;
+      const go = cv.tRev >= 0 && (cv.spec.mode === 'delay' ? t - cv.tRev >= (cv.spec.delay ?? 0) - 1e-12 : -V >= cv.vr);
+      if (go) {
+        cv.state = 'closing';
+        cv.tStart = cv.spec.mode === 'delay' ? Math.max(cv.tRev + (cv.spec.delay ?? 0), t - dt) : t;
+        cv.s = 1;
+      }
+    });
     elements.forEach((e) => {
       if (e.kind === 'rigid') e.Qold = e.Q;
       if (e.kind === 'pump') {
@@ -1010,8 +1232,11 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   savs.forEach((sv) => sv && Object.assign(savOut[nodes[sv.node].id], { opened: sv.opened, maxFlow: sv.maxQ }));
   reliefs.forEach((rv) => rv && Object.assign(reliefOut[nodes[rv.node].id], { maxFlow: rv.maxQ, volume: rv.vol }));
   airv.forEach((a, i) => a && (airOut[nodes[i].id].maxAir = a.maxAir));
+  outlets.forEach((ou) => ou && Object.assign(outletOut[nodes[ou.node].id], { openedAt: ou.tOpen >= 0 && ou.tOpen <= st.duration ? ou.tOpen : -1, maxFlow: ou.maxQ, volume: ou.vol }));
   Object.entries(pumpOut).forEach(([id, o]) => {
-    if (o.reverseFlow) warnings.push(`Pump ${id} ran with reverse flow (no non-return valve). Results after flow reversal need full four-quadrant pump data.`);
+    if (!o.reverseFlow) return;
+    if (cvOut[id]) warnings.push(`Pump ${id} ran in reverse until its check valve closed. Results with reverse flow through a pump need full four-quadrant pump data.`);
+    else warnings.push(`Pump ${id} ran with reverse flow (no non-return valve). Results after flow reversal need full four-quadrant pump data.`);
   });
   const nodeMaxR: Record<string, number> = {};
   const nodeMinR: Record<string, number> = {};
@@ -1042,6 +1267,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     pumps: pumpOut,
     airValves: airOut,
     valves: valveOut,
+    checkValves: cvOut,
+    outlets: outletOut,
+    slams,
     steady: { heads: Object.fromEntries(steady.heads), flows: Object.fromEntries(steady.flows) },
     warnings,
     runtimeMs: performance.now() - t0,

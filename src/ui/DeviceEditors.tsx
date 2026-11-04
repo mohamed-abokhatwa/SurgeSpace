@@ -1,16 +1,17 @@
 // Editors for the surge protection devices at a junction: hydropneumatic tank, air valve, open surge tank,
-// one-way tank, surge anticipation valve and pressure relief valve.
+// one-way tank, surge anticipation valve, pressure relief valve and discharge to atmosphere / rupture disk.
 import { useState, type ReactNode } from 'react';
 import { airValveModel, orificeCurve, vesselGeometry, waterDepthOf } from '../engine/devices';
 import type { TransientResult } from '../engine/transient';
 import type { AirValve, AirValveType, NetNode, OpenTank, ReliefValve, SurgeAnticipationValve, SurgeVessel, VesselShape } from '../engine/types';
 import { fmt } from './util';
+import { OutletEditor } from './ValveEditors';
 
 type SetNode = (id: string, f: (n: NetNode) => NetNode) => void;
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s));
 
 /** Number input; `scale` converts stored SI units to the shown unit (e.g. 1000 for m → mm). Empty = undefined. */
-function Num({ label, value, onChange, scale = 1, step, list, digits = 3, optional }: { label: string; value: number | undefined; onChange: (v: number | undefined) => void; scale?: number; step?: number; list?: string; digits?: number; optional?: boolean }) {
+export function Num({ label, value, onChange, scale = 1, step, list, digits = 3, optional }: { label: string; value: number | undefined; onChange: (v: number | undefined) => void; scale?: number; step?: number; list?: string; digits?: number; optional?: boolean }) {
   const shown = value === undefined || !Number.isFinite(value) ? '' : String(+(value * scale).toFixed(digits));
   return (
     <label className="field"><span>{label}</span>
@@ -19,7 +20,7 @@ function Num({ label, value, onChange, scale = 1, step, list, digits = 3, option
     </label>
   );
 }
-function Section({ title, on, onAdd, onRemove, children, hint }: { title: string; on: boolean; onAdd: () => void; onRemove: () => void; children: ReactNode; hint?: string }) {
+export function Section({ title, on, onAdd, onRemove, children, hint }: { title: string; on: boolean; onAdd: () => void; onRemove: () => void; children: ReactNode; hint?: string }) {
   return (
     <details className="dev" open={on}>
       <summary><span>{title}</span>{on ? <span className="pill good">in model</span> : <span className="muted">none</span>}</summary>
@@ -260,6 +261,11 @@ export function DeviceEditors({ n, setNode, result }: { n: NetNode; setNode: Set
         onAdd={() => setNode(n.id, (x) => ({ ...x, relief: { setHead: Math.round((p0 ?? 50) * 1.15), capacity: 0.1, diameter: 0.1, cd: 0.7 } }))}
         onRemove={() => setNode(n.id, (x) => ({ ...x, relief: undefined }))}>
         <ReliefEditor n={n} setNode={setNode} />
+      </Section>
+      <Section title="Discharge to atmosphere" on={!!n.outlet} hint="Blow-off, hydrant or burst that opens at a set time, or a rupture disk that bursts at a set pressure."
+        onAdd={() => setNode(n.id, (x) => ({ ...x, outlet: { diameter: 0.1, cd: 0.6, trigger: 'time', time: 1, openTime: 0.5 } }))}
+        onRemove={() => setNode(n.id, (x) => ({ ...x, outlet: undefined }))}>
+        <OutletEditor n={n} setOutlet={(p) => setNode(n.id, (x) => ({ ...x, outlet: { ...x.outlet!, ...p } }))} />
       </Section>
     </div>
   );

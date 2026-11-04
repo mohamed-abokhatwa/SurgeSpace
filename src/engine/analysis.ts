@@ -67,6 +67,40 @@ export function designChecks(net: Network, r: TransientResult, envs: PipeEnvelop
     out.push({ level: 'info', title: `Relief valve ${id}`, detail: v.maxFlow > 1e-6 ? `Opened; largest discharge ${(v.maxFlow * 1000).toFixed(0)} L/s, ${v.volume.toFixed(2)} m³ released.` : 'Did not open.', where: { node: id } });
   for (const [id, a] of Object.entries(r.airValves))
     if (a.maxAir > 1e-4) out.push({ level: 'info', title: `Air valve ${id} admitted air`, detail: `Up to ${(a.maxAir * 1000).toFixed(0)} L of air${a.air[a.air.length - 1] > 1e-4 ? '; some air is still in the pipe at the end of the run' : ', expelled again as the column returned'}.`, where: { node: id } });
+  // slams: the largest at each check valve or air valve
+  const worstSlam = new Map<string, TransientResult['slams'][number]>();
+  for (const sl of r.slams ?? []) {
+    const k = `${sl.kind}:${sl.id}`;
+    if (!worstSlam.has(k) || sl.joukowsky > worstSlam.get(k)!.joukowsky) worstSlam.set(k, sl);
+  }
+  for (const sl of worstSlam.values()) {
+    const n = (r.slams ?? []).filter((x) => x.kind === sl.kind && x.id === sl.id).length;
+    const times = n > 1 ? ` (${n} closures; the largest at ${sl.t.toFixed(2)} s)` : ` at ${sl.t.toFixed(2)} s`;
+    const level: CheckLevel = sl.joukowsky >= 5 ? 'warn' : 'info';
+    if (sl.kind === 'checkValve')
+      out.push({ level, title: `Check valve slam: ${sl.id}`, detail: `It closed on reverse flow of ${sl.velocity.toFixed(2)} m/s${times}: slam surge a·v/g = ${fmt(sl.joukowsky)} m; peak pressure at ${sl.node.replace(/~.*/, '')} just after: ${fmt(sl.peakPressure)} m. A faster-closing (nozzle / spring-assisted) check valve reduces the reverse velocity.`, where: { node: sl.node.replace(/~.*/, '') } });
+    else
+      out.push({ level, title: `Air-valve slam: ${sl.id}`, detail: `The air pocket closed with the water arriving at ${sl.velocity.toFixed(2)} m/s${times}: slam surge a·v/g = ${fmt(sl.joukowsky)} m; peak pressure just after: ${fmt(sl.peakPressure)} m. A three-stage (anti-slam) valve or a smaller outflow orifice reduces it.`, where: { node: sl.node } });
+  }
+  for (const [id, c] of Object.entries(r.checkValves ?? {})) {
+    if (c.mode === 'ideal') continue;
+    const where = c.where === 'pump' ? `pump ${id}` : c.where === 'pipe' ? `pipe ${id}` : `valve ${id}`;
+    out.push({ level: 'info', title: `Check valve on ${where}`, detail: c.closures ? `Closed ${c.closures} time${c.closures > 1 ? 's' : ''}; largest reverse velocity ${c.maxReverseVelocity.toFixed(2)} m/s, ${c.reverseVelocityAtClosure.toFixed(2)} m/s at closure.` : c.maxReverseVelocity > 1e-4 ? `Reverse flow up to ${c.maxReverseVelocity.toFixed(2)} m/s but it did not close.` : 'The flow never reversed.' });
+  }
+  for (const [id, o] of Object.entries(r.outlets ?? {})) {
+    const node = net.nodes.find((x) => x.id === id);
+    const what = node?.outlet?.trigger === 'pressure' ? 'Rupture disk' : 'Discharge to atmosphere';
+    out.push({ level: o.openedAt >= 0 && node?.outlet?.trigger === 'pressure' ? 'warn' : 'info', title: `${what} ${id}`, detail: o.openedAt >= 0 ? `${node?.outlet?.trigger === 'pressure' ? 'Burst' : 'Opened'} at ${o.openedAt.toFixed(2)} s; largest discharge ${(o.maxFlow * 1000).toFixed(0)} L/s, ${o.volume.toFixed(2)} m³ released.` : node?.outlet?.trigger === 'pressure' ? 'Did not burst.' : 'Did not open during the run.', where: { node: id } });
+  }
+  for (const v of net.valves) {
+    if (!v.control || !r.valves[v.id]) continue;
+    const op = r.valves[v.id].opening;
+    let lo = Infinity, hi = -Infinity;
+    for (const x of op) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+    const name = { PRV: 'Pressure reducing valve', PSV: 'Pressure sustaining valve', FCV: 'Flow control valve' }[v.control.type];
+    const set = v.control.type === 'FCV' ? `${(v.control.set * 1000).toFixed(1)} L/s` : `${fmt(v.control.set)} m`;
+    out.push({ level: 'info', title: `${name} ${v.id}`, detail: `Set point ${set}; ${v.control.active ? 'active during the transient' : 'locked at its steady opening during the transient'}. Opening ${(lo * 100).toFixed(1)}–${(hi * 100).toFixed(1)} % of full area.` });
+  }
   if (r.maxAdjust > net.settings.maxAdjust)
     out.push({ level: 'warn', title: 'Wave speeds adjusted beyond the target', detail: `Up to ${(r.maxAdjust * 100).toFixed(2)} %.` });
   else

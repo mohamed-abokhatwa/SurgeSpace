@@ -89,4 +89,28 @@ All results are deterministic (same answer on repeated runs).
   tried and kept only if it fits the equations better. This removed a false relief-valve spike
   (254 m against a 210 m set pressure). All other examples are unchanged against the saved baseline.
 
+## 7. Valves, check valves and slams (`tests/valves.test.ts`, 43 tests)
+
+| Item | What is checked |
+|---|---|
+| Valve characteristics | Gate table unchanged; globe, ball, butterfly, needle curves rise 0 → 1; manufacturer curve interpolation; a part-open valve starts the transient with no jump (steady state uses the same curve) |
+| Control valves | PRV, PSV and FCV hold their set points in the steady state; fully open with a warning when the set point cannot be reached; locked valves keep their opening; an active PRV brings the downstream pressure back to its set point after a disturbance |
+| Operating curve | Valve follows the time–stroke table at every step |
+| Pump start | Off in steady state, speed ramps to 100 %, settles at the running duty (within 0.1 %) |
+| Check valves | Ideal: no reverse flow on pumps and pipes; parallel pumps with different check valves kept separate; pipe check valve loss = K·v²/2g; reverse-velocity closure: the computed head jump equals a·v/g (within 1.5 %); delay and closing time to one time step; dynamic characteristic: closes at the reverse velocity the curve gives for the measured deceleration; reopening head |
+| Air-valve slam | Pocket closure found; computed jump = a·(Σq/ΣA)/g for the closing columns (39.9 vs 39.8 m); three-stage valve removes the slam |
+| Outlets | Timed outlet and rupture disk: Q = Cd·A·opening·√(2g·p) at every step, volume balance, bursting time, peak limited |
+
+## 8. Control valves against EPANET 2.2 (`control-valves-vs-epanet.ts`)
+
+A network with a PRV (active), a PSV (fully open because its set point is already exceeded) and an FCV (active),
+imported from `data/control-valves.inp` and compared with EPANET 2.2 run through WNTR: worst head difference
+0.005 m, worst flow difference 0.0001 L/s, same valve states.
+
+## 9. Corrections made while adding valves
+
+- A part-open **gate valve** used the raw stroke as the flow area in the steady state but the gate table in the
+  transient, which caused a start-up jump. Both now use the same valve curve.
+- A closed valve with a check valve could be re-opened by the steady solver; it now stays closed.
+
 `scripts/full-check.sh` runs every test and comparison in this folder; it was run three times with identical results.

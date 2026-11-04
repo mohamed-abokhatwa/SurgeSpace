@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AirValveSuggestion, Check, VesselSizing } from '../engine/analysis';
 import { DeviceDatalists, DeviceEditors } from './DeviceEditors';
+import { CheckValveEditor, PairsField, ValveLinkEditor } from './ValveEditors';
 import type { AirValveType } from '../engine/types';
 import { estimateInertia, pumpRatedQ } from '../engine/hydraulics';
 import type { TransientResult } from '../engine/transient';
@@ -29,6 +30,7 @@ const pipeCols: Col<Pipe>[] = [
   { key: 'roughness', label: 'Rough.', get: (r) => r.roughness, set: (r, v) => ({ ...r, roughness: num(v) }), type: 'num' },
   { key: 'wavespeed', label: 'a (m/s)', get: (r) => r.wavespeed, set: (r, v) => ({ ...r, wavespeed: num(v) }), type: 'num' },
   { key: 'pressureClass', label: 'Class (m)', get: (r) => r.pressureClass ?? '', set: (r, v) => ({ ...r, pressureClass: num(v) || undefined }), type: 'num' },
+  { key: 'cv', label: 'Check valve', get: (r) => !!r.checkValve, set: (r, v) => ({ ...r, checkValve: v === '1' ? r.checkValve ?? { mode: 'ideal', kOpen: 1 } : undefined }), type: 'bool' },
 ];
 const pumpCols: Col<Pump>[] = [
   { key: 'id', label: 'ID', get: (r) => r.id, set: (r, v) => ({ ...r, id: v }) },
@@ -51,7 +53,7 @@ const valveCols: Col<Valve>[] = [
   { key: 'to', label: 'To', get: (r) => r.to, set: (r, v) => ({ ...r, to: v }) },
   { key: 'd', label: 'D (mm)', get: (r) => +(r.diameter * 1000).toFixed(1), set: (r, v) => ({ ...r, diameter: num(v) / 1000 }), type: 'num' },
   { key: 'k0', label: 'K open', get: (r) => r.k0, set: (r, v) => ({ ...r, k0: num(v) }), type: 'num' },
-  { key: 'open', label: 'Opening', get: (r) => r.opening, set: (r, v) => ({ ...r, opening: num(v) }), type: 'num' },
+  { key: 'open', label: 'Stroke', get: (r) => r.opening, set: (r, v) => ({ ...r, opening: num(v) }), type: 'num' },
   { key: 'check', label: 'NRV', get: (r) => !!r.check, set: (r, v) => ({ ...r, check: v === '1' }), type: 'bool' },
 ];
 
@@ -127,16 +129,26 @@ export function EventPanel({ net, setNet }: { net: Network; setNet: SetNet }) {
             <label className="field"><span>Start time (s)</span><input type="number" step="0.1" value={ev.start} onChange={(e) => set({ start: num(e.target.value) })} /></label>
             {ev.kind === 'pumpTrip' && (
               <label className="field"><span>How the pump stops</span>
-                <select value={ev.pumpMode ?? 'trip'} onChange={(e) => set({ pumpMode: e.target.value as 'trip' | 'ramp', duration: ev.duration ?? 5 })}>
+                <select value={ev.pumpMode ?? 'trip'} onChange={(e) => set({ pumpMode: e.target.value as 'trip' | 'ramp' | 'start', duration: ev.duration ?? 5 })}>
                   <option value="trip">Power failure (inertia run-down)</option>
                   <option value="ramp">Controlled stop (VFD ramp)</option>
+                  <option value="start">Pump start (speed ramp-up)</option>
                 </select>
               </label>
             )}
-            {ev.kind === 'pumpTrip' && ev.pumpMode === 'ramp' && <label className="field"><span>Ramp-down time (s)</span><input type="number" step="0.5" value={ev.duration ?? 5} onChange={(e) => set({ duration: num(e.target.value) })} /></label>}
-            {ev.kind !== 'pumpTrip' && <label className="field"><span>Stroke time (s)</span><input type="number" step="0.1" value={ev.duration ?? 5} onChange={(e) => set({ duration: num(e.target.value) })} /></label>}
-            {ev.kind !== 'pumpTrip' && <label className="field"><span>Final opening (0–1)</span><input type="number" step="0.05" value={ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1)} onChange={(e) => set({ finalOpening: num(e.target.value) })} /></label>}
+            {ev.kind === 'pumpTrip' && (ev.pumpMode === 'ramp' || ev.pumpMode === 'start') && <label className="field"><span>{ev.pumpMode === 'start' ? 'Ramp-up time (s)' : 'Ramp-down time (s)'}</span><input type="number" step="0.5" value={ev.duration ?? 5} onChange={(e) => set({ duration: num(e.target.value) })} /></label>}
             {ev.kind !== 'pumpTrip' && (
+              <label className="field"><span>Movement</span>
+                <select value={ev.curve ? 'curve' : 'stroke'} onChange={(e) => set({ curve: e.target.value === 'curve' ? [[0, ev.kind === 'valveClose' ? 1 : 0], [(ev.duration ?? 5) / 2, 0.2], [ev.duration ?? 5, ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1)]] : undefined })}>
+                  <option value="stroke">Stroke time and law</option>
+                  <option value="curve">Operating curve (time, stroke)</option>
+                </select>
+              </label>
+            )}
+            {ev.kind !== 'pumpTrip' && !ev.curve && <label className="field"><span>Stroke time (s)</span><input type="number" step="0.1" value={ev.duration ?? 5} onChange={(e) => set({ duration: num(e.target.value) })} /></label>}
+            {ev.kind !== 'pumpTrip' && !ev.curve && <label className="field"><span>Final stroke (0–1)</span><input type="number" step="0.05" value={ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1)} onChange={(e) => set({ finalOpening: num(e.target.value) })} /></label>}
+            {ev.kind !== 'pumpTrip' && ev.curve && <PairsField key={ev.curve.length} label="Time from start (s), stroke (0 shut – 1 open)" value={ev.curve} onChange={(c) => set({ curve: c.length >= 2 ? c : ev.curve })} rows={6} />}
+            {ev.kind !== 'pumpTrip' && !ev.curve && (
               <label className="field"><span>Closure law</span>
                 <select value={ev.exponent ?? 1} onChange={(e) => set({ exponent: num(e.target.value) })}>
                   <option value={0.5}>Fast start (0.5)</option>
@@ -147,6 +159,8 @@ export function EventPanel({ net, setNet }: { net: Network; setNet: SetNet }) {
               </label>
             )}
           </div>
+          {ev.kind === 'pumpTrip' && ev.pumpMode === 'start' && <p className="hint">The pumps above are off in the steady state and start at the start time; their check valves open once the pump head beats the line.</p>}
+          {ev.kind !== 'pumpTrip' && <p className="hint">Stroke is converted to flow area by each valve’s characteristic (set it in the valve inspector). An operating curve gives multi-stage closures, e.g. fast to 20 % then slow.</p>}
         </>
       )}
       <div className="label">Run</div>
@@ -267,6 +281,8 @@ export function ProtectionPanel({ net, setNet, busy, onSizeVessel, onAirValves, 
 
 export function Inspector({ net, setNet, sel, result, onClose }: { net: Network; setNet: SetNet; sel: NonNullable<Selection>; result: TransientResult | null; onClose: () => void }) {
   const setNode = (id: string, f: (n: NetNode) => NetNode) => setNet((n) => ({ ...n, nodes: n.nodes.map((x) => (x.id === id ? f(x) : x)) }));
+  const setPipe = (id: string, f: (p: Pipe) => Pipe) => setNet((n) => ({ ...n, pipes: n.pipes.map((x) => (x.id === id ? f(x) : x)) }));
+  const setPump = (id: string, f: (p: Pump) => Pump) => setNet((n) => ({ ...n, pumps: n.pumps.map((x) => (x.id === id ? f(x) : x)) }));
   const head = (
     <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
       <b>{sel.type === 'node' ? 'Node' : sel.type === 'pipe' ? 'Pipe' : sel.type === 'pump' ? 'Pump' : 'Valve'} {sel.id}</b>
@@ -314,6 +330,16 @@ export function Inspector({ net, setNet, sel, result, onClose }: { net: Network;
             <p className="muted" style={{ marginBottom: 0 }}>{rigid ? 'Modelled as a rigid water column (too short to carry a wave at this time step).' : `Wave speed adjusted by ${fmt((result.pipeAdjust[p.id] ?? 0) * 100, 3)} %; length unchanged.`}</p>
           </>
         )}
+        <div className="devices">
+          <details className="dev" open={!!p.checkValve}>
+            <summary><span>Check valve at {p.from}</span>{p.checkValve ? <span className="pill good">in model</span> : <span className="muted">none</span>}</summary>
+            <div className="dev-body">
+              <label className="row dev-check"><input type="checkbox" checked={!!p.checkValve} onChange={(e) => setPipe(p.id, (x) => ({ ...x, checkValve: e.target.checked ? x.checkValve ?? { mode: 'ideal', kOpen: 1 } : undefined }))} /> Flow only from {p.from} to {p.to}</label>
+              {p.checkValve && <CheckValveEditor spec={p.checkValve} showLoss boreHint={p.diameter} onChange={(s) => setPipe(p.id, (x) => ({ ...x, checkValve: s }))} />}
+              {p.checkValve && <CheckValveResult r={result} id={p.id} />}
+            </div>
+          </details>
+        </div>
       </div>
     );
   }
@@ -335,6 +361,17 @@ export function Inspector({ net, setNet, sel, result, onClose }: { net: Network;
         </div>
         <p className="muted">Thorley estimate for this duty: {fmt(est, 2)} kg·m² (pump + motor).</p>
         <button className="btn small" onClick={() => setNet((n) => ({ ...n, pumps: n.pumps.map((x) => (x.id === p.id ? { ...x, inertia: +est.toFixed(2) } : x)) }))}>Use estimate</button>
+        <div className="devices">
+          <DeviceDatalists />
+          <details className="dev" open={p.checkValve}>
+            <summary><span>Discharge check valve</span>{p.checkValve ? <span className="pill good">in model</span> : <span className="muted">none</span>}</summary>
+            <div className="dev-body">
+              <label className="row dev-check"><input type="checkbox" checked={p.checkValve} onChange={(e) => setPump(p.id, (x) => ({ ...x, checkValve: e.target.checked }))} /> Non-return valve on the discharge</label>
+              {p.checkValve && <CheckValveEditor spec={p.checkSpec ?? { mode: 'ideal' }} boreHint={net.pipes.find((x) => x.from === p.to || x.to === p.to)?.diameter} onChange={(s) => setPump(p.id, (x) => ({ ...x, checkSpec: s }))} />}
+              {p.checkValve && <CheckValveResult r={result} id={p.id} />}
+            </div>
+          </details>
+        </div>
       </div>
     );
   }
@@ -343,8 +380,20 @@ export function Inspector({ net, setNet, sel, result, onClose }: { net: Network;
   return (
     <div className="card inspector small">
       {head}
-      <div className="muted">{v.from} → {v.to} · DN{Math.round(v.diameter * 1000)} · K open {v.k0} · opening {v.opening}</div>
+      <div className="muted">{v.from} → {v.to}</div>
+      <DeviceDatalists />
+      <ValveLinkEditor v={v} result={result} setValve={(f) => setNet((n) => ({ ...n, valves: n.valves.map((x) => (x.id === v.id ? f(x) : x)) }))} />
+      {v.check && <CheckValveResult r={result} id={v.id} />}
     </div>
+  );
+}
+
+function CheckValveResult({ r, id }: { r: TransientResult | null; id: string }) {
+  const c = r?.checkValves?.[id];
+  if (!c) return null;
+  const slam = r!.slams.filter((s) => s.kind === 'checkValve' && s.id === id).sort((a, b) => b.joukowsky - a.joukowsky)[0];
+  return (
+    <p className="muted dev-note">Last run: {c.closures ? `closed ${c.closures}×, ` : ''}largest reverse velocity {fmt(c.maxReverseVelocity, 2)} m/s{slam ? `; slam surge ${fmt(slam.joukowsky, 1)} m (a·v/g) at ${fmt(slam.t, 2)} s` : ''}.</p>
   );
 }
 
