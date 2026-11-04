@@ -105,7 +105,13 @@ All results are deterministic (same answer on repeated runs).
 
 A network with a PRV (active), a PSV (fully open because its set point is already exceeded) and an FCV (active),
 imported from `data/control-valves.inp` and compared with EPANET 2.2 run through WNTR: worst head difference
-0.005 m, worst flow difference 0.0001 L/s, same valve states.
+0.005 m, worst flow difference 0.0001 L/s, same valve states. Net6 (3,323 junctions) with its two PRVs as
+control valves: worst head difference 0.017 m against EPANET (`steady-vs-epanet.ts`).
+
+Control valves are solved the way EPANET does it: inside one steady solve each valve has a status (active, open
+or closed); an active PRV holds its downstream node at the set head, a PSV its upstream node, an FCV its flow.
+Statuses change only once the flows have settled. The cost does not grow with the number of valves (Net6: 7 s
+with control valves, 3 s without).
 
 ## 9. Corrections made while adding valves
 

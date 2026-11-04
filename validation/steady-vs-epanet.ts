@@ -13,8 +13,16 @@ for (const name of ['Net3', 'ky4', 'Net6']) {
   for (const n of net.nodes) if (n.kind === 'junction') n.demand = r.demand[n.id] ?? 0;
   for (const p of net.pumps) p.on = r.status[p.id] !== 0;
   for (const p of net.pipes) if (r.status[p.id] === 0) p.closed = true;
+  // PRVs as SurgeSpace control valves (set points from the file), compared before they are fixed below
+  if (net.valves.some((v) => v.control)) {
+    const sc = solveSteady(net);
+    let w = 0;
+    for (const n of net.nodes) if (n.kind !== 'reservoir' && r.head[n.id] !== undefined) w = Math.max(w, Math.abs(sc.heads.get(n.id)! - r.head[n.id]));
+    console.log(`${name}: with its ${net.valves.filter((v) => v.control).length} PRV/PSV/FCV as control valves, worst head difference vs EPANET ${w.toFixed(3)} m`);
+  }
   // PRVs: EPANET decides their setting; hold the loss EPANET found (equivalent at t = 0)
   for (const v of net.valves) {
+    v.control = undefined;
     const q = Math.abs(r.flow[v.id] ?? 0);
     const dh = Math.abs((r.head[v.from] ?? 0) - (r.head[v.to] ?? 0));
     const A = area(v.diameter);
