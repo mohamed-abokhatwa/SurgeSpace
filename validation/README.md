@@ -64,3 +64,29 @@ codes, and both start from EPANET's t = 0 state. Column separation was switched 
 
 Joukowsky jump (0.05 %), line packing, column separation and collapse, 2L/a timing, slow closure,
 mixed-pipe time step selection, and junction wave transmission against exact theory (0.8 %).
+
+## 5. Protection devices (`tests/devices.test.ts`, 49 tests)
+
+Each device is checked against hand calculations or closed-form theory:
+
+| Device | What is checked |
+|---|---|
+| Hydropneumatic tank | Vertical, horizontal and sphere geometry; bladder pre-charge (p_pre·V = p0·Vg); oscillation period and amplitude against rigid-column theory for n = 1.0 and 1.4; connection inertia; water balance; dip-tube minimum water; non-return valve with bypass loss |
+| Open surge tank | Period and amplitude against rigid-column theory; overflow volume balance over 40,000 steps |
+| One-way tank | Outflow only, check valve holds on recovery |
+| Surge anticipation valve | Flow law Q = Cd·A·open·√(2gp); open / hold / close schedule; low and high triggers |
+| Pressure relief valve | Flow law with lift = (p − set)/accumulation; limits the peak near the set pressure |
+| Air valves | Double, three-stage (switch to small orifice), vacuum breaker, release only, manufacturer curve (curve built from the orifice sizes gives the same result), Treat as junction, ideal gas law |
+
+All results are deterministic (same answer on repeated runs).
+
+## 6. Corrections made during device testing
+
+- **Gas start-up equilibrium.** Free-gas volumes are now set at equilibrium with the steady head at t = 0.
+  Before, a tiny start-up drift (3e-4 m) could grow in strongly cavitating runs. The gravity-main example
+  peak changed from 560 m to 510 m; 510 m is converged (510.2–510.4 m across time steps and gas fractions).
+- **Solver fallback.** When the Newton solve for a group of joined devices stalls, a flow-based solve is
+  tried and kept only if it fits the equations better. This removed a false relief-valve spike
+  (254 m against a 210 m set pressure). All other examples are unchanged against the saved baseline.
+
+`scripts/full-check.sh` runs every test and comparison in this folder; it was run three times with identical results.

@@ -28,3 +28,6 @@ msix/layout
 msix/*.msix
 *.key
 .env*
+temp.bin
+temp.inp
+temp.rpt

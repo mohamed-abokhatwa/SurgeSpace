@@ -363,10 +363,38 @@ export function MapView({
       if (n.airValve) {
         const av = result?.airValves[n.id];
         const air = av ? av.air[f0] : 0;
+        const off = !!n.airValve.treatAsJunction;
+        ctx.save();
+        if (off) { ctx.globalAlpha = 0.45; ctx.setLineDash([2, 2]); }
         ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x + 6, y - 17); ctx.lineTo(x - 6, y - 17); ctx.closePath();
         ctx.fillStyle = air > 1e-4 && live ? theme.warn : theme.panel; ctx.fill();
-        ctx.strokeStyle = theme.warn; ctx.lineWidth = 1.6; ctx.stroke();
+        ctx.strokeStyle = off ? theme.faint : theme.warn; ctx.lineWidth = 1.6; ctx.stroke();
+        ctx.restore();
         if (air > 1e-4 && live) { ctx.beginPath(); ctx.arc(x, y - 21, 2 + 2 * Math.abs(Math.sin(now / 200)), 0, Math.PI * 2); ctx.strokeStyle = theme.warn; ctx.stroke(); }
+      }
+      // open surge tank / one-way tank: open-top box with its water level
+      if (n.tank) {
+        const tk = result?.tanks[n.id];
+        const tw = 14, th = 24, bx = x + 8, by = y - 8 - th;
+        const span = n.tank.topElev - n.tank.bottomElev || 1;
+        const lvl = tk ? tk.level[f0] + (tk.level[f1] - tk.level[f0]) * wf : (n.tank.oneWay ? n.tank.initialLevel ?? n.tank.bottomElev + 0.9 * span : n.tank.topElev - 0.3 * span);
+        const frac = Math.max(0, Math.min(1, (lvl - n.tank.bottomElev) / span));
+        ctx.strokeStyle = theme.cyan; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(bx + tw / 2, y); ctx.lineTo(bx + tw / 2, by + th); ctx.stroke();
+        ctx.fillStyle = theme.cyan; ctx.globalAlpha = 0.6; ctx.fillRect(bx, by + th * (1 - frac), tw, th * frac); ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, by + th); ctx.lineTo(bx + tw, by + th); ctx.lineTo(bx + tw, by); ctx.stroke();
+        if (n.tank.oneWay) { ctx.fillStyle = theme.cyan; ctx.beginPath(); ctx.moveTo(bx + tw / 2 - 4, y - 3); ctx.lineTo(bx + tw / 2 + 4, y - 3); ctx.lineTo(bx + tw / 2, y + 3); ctx.closePath(); ctx.fill(); }
+      }
+      // surge anticipation valve and relief valve: small valve symbol with a discharge arrow, lit while flowing
+      for (const [dev, flowArr, dx] of [[n.sav, result?.savs[n.id]?.flow, -18], [n.relief, result?.reliefs[n.id]?.flow, n.sav ? -34 : -18]] as const) {
+        if (!dev) continue;
+        const flowing = !!flowArr && flowArr[f0] > 1e-5 && live;
+        const vx = x + dx, vy = y - 12;
+        ctx.strokeStyle = dev === n.relief ? theme.bad : theme.accent; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(vx, vy + 6); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(vx - 5, vy - 4); ctx.lineTo(vx + 5, vy + 4); ctx.lineTo(vx + 5, vy - 4); ctx.lineTo(vx - 5, vy + 4); ctx.closePath();
+        ctx.fillStyle = flowing ? (dev === n.relief ? theme.bad : theme.accent) : theme.panel; ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(vx, vy - 5); ctx.lineTo(vx, vy - 12); ctx.moveTo(vx - 3, vy - 9); ctx.lineTo(vx, vy - 12); ctx.lineTo(vx + 3, vy - 9); ctx.stroke();
       }
       if (showLabels || isSel) { ctx.fillStyle = theme.muted; ctx.fillText(n.id, x + 7, y + 14); }
     }

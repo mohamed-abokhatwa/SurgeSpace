@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import type { AirValveSuggestion, Check, VesselSizing } from '../engine/analysis';
+import { DeviceDatalists, DeviceEditors } from './DeviceEditors';
+import type { AirValveType } from '../engine/types';
 import { estimateInertia, pumpRatedQ } from '../engine/hydraulics';
 import type { TransientResult } from '../engine/transient';
 import type { EventKind, Network, NetNode, Pipe, Pump, Valve } from '../engine/types';
@@ -194,6 +196,7 @@ export function ProtectionPanel({ net, setNet, busy, onSizeVessel, onAirValves, 
   const junctions = net.nodes.filter((n) => n.kind === 'junction');
   const defaultNode = net.pumps[0]?.to ?? junctions[0]?.id ?? '';
   const [node, setNode] = useState(defaultNode);
+  const [airEdit, setAirEdit] = useState<Record<string, { type: AirValveType; inD: number; outD: number; smallD: number }>>({});
   return (
     <div>
       <div className="label">Automatic surge vessel sizing</div>
@@ -218,7 +221,7 @@ export function ProtectionPanel({ net, setNet, busy, onSizeVessel, onAirValves, 
                 <div className="stat"><b>{sizing.gasVolume} m³</b><span>Initial gas</span></div>
                 <div className="stat"><b>DN{Math.round(sizing.connDiameter * 1000)}</b><span>Connection</span></div>
               </div>
-              <button className="btn small" style={{ marginTop: 8 }} onClick={() => setNet((n) => ({ ...n, nodes: n.nodes.map((x) => (x.id === sizing.node ? { ...x, vessel: { volume: sizing.volume, gasVolume: sizing.gasVolume, n: 1.2, connDiameter: sizing.connDiameter, kIn: 2.5, kOut: 0.5 } } : x)) }))}>Apply to model</button>
+              <button className="btn small" style={{ marginTop: 8 }} onClick={() => setNet((n) => ({ ...n, nodes: n.nodes.map((x) => (x.id === sizing.node ? { ...x, vessel: { n: 1.2, kIn: 2.5, kOut: 0.5, ...x.vessel, volume: sizing.volume, gasVolume: sizing.gasVolume, gasInput: 'volume' as const, connDiameter: sizing.connDiameter } } : x)) }))}>Apply to model</button>
             </>
           )}
         </div>
@@ -230,8 +233,30 @@ export function ProtectionPanel({ net, setNet, busy, onSizeVessel, onAirValves, 
         <div className="card" style={{ marginTop: 10 }}>
           {airSugg.length === 0 ? <span className="small muted">No high point needs an air valve.</span> : (
             <>
-              {airSugg.map((a) => <div key={a.node} className="row small" style={{ justifyContent: 'space-between' }}><span>{a.node}</span><span className="mono">DN{Math.round(a.inDiameter * 1000)} in · min {fmt(a.minPressure, 1)} m</span></div>)}
-              <button className="btn small" style={{ marginTop: 8 }} onClick={() => setNet((n) => ({ ...n, nodes: n.nodes.map((x) => { const s = airSugg.find((a) => a.node === x.id); return s ? { ...x, airValve: { inDiameter: s.inDiameter, outDiameter: Math.max(0.01, s.inDiameter / 4) } } : x; }) }))}>Apply to model</button>
+              <p className="small muted" style={{ marginTop: 0 }}>Change the type or sizes before applying if you like (sizes in mm).</p>
+              <table className="grid">
+                <thead><tr><th>Node</th><th>Type</th><th>In</th><th>Out</th><th>Small</th></tr></thead>
+                <tbody>{airSugg.map((a) => {
+                  const e = airEdit[a.node] ?? { type: 'double' as AirValveType, inD: a.inDiameter * 1000, outD: Math.max(10, (a.inDiameter * 1000) / 4), smallD: 3 };
+                  const upd = (p: Partial<typeof e>) => setAirEdit((m) => ({ ...m, [a.node]: { ...e, ...p } }));
+                  return (
+                    <tr key={a.node} title={`Lowest pressure with this valve: ${fmt(a.minPressure, 1)} m`}>
+                      <td>{a.node}</td>
+                      <td><select className="cell" value={e.type} onChange={(ev) => upd({ type: ev.target.value as AirValveType })}><option value="double">Double</option><option value="threeStage">3-stage</option><option value="vacuumBreaker">Vacuum br.</option></select></td>
+                      <td><input className="cell" type="number" list="dn-sizes" value={e.inD} onChange={(ev) => upd({ inD: Number(ev.target.value) })} /></td>
+                      <td><input className="cell" type="number" list="dn-sizes" value={e.outD} disabled={e.type === 'vacuumBreaker'} onChange={(ev) => upd({ outD: Number(ev.target.value) })} /></td>
+                      <td><input className="cell" type="number" list="small-sizes" value={e.smallD} disabled={e.type !== 'threeStage'} onChange={(ev) => upd({ smallD: Number(ev.target.value) })} /></td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+              <DeviceDatalists />
+              <button className="btn small" style={{ marginTop: 8 }} onClick={() => setNet((n) => ({ ...n, nodes: n.nodes.map((x) => {
+                const s = airSugg.find((a) => a.node === x.id);
+                if (!s) return x;
+                const e = airEdit[s.node] ?? { type: 'double' as AirValveType, inD: s.inDiameter * 1000, outD: Math.max(10, (s.inDiameter * 1000) / 4), smallD: 3 };
+                return { ...x, airValve: { inDiameter: Math.max(e.inD, 1) / 1000, outDiameter: Math.max(e.outD, 0.5) / 1000, type: e.type, ...(e.type === 'threeStage' ? { smallDiameter: Math.max(e.smallD, 0.5) / 1000, switchHead: 0.3 } : {}) } };
+              }) }))}>Apply to model</button>
             </>
           )}
         </div>
@@ -263,38 +288,7 @@ export function Inspector({ net, setNet, sel, result, onClose }: { net: Network;
             <div className="stat"><b>{fmt(result.nodeMin[n.id] - n.elev, 1)}</b><span>Min p (m)</span></div>
           </div>
         )}
-        {n.kind === 'junction' && (
-          <>
-            <div className="label">Surge vessel</div>
-            {n.vessel ? (
-              <div className="grid2">
-                <label className="field"><span>Volume (m³)</span><input type="number" value={n.vessel.volume} onChange={(e) => setNode(n.id, (x) => ({ ...x, vessel: { ...x.vessel!, volume: num(e.target.value) } }))} /></label>
-                <label className="field"><span>Initial gas (m³)</span><input type="number" value={n.vessel.gasVolume} onChange={(e) => setNode(n.id, (x) => ({ ...x, vessel: { ...x.vessel!, gasVolume: num(e.target.value) } }))} /></label>
-                <label className="field"><span>Connection (mm)</span><input type="number" value={Math.round(n.vessel.connDiameter * 1000)} onChange={(e) => setNode(n.id, (x) => ({ ...x, vessel: { ...x.vessel!, connDiameter: num(e.target.value) / 1000 } }))} /></label>
-                <label className="field"><span>Polytropic n</span><input type="number" step="0.05" value={n.vessel.n} onChange={(e) => setNode(n.id, (x) => ({ ...x, vessel: { ...x.vessel!, n: num(e.target.value) } }))} /></label>
-                <label className="field"><span>K in</span><input type="number" step="0.1" value={n.vessel.kIn} onChange={(e) => setNode(n.id, (x) => ({ ...x, vessel: { ...x.vessel!, kIn: num(e.target.value) } }))} /></label>
-                <label className="field"><span>K out</span><input type="number" step="0.1" value={n.vessel.kOut} onChange={(e) => setNode(n.id, (x) => ({ ...x, vessel: { ...x.vessel!, kOut: num(e.target.value) } }))} /></label>
-                <button className="btn small" onClick={() => setNode(n.id, (x) => ({ ...x, vessel: undefined }))}>Remove vessel</button>
-              </div>
-            ) : <button className="btn small" onClick={() => setNode(n.id, (x) => ({ ...x, vessel: { volume: 10, gasVolume: 5, n: 1.2, connDiameter: 0.3, kIn: 2.5, kOut: 0.5 } }))}>+ Add surge vessel</button>}
-            <div className="label">Air valve</div>
-            {n.airValve ? (
-              <div className="grid2">
-                <label className="field"><span>Inflow orifice (mm)</span><input type="number" value={Math.round(n.airValve.inDiameter * 1000)} onChange={(e) => setNode(n.id, (x) => ({ ...x, airValve: { ...x.airValve!, inDiameter: num(e.target.value) / 1000 } }))} /></label>
-                <label className="field"><span>Outflow orifice (mm)</span><input type="number" value={Math.round(n.airValve.outDiameter * 1000)} onChange={(e) => setNode(n.id, (x) => ({ ...x, airValve: { ...x.airValve!, outDiameter: num(e.target.value) / 1000 } }))} /></label>
-                <button className="btn small" onClick={() => setNode(n.id, (x) => ({ ...x, airValve: undefined }))}>Remove air valve</button>
-              </div>
-            ) : <button className="btn small" onClick={() => setNode(n.id, (x) => ({ ...x, airValve: { inDiameter: 0.1, outDiameter: 0.025 } }))}>+ Add air valve</button>}
-            <div className="label">Pressure relief valve</div>
-            {n.relief ? (
-              <div className="grid2">
-                <label className="field"><span>Set pressure (m)</span><input type="number" value={n.relief.setHead} onChange={(e) => setNode(n.id, (x) => ({ ...x, relief: { ...x.relief!, setHead: num(e.target.value) } }))} /></label>
-                <label className="field"><span>Capacity (L/s @ +10 m)</span><input type="number" value={Math.round(n.relief.capacity * 1000)} onChange={(e) => setNode(n.id, (x) => ({ ...x, relief: { ...x.relief!, capacity: num(e.target.value) / 1000 } }))} /></label>
-                <button className="btn small" onClick={() => setNode(n.id, (x) => ({ ...x, relief: undefined }))}>Remove</button>
-              </div>
-            ) : <button className="btn small" onClick={() => setNode(n.id, (x) => ({ ...x, relief: { setHead: Math.round(((result?.steady.heads[n.id] ?? n.elev + 50) - n.elev) * 1.15), capacity: 0.1 } }))}>+ Add relief valve</button>}
-          </>
-        )}
+        {n.kind === 'junction' && <DeviceEditors n={n} setNode={setNode} result={result} />}
       </div>
     );
   }

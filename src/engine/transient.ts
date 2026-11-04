@@ -6,16 +6,16 @@
 //  • Column separation by the discrete gas cavity model (DGCM, Wylie 1984; Bergant & Simpson),
 //    solved in closed form at every computational section — no spurious vapour-pressure spikes.
 //  • Unsteady friction (Brunone–Vítkovský form with Vardy's shear decay coefficient).
-//  • Implicit device boundaries: pump run-down with inertia and non-return valve, surge vessel
-//    (polytropic gas, separate in/out losses), air valve (Wylie–Streeter air-flow model),
-//    pressure relief valve, pressure-dependent demands.
+//  • Implicit device boundaries: pump run-down with inertia and non-return valve; hydropneumatic tank
+//    (vertical, horizontal or spherical; gas volume or bladder pre-charge; dip tube; connection inertia;
+//    separate in/out losses or non-return valve with bypass); air valves (double-acting, three-stage
+//    anti-slam, vacuum breaker, air release, manufacturer curves; Wylie–Streeter air flow); open surge
+//    tank with overflow; one-way (feed) tank; surge anticipation valve; pressure relief valve;
+//    pressure-dependent demands.
 import { frictionF, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpQuadratic, pumpTorqueQuadratic, solveDense, type PumpCurve } from './hydraulics';
 import { solveSteady, type SteadyResult } from './steady';
 import { G, HB, HV, RHO, area, type Network, type NetNode } from './types';
-
-const RAIR = 287.1;
-const TAIR = 293.15;
-const CD_AIR = 0.6;
+import { RAIR, TAIR, airValveMassRate, airValveModel, prechargeGas, reliefFlow, savOpening, solveDecreasing, vesselGeometry, waterDepthOf, waterVolumeAt } from './devices';
 
 export interface PipeEnvelope {
   id: string;
@@ -47,9 +47,15 @@ export interface TransientResult {
   envelopes: PipeEnvelope[];
   nodeMax: Record<string, number>;
   nodeMin: Record<string, number>;
-  vessels: Record<string, { gas: Float32Array; flow: Float32Array; minGas: number; maxGas: number; volume: number; emptied: boolean }>;
+  vessels: Record<string, { gas: Float32Array; flow: Float32Array; level: Float32Array; minGas: number; maxGas: number; volume: number; initialGas: number; emptied: boolean; minWater: number; bottom: number; top: number }>;
+  /** Open surge tanks and one-way tanks: water surface elevation and flow into the tank (negative = out). */
+  tanks: Record<string, { level: Float32Array; flow: Float32Array; minLevel: number; maxLevel: number; bottom: number; top: number; spilled: number; emptied: boolean; oneWay: boolean }>;
+  /** Surge anticipation valves: opening (0–1) and discharge. */
+  savs: Record<string, { opening: Float32Array; flow: Float32Array; opened: number; maxFlow: number }>;
+  /** Pressure relief valves: discharge. */
+  reliefs: Record<string, { flow: Float32Array; maxFlow: number; volume: number }>;
   pumps: Record<string, { speed: Float32Array; flow: Float32Array; reverseFlow: boolean }>;
-  airValves: Record<string, { air: Float32Array; maxAir: number }>;
+  airValves: Record<string, { air: Float32Array; mass: Float32Array; maxAir: number }>;
   valves: Record<string, { opening: Float32Array }>;
   steady: { heads: Record<string, number>; flows: Record<string, number> };
   warnings: string[];
@@ -231,7 +237,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       N, dx, a, B: a / (G * A), A, D: p.diameter, rough: p.roughness,
       minorPerReach: (p.minorLoss ?? 0) / (2 * G * A * A) / N,
       kUF: st.unsteadyFriction && q0 !== 0 ? brunoneK(Math.max(re, 1)) : 0,
-      z, C3, H, Qu: Qa.slice(), Qd: Qa.slice(), Qm1: Qa.slice(), V: new Float64Array(N + 1),
+      // free-gas volumes start at their equilibrium size at the steady pressure (no start-up disturbance)
+      z, C3, H, Qu: Qa.slice(), Qd: Qa.slice(), Qm1: Qa.slice(), V: Float64Array.from(C3, (c, i) => { const y = H[i] - z[i] + (opt.noCavitation ? HB + 1e5 : HB) - HV; return y > 1e-9 ? c / y : 0; }),
       fR: new Float64Array(N + 1).fill((frictionF(p, q0, st.friction) * dx) / (2 * G * p.diameter * A * A) + (p.minorLoss ?? 0) / (2 * G * A * A) / N),
       Hn: new Float64Array(N + 1), Qun: new Float64Array(N + 1), Qdn: new Float64Array(N + 1),
       from, to, CP: 0, CM: 0,
@@ -253,26 +260,60 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     if (st.pressureDependentDemand && d > 0 && p0 > 0.5) demK[i] = d / Math.sqrt(p0);
     else demConst[i] = d;
   });
-  const nodeV = new Float64Array(NN); // node cavity (gas) volume
-  // surge vessels
+  const nodeV = new Float64Array(NN); // node cavity (gas) volume, starting at equilibrium with the steady head
+  nodes.forEach((n, i) => { const y = Hprev[i] - n.elev + (opt.noCavitation ? HB + 1e5 : HB) - HV; nodeV[i] = y > 1e-9 ? nodeC3[i] / y : 0; });
+  // hydropneumatic tanks (surge vessels)
   const vessels = nodes.map((n, i) => {
     if (!n.vessel || n.kind === 'reservoir') return null;
     const v = n.vessel;
-    const Dv = Math.cbrt((2 * v.volume) / Math.PI); // vertical cylinder, height = 2 D
-    const As = (Math.PI / 4) * Dv * Dv;
-    const zl0 = n.elev + (v.volume - v.gasVolume) / As;
-    const pAbs0 = Hprev[i] - zl0 + HB; // gas absolute head
+    const geo = vesselGeometry(v);
+    const bottom = v.bottomElev ?? n.elev;
+    const Vt = v.volume;
+    const gasHeadAt = (Vg: number) => Hprev[i] - (bottom + waterDepthOf(geo, Vt - Vg)) + HB; // absolute gas head
+    let Vg0 = Math.min(Math.max(v.gasVolume, 1e-6), Vt);
+    if (v.gasInput === 'precharge') {
+      const pc = prechargeGas(Vt, v.prechargeHead ?? 0, gasHeadAt);
+      Vg0 = pc.gas;
+      if (!pc.holdsWater) warnings.push(`Hydropneumatic tank at ${n.id}: the pre-charge pressure is at or above the operating pressure, so the tank holds no water. Lower the pre-charge.`);
+    }
+    const minWater = v.dipTubeHeight && v.dipTubeHeight > 0 ? waterVolumeAt(geo, v.dipTubeHeight) : 0;
+    if (Vt - Vg0 < minWater) warnings.push(`Hydropneumatic tank at ${n.id}: the initial water level is below the dip tube.`);
+    const pAbs0 = gasHeadAt(Vg0);
     if (pAbs0 <= 0) warnings.push(`Surge vessel at ${n.id}: steady pressure is below vacuum; check its elevation.`);
     const Ac = area(v.connDiameter);
+    const Ab = v.inlet === 'checkBypass' && v.bypassDiameter ? area(v.bypassDiameter) : 0;
     return {
-      node: i, cfg: v, As, Ac,
-      C: Math.max(pAbs0, 0.5) * v.gasVolume ** v.n,
-      Vg: v.gasVolume, Qs: 0, emptied: false,
-      minGas: v.gasVolume, maxGas: v.gasVolume,
-      rin: v.kIn / (2 * G * Ac * Ac), rout: v.kOut / (2 * G * Ac * Ac),
+      node: i, cfg: v, geo, bottom, Ac,
+      C: Math.max(pAbs0, 0.5) * Vg0 ** v.n,
+      Vg: Vg0, Vg0, Qs: 0, emptied: false,
+      VgMax: Math.max(Vt - minWater, Vg0),
+      minGas: Vg0, maxGas: Vg0,
+      rin: Ab > 0 ? (v.bypassK ?? 1) / (2 * G * Ab * Ab) : v.kIn / (2 * G * Ac * Ac),
+      rout: v.kOut / (2 * G * Ac * Ac),
+      inert: (v.connLength ?? 0) / (G * Ac), // L/(gA): head per unit dQ/dt
     };
   });
-  const airv = nodes.map((n) => (n.airValve && n.kind !== 'reservoir' ? { m: 0, V: 0, Ain: area(n.airValve.inDiameter), Aout: area(n.airValve.outDiameter), maxAir: 0 } : null));
+  // open surge tanks and one-way (feed) tanks
+  const tanks = nodes.map((n, i) => {
+    if (!n.tank || n.kind === 'reservoir') return null;
+    const t = n.tank;
+    const As = area(t.diameter), Ac = area(t.connDiameter);
+    let z0: number;
+    if (t.oneWay) {
+      z0 = t.initialLevel ?? t.bottomElev + 0.9 * (t.topElev - t.bottomElev);
+      if (z0 >= Hprev[i]) warnings.push(`One-way tank at ${n.id}: its water level (${z0.toFixed(2)} m) is not below the steady head (${Hprev[i].toFixed(2)} m), so it would feed the pipe in steady state. Lower it.`);
+    } else {
+      z0 = Hprev[i];
+      if (z0 > t.topElev) { warnings.push(`Surge tank at ${n.id}: the steady head (${z0.toFixed(2)} m) is above its top (${t.topElev} m); it would overflow continuously. Make it taller.`); }
+      if (z0 < t.bottomElev) warnings.push(`Surge tank at ${n.id}: the steady head is below the tank bottom; the tank is empty.`);
+      z0 = Math.max(t.bottomElev, Math.min(t.topElev, z0));
+    }
+    return { node: i, cfg: t, As, z: z0, Qt: 0, minZ: z0, maxZ: z0, spilled: 0, emptied: false, oneWay: !!t.oneWay, rin: t.kIn / (2 * G * Ac * Ac), rout: t.kOut / (2 * G * Ac * Ac) };
+  });
+  // surge anticipation valves
+  const savs = nodes.map((n, i) => (n.sav && n.kind !== 'reservoir' ? { node: i, cfg: n.sav, A: area(n.sav.diameter), cd: n.sav.cd ?? 0.6, tTrig: -1, open: 0, openUsed: 0, opened: 0, maxQ: 0, Q: 0 } : null));
+  const reliefs = nodes.map((n, i) => (n.relief && n.kind !== 'reservoir' ? { node: i, cfg: n.relief, Q: 0, maxQ: 0, vol: 0 } : null));
+  const airv = nodes.map((n) => (n.airValve && !n.airValve.treatAsJunction && n.kind !== 'reservoir' ? { m: 0, V: 0, model: airValveModel(n.airValve), maxAir: 0 } : null));
 
   // ── elements (pumps, valves) and clusters ──────────────────────────────
   const elements: Element[] = [];
@@ -359,11 +400,17 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     return { i, j, env: { id: p.id, s: s2, z: z2, hSteady: h2.slice(), hMax: h2.slice(), hMin: h2.slice(), cavMax: new Float64Array(2), tMax: new Float64Array(2), tMin: new Float64Array(2) } as PipeEnvelope };
   });
   const vesselOut: TransientResult['vessels'] = {};
-  vessels.forEach((v) => v && (vesselOut[nodes[v.node].id] = { gas: new Float32Array(nFrames), flow: new Float32Array(nFrames), minGas: v.Vg, maxGas: v.Vg, volume: v.cfg.volume, emptied: false }));
+  vessels.forEach((v) => v && (vesselOut[nodes[v.node].id] = { gas: new Float32Array(nFrames), flow: new Float32Array(nFrames), level: new Float32Array(nFrames), minGas: v.Vg, maxGas: v.Vg, volume: v.cfg.volume, initialGas: v.Vg0, emptied: false, minWater: v.cfg.volume - v.VgMax, bottom: v.bottom, top: v.bottom + v.geo.height }));
+  const tankOut: TransientResult['tanks'] = {};
+  tanks.forEach((t) => t && (tankOut[nodes[t.node].id] = { level: new Float32Array(nFrames), flow: new Float32Array(nFrames), minLevel: t.z, maxLevel: t.z, bottom: t.cfg.bottomElev, top: t.cfg.topElev, spilled: 0, emptied: false, oneWay: t.oneWay }));
+  const savOut: TransientResult['savs'] = {};
+  savs.forEach((v) => v && (savOut[nodes[v.node].id] = { opening: new Float32Array(nFrames), flow: new Float32Array(nFrames), opened: 0, maxFlow: 0 }));
+  const reliefOut: TransientResult['reliefs'] = {};
+  reliefs.forEach((r) => r && (reliefOut[nodes[r.node].id] = { flow: new Float32Array(nFrames), maxFlow: 0, volume: 0 }));
   const pumpOut: TransientResult['pumps'] = {};
   elements.forEach((e) => e.kind === 'pump' && e.ids.forEach((id) => (pumpOut[id] = { speed: new Float32Array(nFrames), flow: new Float32Array(nFrames), reverseFlow: false })));
   const airOut: TransientResult['airValves'] = {};
-  airv.forEach((a, i) => a && (airOut[nodes[i].id] = { air: new Float32Array(nFrames), maxAir: 0 }));
+  airv.forEach((a, i) => a && (airOut[nodes[i].id] = { air: new Float32Array(nFrames), mass: new Float32Array(nFrames), maxAir: 0 }));
   const valveOut: TransientResult['valves'] = {};
   elements.forEach((e) => e.kind === 'valve' && (valveOut[net.valves[e.idx].id] = { opening: new Float32Array(nFrames) }));
   const nodeMax = new Float64Array(NN).fill(-Infinity);
@@ -397,9 +444,13 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     let q = Sc[i] - Sb[i] * H + qext;
     const p = H - n.elev;
     q -= demConst[i] + (demK[i] > 0 ? demK[i] * Math.sqrt(Math.max(p, 0)) : 0);
-    if (n.relief && p > n.relief.setHead) q -= n.relief.capacity * Math.sqrt((p - n.relief.setHead) / 10);
+    if (n.relief) q -= reliefFlow(n.relief, p);
+    const sv = savs[i];
+    if (sv && sv.open > 0) q -= sv.cd * sv.A * sv.open * Math.sqrt(2 * G * Math.max(p, 0));
     const vs = vessels[i];
     if (vs) q -= vesselFlow(vs, H);
+    const tk = tanks[i];
+    if (tk) q -= tankFlow(tk, H);
     const av = airv[i];
     if (av) q += airCavityRate(av, H, n);
     else q += (gasVolume(nodeC3[i], H, n.elev) - nodeV[i]) / dt;
@@ -409,52 +460,35 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const y = H - z + HBc - HV;
     return y > 1e-14 ? C3 / y : C3 / 1e-14;
   }
-  function vesselFlow(vs: NonNullable<(typeof vessels)[number]>, H: number) {
-    // flow into the vessel that balances node head with vessel liquid head + connection loss
-    const f = (Qs: number) => {
-      let Vg = vs.Vg - (dt * (Qs + vs.Qs)) / 2;
-      if (Vg >= vs.cfg.volume) Vg = vs.cfg.volume;
-      if (Vg < 1e-6) Vg = 1e-6;
-      const zl = nodes[vs.node].elev + (vs.cfg.volume - Vg) / vs.As;
-      const hv = zl + vs.C / Vg ** vs.cfg.n - HB;
-      return H - hv - (Qs >= 0 ? vs.rin : vs.rout) * Qs * Math.abs(Qs);
-    };
-    let lo = -50, hi = 50;
-    // outflow cannot exceed what is left in the vessel
-    const qMinEmpty = (-2 * (vs.cfg.volume - vs.Vg)) / dt - vs.Qs;
-    if (lo < qMinEmpty) lo = qMinEmpty;
-    let flo = f(lo), fhi = f(hi);
-    if (flo <= 0) return lo; // empty: no more outflow possible
-    if (fhi >= 0) return hi;
-    let q = vs.Qs;
-    if (q <= lo || q >= hi) q = (lo + hi) / 2;
-    for (let k = 0; k < 60; k++) {
-      const fq = f(q);
-      if (Math.abs(fq) < 1e-10) break;
-      if (fq > 0) { lo = q; flo = fq; } else { hi = q; fhi = fq; }
-      const h = 1e-6 * Math.max(1, Math.abs(q));
-      const d = (f(q + h) - fq) / h;
-      let qn = d < 0 ? q - fq / d : (lo + hi) / 2;
-      if (!(qn > lo && qn < hi)) qn = (lo + hi) / 2;
-      if (Math.abs(qn - q) < 1e-12) { q = qn; break; }
-      q = qn;
-    }
-    return q;
+  function vesselHead(vs: NonNullable<(typeof vessels)[number]>, Vg: number) {
+    const zl = vs.bottom + waterDepthOf(vs.geo, vs.cfg.volume - Vg);
+    return zl + vs.C / Vg ** vs.cfg.n - HB;
   }
-  function airMassRate(p: number, m: number, av: NonNullable<(typeof airv)[number]>) {
-    const pa = RHO * G * HB;
-    const rhoa = pa / (RAIR * TAIR);
-    if (p < pa) {
-      if (p > 0.528 * pa) return CD_AIR * av.Ain * Math.sqrt(Math.max(7 * pa * rhoa * ((p / pa) ** 1.4286 - (p / pa) ** 1.714), 0));
-      return (CD_AIR * av.Ain * 0.686 * pa) / Math.sqrt(RAIR * TAIR);
-    }
-    if (m <= 0) return 0;
-    if (p < 1.893 * pa) return -CD_AIR * av.Aout * p * Math.sqrt(7 / (RAIR * TAIR)) * Math.sqrt(Math.max((pa / p) ** 1.4286 - (pa / p) ** 1.714, 0));
-    return (-CD_AIR * av.Aout * 0.686 * p) / Math.sqrt(RAIR * TAIR);
+  function vesselFlow(vs: NonNullable<(typeof vessels)[number]>, H: number) {
+    // flow into the vessel that balances the node head with the vessel water head, the connection loss and the
+    // inertia of the water in the connection pipe (trapezoidal gas-volume update over the step)
+    const gasAfter = (Qs: number) => Math.min(Math.max(vs.Vg - (dt * (Qs + vs.Qs)) / 2, 1e-6), vs.VgMax);
+    const f = (Qs: number) => H - vesselHead(vs, gasAfter(Qs)) - (Qs >= 0 ? vs.rin : vs.rout) * Qs * Math.abs(Qs) - (vs.inert * (Qs - vs.Qs)) / dt;
+    let lo = -50, hi = 50;
+    // outflow cannot take more water than is left above the dip tube / bottom
+    const qMinEmpty = (-2 * (vs.VgMax - vs.Vg)) / dt - vs.Qs;
+    if (lo < qMinEmpty) lo = qMinEmpty;
+    if (lo >= hi) return lo;
+    return solveDecreasing(f, lo, hi, vs.Qs);
+  }
+  function tankFlow(tk: NonNullable<(typeof tanks)[number]>, H: number) {
+    // flow into an open tank; its surface is at atmospheric pressure, so the head there is the water level
+    const levelAfter = (Q: number) => tk.z + (dt * (Q + tk.Qt)) / (2 * tk.As);
+    const f = (Q: number) => H - Math.min(levelAfter(Q), tk.cfg.topElev) - (Q >= 0 ? tk.rin : tk.rout) * Q * Math.abs(Q);
+    let lo = -50, hi = tk.oneWay ? 0 : 50;
+    const qMinEmpty = (-2 * (tk.z - tk.cfg.bottomElev) * tk.As) / dt - tk.Qt;
+    if (lo < qMinEmpty) lo = Math.min(qMinEmpty, 0);
+    if (lo >= hi) return hi;
+    return solveDecreasing(f, lo, hi, tk.Qt);
   }
   function airState(av: NonNullable<(typeof airv)[number]>, H: number, n: NetNode) {
     const p = Math.max(RHO * G * (H - n.elev + HB), 500);
-    const m = Math.max(av.m + dt * airMassRate(p, av.m, av), 0);
+    const m = Math.max(av.m + dt * airValveMassRate(av.model, p, av.m), 0);
     const V = m > 0 ? (m * RAIR * TAIR) / p : 0;
     return { m, V };
   }
@@ -485,7 +519,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   };
 
   /** Closed-form DGCM solve for a plain node (no devices, constant demand). */
-  const plainNode = (i: number) => !nodes[i].relief && !vessels[i] && !airv[i] && demK[i] === 0;
+  const plainNode = (i: number) => !nodes[i].relief && !vessels[i] && !airv[i] && !tanks[i] && !savs[i] && demK[i] === 0;
   const dgcm = (sb: number, sc: number, qext: number, z: number, C3: number, Vold: number) => {
     const E = Vold + dt * (sb * (z - HBc + HV) - sc - qext);
     const disc = Math.sqrt(E * E + 4 * dt * sb * C3);
@@ -633,6 +667,58 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
           lam /= 2;
         }
       }
+      // Newton can stall on devices with a sharp opening law (relief, surge anticipation valve, air valves): then
+      // solve again in element flows only, each node head coming from the robust scalar node solve
+      const normNewton = Math.max(...resid(x).map(Math.abs));
+      if (normNewton > 1e-7) {
+        const ne = els.length + speedVars.length;
+        const heads = (q: number[]) => free.map((i) => {
+          let qext = 0;
+          els.forEach((e, k) => { if (e.i === i) qext -= q[k]; if (e.j === i) qext += q[k]; });
+          return solveNode(i, qext);
+        });
+        const headIn = (i: number, hv: number[]) => (isRes[i] ? Hn[i] : hv[free.indexOf(i)]);
+        const residQ = (q: number[]) => {
+          const hv = heads(q);
+          const r = els.map((e, k) => {
+            const sv = e.kind === 'pump' && e.tripped ? speedVars.indexOf(e) : -1;
+            const alpha = e.kind === 'pump' ? (sv >= 0 ? q[els.length + sv] : e.on ? e.alphaSet : 0) : 0;
+            return elFlowAt(e, headIn(e.i, hv), headIn(e.j, hv), q[k], alpha);
+          });
+          speedVars.forEach((e, k) => {
+            const a2 = q[els.length + k], qq = q[els.indexOf(e)];
+            r.push(a2 - e.alpha + (dt * (e.ta * a2 * a2 + e.tb * a2 * qq + e.tc * qq * qq + e.T)) / (2 * e.I * e.w));
+          });
+          return { r, hv };
+        };
+        const q = [...els.map((_, k) => x[free.length + k]), ...speedVars.map((_, k) => x[free.length + els.length + k])];
+        let cur = residQ(q);
+        for (let it = 0; it < 100; it++) {
+          const norm = Math.max(...cur.r.map(Math.abs));
+          if (norm < 1e-10) break;
+          const J = Array.from({ length: ne }, () => new Array(ne).fill(0));
+          for (let k = 0; k < ne; k++) {
+            const h = 1e-7 * Math.max(1, Math.abs(q[k]));
+            const qp = q.slice();
+            qp[k] += h;
+            const rp = residQ(qp).r;
+            for (let m = 0; m < ne; m++) J[m][k] = (rp[m] - cur.r[m]) / h;
+          }
+          const d = solveDense(J, cur.r.map((v) => -v));
+          let lam = 1, accepted = false;
+          for (let ls = 0; ls < 30; ls++) {
+            const qn = q.map((v, k) => v + lam * d[k]);
+            speedVars.forEach((_, k) => (qn[els.length + k] = Math.max(qn[els.length + k], 0)));
+            const rn = residQ(qn);
+            if (Math.max(...rn.r.map(Math.abs)) < norm) { q.splice(0, ne, ...qn); cur = rn; accepted = true; break; }
+            lam /= 2;
+          }
+          if (!accepted) break;
+        }
+        // keep whichever answer balances the nodes and elements better (same residual for both)
+        const xf = [...cur.hv, ...q];
+        if (Math.max(...resid(xf).map(Math.abs)) < normNewton) for (let k = 0; k < nv; k++) x[k] = xf[k];
+      }
       // status changes (non-return valves)
       let changed = false;
       els.forEach((e, k) => {
@@ -688,7 +774,21 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       const o = vesselOut[nodes[v.node].id];
       o.gas[frame] = v.Vg;
       o.flow[frame] = v.Qs;
+      o.level[frame] = v.bottom + waterDepthOf(v.geo, v.cfg.volume - v.Vg);
     });
+    tanks.forEach((tk) => {
+      if (!tk) return;
+      const o = tankOut[nodes[tk.node].id];
+      o.level[frame] = tk.z;
+      o.flow[frame] = tk.Qt;
+    });
+    savs.forEach((sv) => {
+      if (!sv) return;
+      const o = savOut[nodes[sv.node].id];
+      o.opening[frame] = sv.openUsed;
+      o.flow[frame] = sv.Q;
+    });
+    reliefs.forEach((rv) => rv && (reliefOut[nodes[rv.node].id].flow[frame] = rv.Q));
     elements.forEach((e) => {
       if (e.kind === 'pump') {
         for (const id of e.ids) {
@@ -698,7 +798,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       } else if (e.kind === 'valve') valveOut[net.valves[e.idx].id].opening[frame] = e.open;
       else if (e.kind === 'rigid') frameFlows[net.pipes[e.pipe].id][frame] = e.Q;
     });
-    airv.forEach((a, i) => a && (airOut[nodes[i].id].air[frame] = a.V));
+    airv.forEach((a, i) => { if (a) { airOut[nodes[i].id].air[frame] = a.V; airOut[nodes[i].id].mass[frame] = a.m; } });
     frame++;
   };
   record(0);
@@ -791,11 +891,41 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       if (vs) {
         const q = vesselFlow(vs, H);
         let Vg = vs.Vg - (dt * (q + vs.Qs)) / 2;
-        if (Vg >= vs.cfg.volume * 0.999) { vs.emptied = true; Vg = Math.min(Vg, vs.cfg.volume); }
+        if (Vg >= vs.VgMax - 1e-4 * vs.cfg.volume && q < 0) vs.emptied = true;
+        Vg = Math.min(Vg, vs.VgMax);
         vs.Vg = Math.max(Vg, 1e-6);
         vs.Qs = q;
         vs.minGas = Math.min(vs.minGas, vs.Vg);
         vs.maxGas = Math.max(vs.maxGas, vs.Vg);
+      }
+      const tk = tanks[i];
+      if (tk) {
+        const q = tankFlow(tk, H);
+        let z = tk.z + (dt * (q + tk.Qt)) / (2 * tk.As);
+        if (z > tk.cfg.topElev) { tk.spilled += (z - tk.cfg.topElev) * tk.As; z = tk.cfg.topElev; }
+        if (z <= tk.cfg.bottomElev + 1e-6 && q < 0) tk.emptied = true;
+        tk.z = Math.max(z, tk.cfg.bottomElev);
+        tk.Qt = q;
+        tk.minZ = Math.min(tk.minZ, tk.z);
+        tk.maxZ = Math.max(tk.maxZ, tk.z);
+      }
+      const rv = reliefs[i];
+      if (rv) {
+        rv.Q = reliefFlow(rv.cfg, H - nodes[i].elev);
+        rv.maxQ = Math.max(rv.maxQ, rv.Q);
+        rv.vol += rv.Q * dt;
+      }
+      const sv = savs[i];
+      if (sv) {
+        const p = H - nodes[i].elev;
+        sv.Q = sv.cd * sv.A * sv.open * Math.sqrt(2 * G * Math.max(p, 0));
+        sv.openUsed = sv.open;
+        sv.maxQ = Math.max(sv.maxQ, sv.Q);
+        // trigger on low pressure (or high, if set) while closed; the opening for the next step follows its schedule
+        const cycle = sv.cfg.openTime + sv.cfg.holdTime + sv.cfg.closeTime;
+        if (sv.tTrig >= 0 && t - sv.tTrig >= cycle) sv.tTrig = -1;
+        if (sv.tTrig < 0 && (p < sv.cfg.lowSet || (sv.cfg.highSet !== undefined && sv.cfg.highSet > 0 && p > sv.cfg.highSet))) { sv.tTrig = t; sv.opened++; }
+        sv.open = sv.tTrig >= 0 ? savOpening(sv.cfg, t + dt - sv.tTrig) : 0;
       }
       const av = airv[i];
       if (av) {
@@ -864,8 +994,21 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     o.minGas = v.minGas;
     o.maxGas = v.maxGas;
     o.emptied = v.emptied;
-    if (v.emptied) warnings.push(`Surge vessel at ${nodes[v.node].id} emptied: it is too small or its initial water volume too low.`);
+    if (v.emptied) {
+      const why = v.cfg.volume - v.VgMax > 1e-9 ? 'the water fell to the dip tube' : v.cfg.bladder ? 'the bladder is fully expanded' : 'air could enter the pipe';
+      warnings.push(`Surge vessel at ${nodes[v.node].id} emptied (${why}): it is too small or its initial water volume too low.`);
+    }
   });
+  tanks.forEach((tk) => {
+    if (!tk) return;
+    const o = tankOut[nodes[tk.node].id];
+    Object.assign(o, { minLevel: tk.minZ, maxLevel: tk.maxZ, spilled: tk.spilled, emptied: tk.emptied });
+    const kind = tk.oneWay ? 'One-way tank' : 'Surge tank';
+    if (tk.emptied) warnings.push(`${kind} at ${nodes[tk.node].id} emptied: air could enter the pipe. Make it larger.`);
+    if (tk.spilled > 1e-6) warnings.push(`Surge tank at ${nodes[tk.node].id} overflowed (${tk.spilled.toFixed(2)} m³ spilled). Raise its top or enlarge it.`);
+  });
+  savs.forEach((sv) => sv && Object.assign(savOut[nodes[sv.node].id], { opened: sv.opened, maxFlow: sv.maxQ }));
+  reliefs.forEach((rv) => rv && Object.assign(reliefOut[nodes[rv.node].id], { maxFlow: rv.maxQ, volume: rv.vol }));
   airv.forEach((a, i) => a && (airOut[nodes[i].id].maxAir = a.maxAir));
   Object.entries(pumpOut).forEach(([id, o]) => {
     if (o.reverseFlow) warnings.push(`Pump ${id} ran with reverse flow (no non-return valve). Results after flow reversal need full four-quadrant pump data.`);
@@ -893,6 +1036,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     nodeMax: nodeMaxR,
     nodeMin: nodeMinR,
     vessels: vesselOut,
+    tanks: tankOut,
+    savs: savOut,
+    reliefs: reliefOut,
     pumps: pumpOut,
     airValves: airOut,
     valves: valveOut,

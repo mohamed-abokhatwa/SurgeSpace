@@ -384,6 +384,7 @@ export default function App() {
                           <tr><td>Column separation</td><td>Vapour cavity at computing points</td><td>Discrete gas cavity model (free gas {net.settings.gasFraction}), closed-form at every section</td></tr>
                           <tr><td>Wave damping</td><td>Steady or quasi-steady friction by default</td><td>{net.settings.unsteadyFriction ? 'Unsteady friction on (Brunone–Vítkovský, Vardy coefficient)' : 'Quasi-steady (unsteady friction off in Settings)'}</td></tr>
                           <tr><td>Uncertainty</td><td>One deterministic run</td><td>Worst-case envelope over wave speed, stroke, inertia and time step</td></tr>
+                          <tr><td>Protection devices</td><td>Hydropneumatic tank, air valves, surge tanks, relief and anticipation valves</td><td>The same, plus horizontal/spherical tanks, bladder pre-charge, dip tube, connection inertia, non-return valve with bypass, three-stage anti-slam and manufacturer-curve air valves, and "treat as junction"</td></tr>
                           <tr><td>Protection design</td><td>Trial and error</td><td>Automatic vessel and air valve sizing</td></tr>
                         </tbody>
                       </table>

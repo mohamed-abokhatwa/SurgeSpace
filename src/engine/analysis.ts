@@ -47,14 +47,26 @@ export function designChecks(net: Network, r: TransientResult, envs: PipeEnvelop
   if (cav.v > 1e-4)
     out.push({ level: 'fail', title: 'Column separation (vapour cavity)', detail: `Largest cavity ${(cav.v * 1000).toFixed(0)} L in ${cav.pipe} at ${fmt(cav.s)} m. The collapse can cause pressure peaks above the normal surge.`, where: { pipe: cav.pipe, s: cav.s } });
   for (const [id, v] of Object.entries(r.vessels)) {
-    if (v.emptied) out.push({ level: 'fail', title: `Surge vessel ${id} empties`, detail: 'Water ran out of the vessel. Increase its volume or its initial water volume.', where: { node: id } });
+    const reserve = v.minWater > 1e-9 ? ` (dip tube keeps ${v.minWater.toFixed(2)} m³)` : '';
+    if (v.emptied) out.push({ level: 'fail', title: `Hydropneumatic tank ${id} empties`, detail: `The usable water ran out${reserve}. Increase its volume or its initial water volume (less gas or a lower pre-charge).`, where: { node: id } });
     else {
       const minWater = v.volume - v.maxGas;
-      out.push({ level: minWater < 0.1 * v.volume ? 'warn' : 'pass', title: `Surge vessel ${id}`, detail: `Gas volume ${v.minGas.toFixed(2)}–${v.maxGas.toFixed(2)} m³ of ${v.volume} m³; lowest water volume ${minWater.toFixed(2)} m³.`, where: { node: id } });
+      const usable = minWater - v.minWater;
+      out.push({ level: usable < 0.1 * v.volume ? 'warn' : 'pass', title: `Hydropneumatic tank ${id}`, detail: `Gas volume ${v.minGas.toFixed(2)}–${v.maxGas.toFixed(2)} m³ of ${v.volume} m³ (start ${v.initialGas.toFixed(2)} m³); lowest water volume ${minWater.toFixed(2)} m³${reserve}.`, where: { node: id } });
     }
   }
+  for (const [id, tk] of Object.entries(r.tanks ?? {})) {
+    const kind = tk.oneWay ? 'One-way tank' : 'Surge tank';
+    if (tk.emptied) out.push({ level: 'fail', title: `${kind} ${id} empties`, detail: 'The tank ran dry, so air can enter the pipe. Make it larger or raise its water level.', where: { node: id } });
+    else if (tk.spilled > 1e-6) out.push({ level: 'warn', title: `Surge tank ${id} overflows`, detail: `${tk.spilled.toFixed(2)} m³ spilled over the top (${tk.top} m). Raise the top or enlarge the tank.`, where: { node: id } });
+    else out.push({ level: 'pass', title: `${kind} ${id}`, detail: `Water level ${tk.minLevel.toFixed(2)}–${tk.maxLevel.toFixed(2)} m (bottom ${tk.bottom} m, top ${tk.top} m).`, where: { node: id } });
+  }
+  for (const [id, v] of Object.entries(r.savs ?? {}))
+    out.push({ level: 'info', title: `Surge anticipation valve ${id}`, detail: v.opened ? `Opened ${v.opened} time${v.opened > 1 ? 's' : ''}; largest discharge ${(v.maxFlow * 1000).toFixed(0)} L/s.` : 'Did not open (the pressure stayed above its low set point).', where: { node: id } });
+  for (const [id, v] of Object.entries(r.reliefs ?? {}))
+    out.push({ level: 'info', title: `Relief valve ${id}`, detail: v.maxFlow > 1e-6 ? `Opened; largest discharge ${(v.maxFlow * 1000).toFixed(0)} L/s, ${v.volume.toFixed(2)} m³ released.` : 'Did not open.', where: { node: id } });
   for (const [id, a] of Object.entries(r.airValves))
-    if (a.maxAir > 1e-4) out.push({ level: 'info', title: `Air valve ${id} admitted air`, detail: `Up to ${(a.maxAir * 1000).toFixed(0)} L of air, expelled again as the column returned.`, where: { node: id } });
+    if (a.maxAir > 1e-4) out.push({ level: 'info', title: `Air valve ${id} admitted air`, detail: `Up to ${(a.maxAir * 1000).toFixed(0)} L of air${a.air[a.air.length - 1] > 1e-4 ? '; some air is still in the pipe at the end of the run' : ', expelled again as the column returned'}.`, where: { node: id } });
   if (r.maxAdjust > net.settings.maxAdjust)
     out.push({ level: 'warn', title: 'Wave speeds adjusted beyond the target', detail: `Up to ${(r.maxAdjust * 100).toFixed(2)} %.` });
   else
@@ -156,7 +168,9 @@ export function sizeVessel(net: Network, nodeId: string, onProgress?: (msg: stri
   const evaluate = (V: number, gf: number) => {
     const trial: Network = structuredClone(net);
     const n = trial.nodes.find((x) => x.id === nodeId)!;
-    n.vessel = { volume: V, gasVolume: V * gf, n: 1.2, connDiameter: conn, kIn: 2.5, kOut: 0.5 };
+    // keep the tank type the user chose (shape, bladder, dip tube, connection, losses); only size and gas change
+    const tpl = node.vessel;
+    n.vessel = { n: 1.2, kIn: 2.5, kOut: 0.5, ...tpl, diameter: undefined, gasInput: 'volume', volume: V, gasVolume: V * gf, connDiameter: conn };
     const r = runTransient(trial, { steady, envelopeOnly: true });
     const s = summary(r);
     let ratio = 0;

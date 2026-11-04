@@ -7,10 +7,13 @@ export const HV = 0.24; // vapour pressure head at 20 °C, m absolute
 
 export type NodeKind = 'junction' | 'reservoir';
 
+export type VesselShape = 'vertical' | 'horizontal' | 'sphere';
+
+/** Hydropneumatic tank (surge vessel): a closed tank with a gas cushion. */
 export interface SurgeVessel {
   /** Total vessel volume, m³. */
   volume: number;
-  /** Gas volume at the initial (steady) pressure, m³. */
+  /** Gas volume at the initial (steady) pressure, m³ (used when gasInput is 'volume'). */
   gasVolume: number;
   /** Polytropic exponent (1.0 isothermal … 1.4 adiabatic); 1.2 is the usual design value. */
   n: number;
@@ -19,20 +22,111 @@ export interface SurgeVessel {
   /** Loss coefficients for flow into / out of the vessel (K, on connection velocity). */
   kIn: number;
   kOut: number;
+  /** Tank shape (default vertical cylinder). */
+  shape?: VesselShape;
+  /** Internal diameter, m. Default: vertical height = 2 D; horizontal length = 3 D; sphere from the volume. */
+  diameter?: number;
+  /** Elevation of the tank bottom, m (default: the node elevation). */
+  bottomElev?: number;
+  /** How the gas is given: initial gas volume, or the pre-charge pressure of a bladder / diaphragm tank. */
+  gasInput?: 'volume' | 'precharge';
+  /** Pre-charge pressure head (gauge, m) of the empty tank (gasInput 'precharge'). */
+  prechargeHead?: number;
+  /** Bladder or diaphragm separates gas and water (no air can reach the pipe when the tank empties). */
+  bladder?: boolean;
+  /** Dip tube: water below this height above the tank bottom (m) cannot leave the tank. */
+  dipTubeHeight?: number;
+  /** Connection pipe length, m (the water in it has inertia). Default 0. */
+  connLength?: number;
+  /** Inflow path: through the connection ('orifice', K in), or a non-return valve with a smaller bypass ('checkBypass'). */
+  inlet?: 'orifice' | 'checkBypass';
+  /** Bypass diameter, m (inlet 'checkBypass'): water returns to the tank only through it. */
+  bypassDiameter?: number;
+  /** Bypass loss coefficient (on bypass velocity). Default 1. */
+  bypassK?: number;
 }
 
+export type AirValveType = 'double' | 'threeStage' | 'vacuumBreaker' | 'releaseOnly' | 'curve';
+
+/** Air valve (air release / vacuum valve) at a high point. */
 export interface AirValve {
-  /** Inflow (vacuum) orifice diameter, m. */
+  /** Large inflow (vacuum) orifice diameter, m. */
   inDiameter: number;
-  /** Outflow (release) orifice diameter, m. Smaller outflow = anti-slam behaviour. */
+  /** Large outflow orifice diameter, m. */
   outDiameter: number;
+  /** Valve type (default 'double'):
+   *  double: air in through the inflow orifice, out through the outflow orifice (plus the small orifice, if given);
+   *  threeStage: anti-slam; air leaves through the large outflow orifice until the overpressure reaches switchHead,
+   *    then only through the small orifice;
+   *  vacuumBreaker: air in only (no release; the trapped air cushions the returning water);
+   *  releaseOnly: air out only, through the small orifice (no air in);
+   *  curve: manufacturer flow curves for inflow and outflow. */
+  type?: AirValveType;
+  /** Small (pressurised air release) orifice diameter, m. */
+  smallDiameter?: number;
+  /** Discharge coefficients (default 0.6). */
+  cdIn?: number;
+  cdOut?: number;
+  /** Three-stage: overpressure head (m) at which outflow switches to the small orifice (default 0.3 m ≈ 3 kPa). */
+  switchHead?: number;
+  /** Manufacturer curves: [pressure difference kPa, free air flow Nm³/h], inflow and outflow. */
+  inCurve?: [number, number][];
+  outCurve?: [number, number][];
+  /** Treat as junction (as in HAMMER): the valve is kept in the model but ignored in the run, so results with and
+   *  without it can be compared without deleting its settings. */
+  treatAsJunction?: boolean;
 }
 
+/** Pressure relief valve: opens above the set pressure and discharges to atmosphere. */
 export interface ReliefValve {
   /** Opening pressure head, m. */
   setHead: number;
-  /** Flow at full lift for 10 m over the set head, m³/s. */
+  /** Flow at full lift for 10 m over the set head, m³/s (used when no diameter is given). */
   capacity: number;
+  /** Valve diameter, m (with diameter, flow = Cd·A·lift·√(2g·p)). */
+  diameter?: number;
+  /** Discharge coefficient (default 0.7). */
+  cd?: number;
+  /** Overpressure above the set head (m) at which the valve is fully open (default 10 % of the set head). */
+  accumulation?: number;
+}
+
+/** Open surge tank (standpipe) or one-way (feed) tank, open to the atmosphere. */
+export interface OpenTank {
+  /** Tank internal diameter, m. */
+  diameter: number;
+  /** Tank bottom elevation, m. */
+  bottomElev: number;
+  /** Overflow (top) elevation, m. Water above it spills. */
+  topElev: number;
+  /** Connection pipe diameter, m. */
+  connDiameter: number;
+  /** Loss coefficients into / out of the tank (on connection velocity). */
+  kIn: number;
+  kOut: number;
+  /** One-way (feed) tank: a non-return valve lets water flow only from the tank into the pipe. */
+  oneWay?: boolean;
+  /** Initial water surface elevation, m. Open tanks start at the steady head; one-way tanks need it (default: 90 % full). */
+  initialLevel?: number;
+}
+
+/** Surge anticipation valve: opens when the pressure falls below the low set point (or rises above the high one),
+ *  stays open, then closes slowly, discharging to atmosphere. */
+export interface SurgeAnticipationValve {
+  /** Valve diameter, m. */
+  diameter: number;
+  /** Discharge coefficient at full opening (default 0.6). */
+  cd?: number;
+  /** Pressure head (m) below which the valve starts to open (pump-trip down-surge). */
+  lowSet: number;
+  /** Pressure head (m) above which the valve also opens (optional). */
+  highSet?: number;
+  /** Opening time, s. */
+  openTime: number;
+  /** Time held fully open, s. */
+  holdTime: number;
+  /** Closing time, s. */
+  closeTime: number;
 }
 
 export interface NetNode {
@@ -49,6 +143,8 @@ export interface NetNode {
   vessel?: SurgeVessel;
   airValve?: AirValve;
   relief?: ReliefValve;
+  tank?: OpenTank;
+  sav?: SurgeAnticipationValve;
 }
 
 export interface Pipe {

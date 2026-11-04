@@ -136,3 +136,18 @@ svg text { font-family: var(--sans); }
 a.btn { text-decoration: none; color: inherit; } a.btn.primary { color: #fff; }
 .machine-id { font: 600 17px var(--mono); letter-spacing: 0.06em; padding: 6px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line-2); }
 .steps { margin: 12px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 12px; font-size: 13.5px; }
+
+/* device editors */
+.devices { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+details.dev { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
+details.dev > summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 7px 9px; font-weight: 600; }
+details.dev > summary::-webkit-details-marker { display: none; }
+details.dev > summary::before { content: '▸'; color: var(--muted); margin-right: 6px; }
+details.dev[open] > summary::before { content: '▾'; }
+details.dev > summary > span:first-child { flex: 1; }
+.dev-body { padding: 4px 9px 9px; display: flex; flex-direction: column; gap: 8px; }
+.dev-note { margin: 0; font-size: 11.5px; }
+.dev-warn { margin: 0; font-size: 11.5px; color: var(--bad); }
+.dev-check { font-size: 12px; gap: 6px; align-items: flex-start; }
+.dev-body .label { margin: 4px 0 0; }
+.inspector { width: 320px; }
