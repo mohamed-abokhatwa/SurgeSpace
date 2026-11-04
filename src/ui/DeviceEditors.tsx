@@ -74,7 +74,11 @@ function VesselEditor({ n, setNode, steadyHead }: { n: NetNode; setNode: SetNode
       <p className="muted dev-note">{g.shape === 'vertical' ? `Ø ${fmt(g.D, 2)} m × ${fmt(g.L, 2)} m high` : g.shape === 'horizontal' ? `Ø ${fmt(g.D, 2)} m × ${fmt(g.L, 2)} m long` : `Ø ${fmt(g.D, 2)} m`} · bottom at {fmt(bottom, 2)} m{waterDepth !== undefined ? ` · water ${fmt(waterDepth, 2)} m deep at start` : ''}</p>
       <div className="grid2">
         <label className="field"><span>Gas given as</span>
-          <select value={v.gasInput ?? 'volume'} onChange={(e) => set({ gasInput: e.target.value as 'volume' | 'precharge' })}>
+          <select value={v.gasInput ?? 'volume'} onChange={(e) => {
+            const gi = e.target.value as 'volume' | 'precharge';
+            // store a starting pre-charge (about 60 % of the operating pressure) so the run uses the value shown
+            set(gi === 'precharge' && v.prechargeHead === undefined ? { gasInput: gi, prechargeHead: Math.max(1, Math.round(0.6 * ((steadyHead ?? bottom + 30) - bottom))) } : { gasInput: gi });
+          }}>
             <option value="volume">Initial gas volume</option>
             <option value="precharge">Bladder pre-charge</option>
           </select>
