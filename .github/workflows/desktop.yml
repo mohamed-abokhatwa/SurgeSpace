@@ -20,6 +20,10 @@ jobs:
       - run: npx tsc -b
       - run: npx tsx tests/engine.test.ts
       - run: npx tsx tests/license.test.ts
+      - run: npx tsx tests/devices.test.ts
+      - run: npx tsx tests/valves.test.ts
+      - run: npx tsx tests/report.test.ts
+      - run: npx tsx validation/control-valves-vs-epanet.ts
 
   windows-store:
     needs: test
