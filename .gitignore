@@ -31,3 +31,4 @@ msix/*.msix
 temp.bin
 temp.inp
 temp.rpt
+store-upload/
