@@ -12,7 +12,7 @@ hostname). Never mix the two.
 
 - Repository: `github.com/mohamed-abokhatwa/SurgeSpace` (branch `main`)
 - Owner / commit identity: `git -c user.email=mohamed.abokhatwa@hotmail.com -c user.name="Mohamed"`
-- Version: 1.0.x (MSIX builds are `1.0.<run>.0`; the last one sent was **1.0.9.0**)
+- Version: **2.0.x** (MSIX builds are `<major>.<minor>.<run>.0`; v1 builds were 1.0.x, the last 1.0.9.0). Tag `v2.0.0` builds 2.0.<run>.0.
 
 ## 1a. Version 2 workspace (branch `v2-workspace`)
 
@@ -38,7 +38,14 @@ values identical; HAMMER Tnet0 exact).
   design limits (max pressure cap), animation frames, element defaults.
 - **Catalogues**: pipe materials, liquids, wave speed calculator (Korteweg with restraint, thick-wall correction).
 - **Model Health Check** (`src/app/health.ts`) before every run; **Graph builder** for any element variable.
-- Tests: `tests/workspace.test.ts` (26 tests: multi-operation runs, fluid/site, head schedule, editing operations,
+- **Hydro turbine** (`Valve.turbine`, `turbineSpeeds` / `turbineK` in `analysis.ts`): modelled through its wicket
+  gates (a valve sized to pass the rated flow at the rated head); runner speed from the power balance after a load
+  rejection (windage ~1 % rated); overspeed design check; example "Hydropower plant · load rejection".
+- **Contours** (`src/app/contours.ts`): IDW grid masked to the network, marching squares (View → Contours).
+- **Report in display units** (`ReportOptions.units`); device detail rows stay in SI.
+- **Store builds**: the Windows job also force-pushes the MSIX to the `store-builds` branch, so it can be fetched
+  with git when the Actions API is not reachable.
+- Tests: `tests/workspace.test.ts` (33 tests: multi-operation runs, fluid/site, head schedule, editing operations,
   units, wave speed, health check).
 
 ## 2. Features
@@ -118,7 +125,7 @@ Run everything: `bash scripts/full-check.sh <baseline.json> <reference folder> <
 | `tests/valves.test.ts` | 43 tests: valve curves, PRV/PSV/FCV, operating curve, pump start, check valves and slam = a·v/g, air-valve slam, outlets |
 | `tests/report.test.ts` | report builds for every example with the right numbers |
 | `tests/license.test.ts` | 60 licensing tests |
-| `tests/workspace.test.ts` | 26 tests for the v2 workspace and engine additions |
+| `tests/workspace.test.ts` | 33 tests: v2 workspace, engine additions, turbine, contours, US-unit report |
 | Examples vs baseline | 344 values identical |
 | HAMMER Tnet0 / Tnet3 | exact / mean 1.6 m max, 0.8 m min, 92 % within 3 m |
 | EPANET steady (Net3, ky4, Net6) | worst 0.012 m; control valves vs EPANET 0.005 m |
@@ -144,7 +151,8 @@ Commands: `npm install`, `npm run dev`, `npx tsc -b`, `npx tsx tests/<name>.test
 
 ## 7. Open items
 
-- Microsoft Store: upload 1.0.9.0 (or newer) with the updated listing (`store/microsoft-store-listing.md`).
+- Microsoft Store: submit 2.0.<n>.0 (from the `store-builds` branch or the Actions artifact) with the updated listing and the new screenshots (`store/microsoft-store-listing.md`, `store/images/`).
+- The GitHub token pasted in chat (Nov 2026) should be revoked and replaced.
 - Mac: add the Apple secrets to GitHub, then run Desktop builds for a notarized DMG; decide where to host it.
 - Optional: Resend key for licence e-mail alerts.
 - The Cloudflare token pasted in an old chat should be revoked and replaced.

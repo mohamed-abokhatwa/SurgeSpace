@@ -15,6 +15,7 @@ export const ELEMENT_ICONS: Record<ElementKind, ReactNode> = {
   levelSource: <><path d="M4 9h16l-2 11H6z" /><path d="M6 5c1.5-2 3 2 4.5 0S13.5 3 15 5s3 0 3.5-.5" /><path d="M5.5 13c2-1.5 3.5 1.5 5.5 0s3.5 1.5 5.5 0" /></>,
   pipe: <><path d="M3 17L10 10l4 3 7-7" /><circle cx="3" cy="17" r="1.6" /><circle cx="21" cy="6" r="1.6" /></>,
   pump: <><path d="M2 12h4M18 12h4" /><circle cx="12" cy="12" r="6" /><path d="M10 8.8l4.5 3.2-4.5 3.2z" fill="currentColor" /></>,
+  turbine: <><path d="M2 12h4M18 12h4" /><circle cx="12" cy="12" r="6" /><path d="M12 6c-2 2-2 4 0 6s2 4 0 6M6 12c2-2 4-2 6 0s4 2 6 0" /></>,
   lineValve: <><path d="M2 12h3M19 12h3" /><path d="M5 7l14 10V7L5 17z" /><path d="M12 12V5M9 5h6" /></>,
   nrv: <><path d="M2 12h3M19 12h3" /><path d="M5 7l14 10V7L5 17z" /><path d="M19 5v14" strokeWidth={2.2} /></>,
   prv: <><path d="M2 14h3M19 14h3" /><path d="M5 9l14 10V9L5 19z" /><rect x="7" y="2" width="10" height="5" rx="1" /></>,

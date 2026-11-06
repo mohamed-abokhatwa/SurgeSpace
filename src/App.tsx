@@ -7,7 +7,7 @@ import { defaultSettings, type Network } from './engine/types';
 import { call, cancelAll } from './ui/client';
 import { ImportDialog } from './ui/ImportDialog';
 import { ReportDialog } from './ui/ReportDialog';
-import { Canvas, colorByPipes, surgeScale, type ColorBy, type ColorMode, type Tool, type ValueLabel, type ViewOpts } from './ui/Canvas';
+import { Canvas, colorByPipes, surgeScale, type ColorBy, type ContourBy, type ColorMode, type Tool, type ValueLabel, type ViewOpts } from './ui/Canvas';
 import { Timeline } from './ui/Timeline';
 import { ChecksView, ProtectionPanel } from './ui/panels';
 import { ProfileView } from './ui/ProfileView';
@@ -380,6 +380,7 @@ export default function App() {
       { label: 'Background picture…', checked: !!net.background?.visible, action: () => setDialog('background') },
       { label: 'North arrow', checked: viewOpts.north, action: () => setViewOpts((v) => ({ ...v, north: !v.north })) },
       { label: 'Value labels', sub: valueLabels.map(([k, l]) => ({ label: l, checked: viewOpts.values === k, action: () => setViewOpts((v) => ({ ...v, values: k })) })) },
+      { label: 'Contours', sub: ([['none', 'None'], ['elevation', 'Ground elevation'], ['steadyPressure', 'Steady pressure'], ['maxPressure', 'Maximum pressure'], ['minPressure', 'Minimum pressure'], ['maxHead', 'Maximum head']] as [ContourBy, string][]).map(([k, l]) => ({ label: l, checked: (viewOpts.contour ?? 'none') === k, disabled: k !== 'none' && k !== 'elevation' && !result, action: () => setViewOpts((v) => ({ ...v, contour: k })) })) },
       { label: 'Colour pipes by', sub: colorBys.map(([k, l]) => ({ label: l, checked: viewOpts.colorBy === k, action: () => { setViewOpts((v) => ({ ...v, colorBy: k })); setMode('plain'); } })) },
       'sep',
       { label: 'Model Explorer panel', checked: showLeft, action: () => setShowLeft((v) => !v) },
@@ -393,7 +394,7 @@ export default function App() {
       { label: 'Pan', shortcut: 'H', checked: tool === 'pan', action: () => pickTool('pan') },
       'sep',
       { label: 'Network', sub: (['junction', 'reservoir', 'levelSource'] as ElementKind[]).map(toolItem) },
-      { label: 'Links', sub: (['pipe', 'pump', 'lineValve', 'nrv', 'prv', 'psv', 'fcv', 'orifice'] as ElementKind[]).map(toolItem) },
+      { label: 'Links', sub: (['pipe', 'pump', 'turbine', 'lineValve', 'nrv', 'prv', 'psv', 'fcv', 'orifice'] as ElementKind[]).map(toolItem) },
       { label: 'Protection devices', sub: (['airVessel', 'airValve', 'standpipe', 'feedTank', 'anticipator', 'relief', 'blowoff', 'burstDisc'] as ElementKind[]).map(toolItem) },
       'sep',
       { label: 'Operations…', action: () => { setLeft('operations'); setShowLeft(true); } },
@@ -477,7 +478,7 @@ export default function App() {
       return [
         { label: 'Properties', action: () => { setSelected([r]); setShowRight(true); } },
         { label: 'Split pipe here', action: () => { let id = ''; edit((n) => { const o = splitPipe(n, r.id, u, defaults); id = o.node; return o.net; }, undefined, 'Split pipe'); setTimeout(() => setSelected([{ type: 'node', id }]), 0); } },
-        { label: 'Insert here', sub: (['pump', 'lineValve', 'prv', 'psv', 'fcv', 'orifice', 'airVessel', 'airValve', 'standpipe', 'feedTank', 'anticipator', 'relief', 'blowoff', 'burstDisc'] as ElementKind[]).map((k) => ({ label: EL[k].name, action: () => { let rr: ElRef | null = null; edit((n) => { const o = insertOnPipe(n, r.id, k, u, defaults); rr = { type: o.type, id: o.id }; return o.net; }, undefined, 'Insert'); setTimeout(() => rr && setSelected([rr]), 0); } })) },
+        { label: 'Insert here', sub: (['pump', 'turbine', 'lineValve', 'prv', 'psv', 'fcv', 'orifice', 'airVessel', 'airValve', 'standpipe', 'feedTank', 'anticipator', 'relief', 'blowoff', 'burstDisc'] as ElementKind[]).map((k) => ({ label: EL[k].name, action: () => { let rr: ElRef | null = null; edit((n) => { const o = insertOnPipe(n, r.id, k, u, defaults); rr = { type: o.type, id: o.id }; return o.net; }, undefined, 'Insert'); setTimeout(() => rr && setSelected([rr]), 0); } })) },
         { label: p.checkValve ? 'Remove non-return valve' : 'Add non-return valve', action: () => edit((n) => ({ ...n, pipes: n.pipes.map((x) => (x.id === r.id ? { ...x, checkValve: x.checkValve ? undefined : { mode: 'ideal', kOpen: 1 } } : x)) }), [r], 'Non-return valve') },
         { label: 'Reverse direction', action: () => edit((n) => reversePipe(n, r.id), [r], 'Reverse pipe') },
         { label: 'Length from drawing', action: () => edit((n) => lengthsFromDrawing(n, [r.id]), [r], 'Length from drawing') },
@@ -558,7 +559,7 @@ export default function App() {
           {(['reservoir', 'levelSource', 'junction'] as ElementKind[]).map(tb)}
         </div><div className="rcap">Network</div></div>
         <div className="rgroup"><div className="rrow">
-          {(['pipe', 'pump', 'lineValve', 'nrv', 'prv', 'psv', 'fcv', 'orifice'] as ElementKind[]).map(tb)}
+          {(['pipe', 'pump', 'turbine', 'lineValve', 'nrv', 'prv', 'psv', 'fcv', 'orifice'] as ElementKind[]).map(tb)}
         </div><div className="rcap">Links</div></div>
         <div className="rgroup"><div className="rrow">
           {(['airVessel', 'airValve', 'standpipe', 'feedTank', 'anticipator', 'relief', 'blowoff', 'burstDisc'] as ElementKind[]).map(tb)}

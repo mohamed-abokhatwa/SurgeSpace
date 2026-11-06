@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { TransientResult } from '../engine/transient';
 import { area, type Network, type NetNode, type Pipe, type Pump, type Valve } from '../engine/types';
 import { estimateInertia, pumpRatedQ } from '../engine/hydraulics';
+import { turbineK, turbineSpeeds } from '../engine/analysis';
 import { DeviceEditors, DeviceDatalists } from './DeviceEditors';
 import { CheckValveEditor, PairsField, ValveLinkEditor } from './ValveEditors';
 import { EL, nodeDevices, nodeKind, valveKind } from '../app/elements';
@@ -169,7 +170,8 @@ export function Properties({ net, setNet, selected, result, onSelect }: { net: N
         <ConnFields net={net} from={v.from} to={v.to} onChange={(from, to) => setValve((x) => ({ ...x, from, to }))} />
         <label className="row small" style={{ marginTop: 8 }}><input type="checkbox" checked={!!v.orifice} onChange={(e) => setValve((x) => ({ ...x, orifice: e.target.checked || undefined }))} /> Fixed restriction (inline orifice, never operated)</label>
       </Group>
-      <Group title="Valve data">
+      {v.turbine && <TurbineGroup v={v} setValve={setValve} net={net} result={result} />}
+      <Group title={v.turbine ? 'Wicket gate (as a valve)' : 'Valve data'} open={!v.turbine}>
         <DeviceDatalists />
         <ValveLinkEditor v={v} result={result} setValve={setValve} />
       </Group>
@@ -394,5 +396,36 @@ function ModelSummary({ net, result }: { net: Network; result: TransientResult |
       )}
       <p className="hint" style={{ margin: 12 }}>Select an element on the drawing or in the Model Explorer to see and edit its properties. Shift-drag on empty space selects several.</p>
     </div>
+  );
+}
+
+function TurbineGroup({ v, setValve, net, result }: { v: Valve; setValve: (f: (v: Valve) => Valve) => void; net: Network; result: TransientResult | null }) {
+  const units = useUnits();
+  const t = v.turbine!;
+  const setT = (p: Partial<NonNullable<Valve['turbine']>>) => setValve((x) => {
+    const nt = { ...x.turbine!, ...p };
+    return { ...x, turbine: nt, k0: +turbineK(nt, x.diameter).toFixed(3) };
+  });
+  const run = result ? turbineSpeeds(net, result).find((r) => r.id === v.id) : undefined;
+  const P = (998.2 * 9.80665 * t.ratedFlow * t.ratedHead * t.efficiency) / 1000;
+  return (
+    <Group title="Turbine and generator">
+      <div className="grid2">
+        <QNum label="Rated net head" q="head" value={t.ratedHead} onChange={(x) => x && setT({ ratedHead: x })} />
+        <QNum label="Rated flow" q="flow" value={t.ratedFlow} onChange={(x) => x && setT({ ratedFlow: x })} />
+        <label className="field"><span>Efficiency <em className="unit">%</em></span><input type="number" value={Math.round(t.efficiency * 1000) / 10} onChange={(e) => setT({ efficiency: (num(e.target.value) || 90) / 100 })} /></label>
+        <label className="field"><span>Synchronous speed <em className="unit">rpm</em></span><input type="number" value={t.speed} onChange={(e) => setT({ speed: num(e.target.value) || 750 })} /></label>
+        <QNum label="Turbine + generator inertia" q="inertia" value={t.inertia} onChange={(x) => x && setT({ inertia: x })} />
+        <QNum label="Gate bore" q="diameter" value={v.diameter} digits={1} onChange={(x) => x && setValve((y) => ({ ...y, diameter: x, k0: +turbineK(y.turbine!, x).toFixed(3) }))} />
+      </div>
+      <p className="hint">Rated output {fmtQ(P, 'power', 0, units)}. The gates are sized so the turbine passes the rated flow at the rated head (K = {v.k0}). Operate it in Operations → Turbine load rejection / acceptance.</p>
+      {run && (
+        <div className="stats" style={{ marginTop: 8 }}>
+          <Stat v={`${((run.maxSpeed - 1) * 100).toFixed(1)} %`} l="Largest speed rise" />
+          <Stat v={`${run.tMax.toFixed(2)} s`} l="Time of peak speed" />
+          <Stat v={fmtQ(run.power[0], 'power', 0, units)} l="Steady output" />
+        </div>
+      )}
+    </Group>
   );
 }

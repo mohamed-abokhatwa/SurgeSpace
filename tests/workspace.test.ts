@@ -5,7 +5,10 @@
 //  • reservoir head schedule: steady state unchanged, the boundary follows the sine exactly;
 //  • editing operations (add, connect, split, insert, delete, rename) keep the model consistent;
 //  • unit conversions round-trip; wave speed calculator matches Korteweg; model health check finds faults.
-import { gravityValve, risingMain } from '../src/engine/cases';
+import { gravityValve, hydroPlant, risingMain } from '../src/engine/cases';
+import { turbineK, turbineSpeeds } from '../src/engine/analysis';
+import { buildReport } from '../src/report/report';
+import { designChecks } from '../src/engine/analysis';
 import { solveSteady } from '../src/engine/steady';
 import { runTransient, schedHead } from '../src/engine/transient';
 import { HB, HV, applyFluid, barometricHead, type Network } from '../src/engine/types';
@@ -13,6 +16,7 @@ import { addNode, addPipe, deleteElements, insertOnPipe, renameElement, splitPip
 import { FLUIDS, waveSpeed, PIPE_MATERIALS } from '../src/app/catalogues';
 import { toShow, fromShow } from '../src/app/units';
 import { healthCheck } from '../src/app/health';
+import { computeContours } from '../src/app/contours';
 
 let pass = 0, fail = 0;
 const t = (name: string, ok: boolean, info = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? ` (${info})` : ''}`); ok ? pass++ : fail++; };
@@ -113,6 +117,33 @@ const maxOf = (r: ReturnType<typeof runTransient>) => Math.max(...Object.values(
   bad.nodes.push({ id: 'ORPHAN', kind: 'junction', x: 0, y: 0, elev: 0 });
   const iss = healthCheck(bad);
   t('health check: finds missing node, zero length and orphan', iss.some((i) => i.title.includes('missing node')) && iss.some((i) => i.title.includes('length')) && iss.some((i) => i.title.toLowerCase().includes('not connected')));
+}
+
+// ── contours ──
+{
+  const pts = [];
+  for (let i = 0; i <= 10; i++) for (let j = 0; j <= 10; j++) pts.push({ x: i * 10, y: j * 10, v: i * 10 });
+  const c = computeContours(pts, { levels: [25, 55] })!;
+  const ok = c.segs.every((g) => Math.abs(g.x1 - c.levels[g.k]) < 0.6 && Math.abs(g.x2 - c.levels[g.k]) < 0.6);
+  t('contours of a plane are straight lines at the right place', c.segs.length > 20 && ok);
+}
+
+// ── turbine ──
+{
+  const h = hydroPlant();
+  const v = h.valves[0];
+  const K = turbineK(v.turbine!, v.diameter);
+  t('turbine gate K passes the rated flow at the rated head', Math.abs(K - v.k0) / K < 0.01);
+  const r = runTransient(h, { frames: 400 });
+  const run = turbineSpeeds(h, r)[0];
+  t('turbine: load rejection speeds the runner up, then it slows', run.maxSpeed > 1.05 && run.maxSpeed < 1.8 && run.speed[run.speed.length - 1] < run.maxSpeed, `peak ${(run.maxSpeed * 100).toFixed(1)} %`);
+  t('turbine: speed is synchronous before the rejection', run.speed[0] === 1 && Math.abs(run.power[0] - (998.2 * 9.80665 * r.steady.flows['TU-1'] * (r.steady.heads['INLET'] - r.steady.heads['OUTLET']) * 0.9) / 1000) < 5);
+  const slow = runTransient({ ...h, event: { ...h.event, duration: 20 } }, { frames: 400 });
+  const runSlow = turbineSpeeds({ ...h, event: { ...h.event, duration: 20 } }, slow)[0];
+  t('turbine: slower gate closure → more overspeed, less pressure rise', runSlow.maxSpeed > run.maxSpeed && slow.nodeMax['INLET'] < r.nodeMax['INLET'], `${(runSlow.maxSpeed * 100).toFixed(0)} % vs ${(run.maxSpeed * 100).toFixed(0)} %`);
+  t('turbine: design check reports the speed rise', designChecks(h, r).some((c) => c.title.includes('Turbine TU-1')));
+  const htmlUS = buildReport(h, r, designChecks(h, r), { version: 'test', units: { system: 'US', flow: 'gpm', pressure: 'psi' } });
+  t('report in US units shows psi, gpm and ft', htmlUS.includes('(psi)') && htmlUS.includes('(gpm)') && htmlUS.includes('(ft)') && htmlUS.includes('Turbine'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -4,7 +4,7 @@ import type { NetNode, Network } from '../engine/types';
 
 export type ElementKind =
   | 'junction' | 'reservoir' | 'levelSource'
-  | 'pipe' | 'pump' | 'lineValve' | 'nrv' | 'prv' | 'psv' | 'fcv' | 'orifice'
+  | 'pipe' | 'pump' | 'turbine' | 'lineValve' | 'nrv' | 'prv' | 'psv' | 'fcv' | 'orifice'
   | 'airVessel' | 'airValve' | 'standpipe' | 'feedTank' | 'anticipator' | 'relief' | 'blowoff' | 'burstDisc';
 
 export type Placement = 'node' | 'link' | 'device';
@@ -26,6 +26,7 @@ export const ELEMENTS: ElementInfo[] = [
   { kind: 'levelSource', name: 'Varying-Level Source', short: 'Var. source', group: 'Network', placement: 'node', description: 'A source whose level follows a sine wave or a time table (tide, wave action, upstream station).' },
   { kind: 'pipe', name: 'Pipe', short: 'Pipe', group: 'Links', placement: 'link', key: 'P', description: 'Click the start node (or empty space), click to add bends, finish on the end node. Double-click or Esc to stop.' },
   { kind: 'pump', name: 'Pump', short: 'Pump', group: 'Links', placement: 'link', key: 'U', description: 'Click on a pipe to insert a pump, or click the suction node then the discharge node.' },
+  { kind: 'turbine', name: 'Hydro Turbine', short: 'Turbine', group: 'Links', placement: 'link', key: 'T', description: 'Turbine and generator: click a pipe to insert one. Operate it with a load rejection (gates close, the runner speeds up) or a load acceptance.' },
   { kind: 'lineValve', name: 'Line Valve', short: 'Valve', group: 'Links', placement: 'link', key: 'V', description: 'Isolating or throttling valve (gate, butterfly, ball, globe, needle or your own curve) that can be operated in the run.' },
   { kind: 'nrv', name: 'Non-Return Valve', short: 'NRV', group: 'Links', placement: 'link', key: 'N', description: 'Check valve on a pipe: ideal, delayed, reverse-velocity or dynamic closure, with slam detection.' },
   { kind: 'prv', name: 'Pressure Reducer', short: 'PRV', group: 'Links', placement: 'link', description: 'Holds the downstream pressure at its set point.' },
@@ -90,6 +91,7 @@ export function removeDevice(n: NetNode, kind: ElementKind): NetNode {
 
 /** Kind of a valve link. */
 export function valveKind(v: Network['valves'][number]): ElementKind {
+  if (v.turbine) return 'turbine';
   if (v.control) return v.control.type === 'PRV' ? 'prv' : v.control.type === 'PSV' ? 'psv' : 'fcv';
   if (v.check) return 'nrv';
   if (v.orifice) return 'orifice';
@@ -108,6 +110,7 @@ export function explorerGroups(net: Network): ExplorerGroup[] {
     g('junction', 'Junctions', nodesOf((n) => n.kind === 'junction')),
     g('pipe', 'Pipes', net.pipes.map((p) => ({ type: 'pipe' as const, id: p.id, sub: p.checkValve ? 'NRV' : undefined }))),
     g('pump', 'Pumps', net.pumps.map((p) => ({ type: 'pump' as const, id: p.id }))),
+    g('turbine', 'Turbines', vk('turbine')),
     g('lineValve', 'Line valves', vk('lineValve')),
     g('nrv', 'Non-return valves', [...vk('nrv'), ...net.pipes.filter((p) => p.checkValve).map((p) => ({ type: 'pipe' as const, id: p.id, sub: 'on pipe' }))]),
     g('prv', 'Pressure reducers', vk('prv')),

@@ -106,6 +106,15 @@ export function designChecks(net: Network, r: TransientResult, envs: PipeEnvelop
     out.push({ level: 'warn', title: 'Wave speeds adjusted beyond the target', detail: `Up to ${(r.maxAdjust * 100).toFixed(2)} %.` });
   else
     out.push({ level: 'pass', title: 'Exact geometry', detail: `Wave speeds adjusted by at most ${(r.maxAdjust * 100).toFixed(2)} % (HAMMER's default tolerance is 75 %); pipe lengths unchanged.${r.rigidPipes.length ? ` ${r.rigidPipes.length} very short pipe(s) modelled as rigid columns.` : ''}` });
+  for (const tr of turbineSpeeds(net, r)) {
+    if (tr.mode !== 'rejection') { out.push({ level: 'info', title: `Turbine ${tr.id}`, detail: `Synchronised to the grid; rated output ${tr.ratedPower.toFixed(0)} kW.` }); continue; }
+    const pct = Math.round((tr.maxSpeed - 1) * 100);
+    out.push(tr.maxSpeed > 1.5
+      ? { level: 'fail', title: `Turbine ${tr.id} overspeeds on load rejection`, detail: `Speed rises ${pct} % (to ${(tr.maxSpeed * 100).toFixed(0)} %) at ${tr.tMax.toFixed(2)} s. Close the gates faster or add inertia (a flywheel), or relieve the flow with a bypass valve.` }
+      : tr.maxSpeed > 1.35
+        ? { level: 'warn', title: `Turbine ${tr.id} speed rise is high`, detail: `Speed rises ${pct} % at ${tr.tMax.toFixed(2)} s on load rejection (typical guarantee 35–50 %).` }
+        : { level: 'pass', title: `Turbine ${tr.id} speed rise acceptable`, detail: `Speed rises ${pct} % at ${tr.tMax.toFixed(2)} s on load rejection.` });
+  }
   for (const w of r.warnings) out.push({ level: 'warn', title: 'Note', detail: w });
   return out;
 }
@@ -277,6 +286,68 @@ export function suggestAirValves(net: Network, base: TransientResult, onProgress
         break;
       }
     }
+  }
+  return out;
+}
+
+/** Loss coefficient (fully open, on the bore velocity) that makes a turbine pass its rated flow at its rated head. */
+export function turbineK(t: { ratedHead: number; ratedFlow: number }, diameter: number): number {
+  const A = (Math.PI / 4) * diameter * diameter;
+  const V = t.ratedFlow / Math.max(A, 1e-9);
+  return Math.max((2 * 9.80665 * t.ratedHead) / Math.max(V * V, 1e-12), 1e-3);
+}
+
+export interface TurbineRun {
+  id: string;
+  /** Runner speed per frame, fraction of synchronous speed. */
+  speed: Float32Array;
+  /** Hydraulic power per frame, kW. */
+  power: Float32Array;
+  maxSpeed: number;
+  tMax: number;
+  ratedPower: number;
+  mode: 'rejection' | 'acceptance' | 'none';
+}
+
+/** Runner speed of each turbine from the power balance I·ω·dω/dt = P_hydraulic − P_generator.
+ *  Load rejection: the generator load falls to zero at the operation start, so the unit speeds up until the gates
+ *  have closed enough. Load acceptance and normal running: the unit stays synchronised to the grid (speed 1). */
+export function turbineSpeeds(net: Network, r: TransientResult): TurbineRun[] {
+  const out: TurbineRun[] = [];
+  const evs = allEvents(net);
+  const t = r.times;
+  for (const v of net.valves) {
+    const tb = v.turbine;
+    const vr = r.valves[v.id];
+    if (!tb || !vr) continue;
+    const ev = evs.find((e) => e.targets.includes(v.id));
+    const mode = ev?.turbineOp ?? (ev?.kind === 'valveClose' ? 'rejection' : ev?.kind === 'valveOpen' ? 'acceptance' : 'none');
+    const hf = r.nodeHead[v.from], ht = r.nodeHead[v.to];
+    const n = t.length;
+    const speed = new Float32Array(n), power = new Float32Array(n);
+    const w0 = (2 * Math.PI * tb.speed) / 60;
+    const rho = 998.2, g = 9.80665;
+    for (let k = 0; k < n; k++) {
+      const dH = hf && ht ? hf[k] - ht[k] : tb.ratedHead;
+      power[k] = (rho * g * Math.max(vr.flow[k], 0) * Math.max(dH, 0) * tb.efficiency) / 1000;
+    }
+    let w = w0, maxW = w0, tMax = 0;
+    speed[0] = 1;
+    for (let k = 1; k < n; k++) {
+      const dt = t[k] - t[k - 1];
+      const rejected = mode === 'rejection' && ev && t[k] >= ev.start;
+      if (!rejected) { w = w0; speed[k] = 1; continue; }
+      // the efficiency falls as the runner overspeeds; a simple parabola keeps the runaway speed finite (~1.8 ×)
+      const ratio = w / w0;
+      const eta = Math.max(0, 1 - ((ratio - 1) / 0.8) ** 2);
+      const Ph = power[k] * 1000 * eta;
+      // after the rejection the only load is windage and bearing friction (about 1 % of rated power at rated speed, ∝ ω³)
+      const Pw = 0.01 * rho * g * tb.ratedFlow * tb.ratedHead * tb.efficiency * ratio ** 3;
+      w = Math.max(0, w + (dt * (Ph - Pw)) / Math.max(tb.inertia * w, 1e-6));
+      speed[k] = w / w0;
+      if (w > maxW) { maxW = w; tMax = t[k]; }
+    }
+    out.push({ id: v.id, speed, power, maxSpeed: maxW / w0, tMax, ratedPower: (rho * g * tb.ratedFlow * tb.ratedHead * tb.efficiency) / 1000, mode });
   }
   return out;
 }

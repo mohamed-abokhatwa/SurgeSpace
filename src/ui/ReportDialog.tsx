@@ -1,3 +1,4 @@
+import { useUnits } from '../app/units';
 // Report dialog: title-page details, then a preview of the detailed report with Print / Save as PDF and HTML download.
 import { useMemo, useRef, useState } from 'react';
 import type { Check } from '../engine/analysis';
@@ -10,10 +11,11 @@ export function ReportDialog({ net, result, checks, route, nodes, version, onSav
   net: Network; result: TransientResult; checks: Check[]; route: [string, string]; nodes: string[]; version: string;
   onSaveInfo: (info: ReportInfo) => void; onClose: () => void;
 }) {
+  const units = useUnits();
   const [info, setInfo] = useState<ReportInfo>(net.report ?? {});
   const [made, setMade] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
-  const html = useMemo(() => (made ? buildReport({ ...net, report: info }, result, checks, { version, route, nodes }) : ''), [made, net, info, result, checks, version, route, nodes]);
+  const html = useMemo(() => (made ? buildReport({ ...net, report: info }, result, checks, { version, route, nodes, units }) : ''), [made, net, info, result, checks, version, route, nodes, units]);
   const field = (k: keyof ReportInfo, label: string, area = false) => (
     <label className="field" style={area ? { gridColumn: '1 / -1' } : undefined}><span>{label}</span>
       {area ? <textarea rows={3} value={info[k] ?? ''} onChange={(e) => setInfo({ ...info, [k]: e.target.value })} />

@@ -7,28 +7,32 @@ import { valveKind, EL } from '../app/elements';
 type SetNet = (f: (n: Network) => Network, label?: string) => void;
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s));
 
-const KINDS: { kind: EventKind; mode?: 'trip' | 'ramp' | 'start'; label: string; hint: string }[] = [
+const KINDS: { kind: EventKind; mode?: string; label: string; hint: string }[] = [
   { kind: 'pumpTrip', mode: 'trip', label: 'Pump power failure', hint: 'Power is lost; the pump runs down on its inertia.' },
   { kind: 'pumpTrip', mode: 'ramp', label: 'Pump controlled stop', hint: 'A drive (VFD / soft starter) brings the speed down to zero over the ramp time.' },
   { kind: 'pumpTrip', mode: 'start', label: 'Pump start-up', hint: 'Off in the steady state; speed rises to full over the ramp time.' },
   { kind: 'valveClose', label: 'Valve closing', hint: 'Valve moves towards its final stroke, by stroke time and law or by an operating curve.' },
   { kind: 'valveOpen', label: 'Valve opening', hint: 'Valve opens from its steady stroke.' },
+  { kind: 'valveClose', mode: 'rejection', label: 'Turbine load rejection', hint: 'The generator disconnects: the runner speeds up while the governor closes the wicket gates over the stroke time.' },
+  { kind: 'valveOpen', mode: 'acceptance', label: 'Turbine load acceptance', hint: 'The governor opens the wicket gates to take load; the unit stays synchronised to the grid.' },
 ];
-const keyOf = (e: TransientEvent) => (e.kind === 'pumpTrip' ? `pumpTrip:${e.pumpMode ?? 'trip'}` : e.kind);
+const keyOf = (e: TransientEvent) => (e.kind === 'pumpTrip' ? `pumpTrip:${e.pumpMode ?? 'trip'}` : e.turbineOp ? `${e.kind}:${e.turbineOp}` : e.kind);
 
 function OperationCard({ net, ev, index, onChange, onRemove }: { net: Network; ev: TransientEvent; index: number; onChange: (e: TransientEvent) => void; onRemove?: () => void }) {
   const set = (p: Partial<TransientEvent>) => onChange({ ...ev, ...p });
   const isPump = ev.kind === 'pumpTrip';
-  const cands = isPump ? net.pumps.map((p) => ({ id: p.id, sub: 'pump' })) : net.valves.filter((v) => !v.orifice).map((v) => ({ id: v.id, sub: EL[valveKind(v)].short }));
+  const cands = isPump ? net.pumps.map((p) => ({ id: p.id, sub: 'pump' })) : net.valves.filter((v) => !v.orifice && (ev.turbineOp ? !!v.turbine : true)).map((v) => ({ id: v.id, sub: EL[valveKind(v)].short }));
   const k = KINDS.find((x) => `${x.kind}${x.mode ? ':' + x.mode : ''}` === keyOf(ev));
   return (
     <div className="op-card">
       <div className="op-head">
         <span className="op-num">{index + 1}</span>
         <select value={keyOf(ev)} onChange={(e) => {
-          const [kind, mode] = e.target.value.split(':') as [EventKind, 'trip' | 'ramp' | 'start' | undefined];
+          const [kind, mode] = e.target.value.split(':') as [EventKind, string | undefined];
           const pump = kind === 'pumpTrip';
-          set({ kind, pumpMode: pump ? mode : undefined, targets: pump === isPump ? ev.targets : pump ? net.pumps.filter((p) => p.on).map((p) => p.id) : net.valves.slice(0, 1).map((v) => v.id), duration: ev.duration ?? 5, curve: pump ? undefined : ev.curve });
+          const turb = mode === 'rejection' || mode === 'acceptance' ? (mode as 'rejection' | 'acceptance') : undefined;
+          const targets = pump === isPump && !!turb === !!ev.turbineOp ? ev.targets : pump ? net.pumps.filter((p) => p.on).map((p) => p.id) : turb ? net.valves.filter((v) => v.turbine).map((v) => v.id) : net.valves.filter((v) => !v.turbine).slice(0, 1).map((v) => v.id);
+          set({ kind, pumpMode: pump ? (mode as 'trip' | 'ramp' | 'start') : undefined, turbineOp: turb, targets, duration: ev.duration ?? 5, curve: pump ? undefined : ev.curve, finalOpening: turb === 'rejection' ? 0 : turb === 'acceptance' ? 1 : ev.finalOpening });
         }}>
           {KINDS.map((x) => <option key={x.label} value={`${x.kind}${x.mode ? ':' + x.mode : ''}`}>{x.label}</option>)}
         </select>
@@ -82,7 +86,7 @@ export function OperationsPanel({ net, setNet }: { net: Network; setNet: SetNet 
   const shown = hasMain ? list : list.slice(1);
   const add = (kind: EventKind) => write([...shown, kind === 'pumpTrip'
     ? { kind, pumpMode: 'trip', targets: net.pumps.filter((p) => p.on).map((p) => p.id).slice(0, 1), start: 1 }
-    : { kind, targets: net.valves.filter((v) => !v.orifice).slice(0, 1).map((v) => v.id), start: 1, duration: 10, exponent: 1, finalOpening: kind === 'valveClose' ? 0 : 1 }]);
+    : { kind, targets: net.valves.filter((v) => !v.orifice && !v.turbine).slice(0, 1).map((v) => v.id), start: 1, duration: 10, exponent: 1, finalOpening: kind === 'valveClose' ? 0 : 1 }]);
   // timeline sketch
   const T = Math.max(net.settings.duration, 1);
   return (
@@ -94,7 +98,8 @@ export function OperationsPanel({ net, setNet }: { net: Network; setNet: SetNet 
       ))}
       <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
         <button className="btn small" onClick={() => add('pumpTrip')} disabled={!net.pumps.length}>+ Pump operation</button>
-        <button className="btn small" onClick={() => add('valveClose')} disabled={!net.valves.length}>+ Valve operation</button>
+        <button className="btn small" onClick={() => add('valveClose')} disabled={!net.valves.some((v) => !v.turbine)}>+ Valve operation</button>
+        <button className="btn small" onClick={() => write([...shown, { kind: 'valveClose', turbineOp: 'rejection', targets: net.valves.filter((v) => v.turbine).map((v) => v.id), start: 1, duration: 8, exponent: 1, finalOpening: 0 }])} disabled={!net.valves.some((v) => v.turbine)}>+ Turbine operation</button>
       </div>
       {shown.length > 0 && (
         <div className="op-timeline" aria-label="Operations timeline">

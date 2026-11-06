@@ -2,6 +2,7 @@
 // export the series to CSV. The element-by-element device histories stay available under "All devices".
 import { useMemo, useState } from 'react';
 import type { TransientResult } from '../engine/transient';
+import { turbineSpeeds } from '../engine/analysis';
 import { area, type Network } from '../engine/types';
 import { Chart, type Series } from './Chart';
 import { HistoryView } from './HistoryView';
@@ -33,6 +34,8 @@ const VARS: Record<ElRef['type'], VarDef[]> = {
     { v: 'q', label: 'Flow', q: 'flow', get: (_n, r, id) => r.pumps[id]?.flow ?? null },
   ],
   valve: [
+    { v: 'tspeed', label: 'Turbine speed', q: null, unit: '%', get: (n, r, id) => { const t = turbineSpeeds(n, r).find((x) => x.id === id); return t ? Array.from(t.speed, (x) => x * 100) : null; } },
+    { v: 'tpower', label: 'Turbine power', q: 'power', get: (n, r, id) => turbineSpeeds(n, r).find((x) => x.id === id)?.power ?? null },
     { v: 'open', label: 'Flow area', q: null, unit: '%', get: (_n, r, id) => (r.valves[id] ? Array.from(r.valves[id].opening, (x) => x * 100) : null) },
     { v: 'q', label: 'Flow', q: 'flow', get: (_n, r, id) => r.valves[id]?.flow ?? null },
   ],
@@ -98,7 +101,9 @@ export function GraphsView({ net, result, items, setItems, selected, tNow }: { n
             ))}
             {!items.length && <span className="hint">Select elements on the drawing (Shift for several) and press “Add selected”. Clicking a node also adds it.</span>}
           </div>
-          {charts.map((c) => <Chart key={c.title + c.unit} series={c.series} xLabel="Time (s)" yLabel={`${c.title} (${c.unit})`} yUnit={c.unit} xUnit="s" vLine={tNow} height={220} />)}
+          <div className={charts.length > 1 ? 'grid2' : ''}>
+            {charts.map((c) => <Chart key={c.title + c.unit} series={c.series} xLabel="Time (s)" yLabel={`${c.title} (${c.unit})`} yUnit={c.unit} xUnit="s" vLine={tNow} height={charts.length > 1 ? 200 : 220} />)}
+          </div>
         </>
       )}
     </div>

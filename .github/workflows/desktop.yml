@@ -29,6 +29,8 @@ jobs:
   windows-store:
     needs: test
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,6 +53,21 @@ jobs:
           ./msix/pack.ps1 -IdentityName $id -Publisher $pub -PublisherDisplay $disp -Version "$v.0"
       - uses: actions/upload-artifact@v4
         with: { name: SurgeSpace-MicrosoftStore, path: msix/*.msix }
+      - name: Copy the package to the store-builds branch (download with git, no API needed)
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem msix/*.msix | Select-Object -First 1
+          $tmp = Join-Path $env:RUNNER_TEMP "store-builds"
+          New-Item -ItemType Directory $tmp | Out-Null
+          Copy-Item $f.FullName $tmp
+          Set-Location $tmp
+          git init -q
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout -q -b store-builds
+          git add .
+          git commit -q -m "MSIX $($f.Name) (run ${{ github.run_number }}, ${{ github.sha }})"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" store-builds
 
   macos:
     needs: test

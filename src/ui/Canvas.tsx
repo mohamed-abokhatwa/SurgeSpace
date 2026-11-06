@@ -9,13 +9,15 @@ import { pressureColor } from './util';
 import { EL, deviceDefaults, nodeDevices, valveKind, type ElementKind } from '../app/elements';
 import { addLink, addNode, addPipe, insertOnPipe, moveNodes, nearestFraction, pipePath, splitPipe, type ElRef, type ElementDefaults } from '../app/edit';
 import { fmtQ, getUnits, toShow, uLabel } from '../app/units';
+import { computeContours } from '../app/contours';
 
 export type ColorMode = 'surge' | 'pressure' | 'max' | 'min' | 'steady' | 'plain';
 export type Selection = ElRef | null;
 export type Tool = 'select' | 'pan' | ElementKind;
 export type ColorBy = 'none' | 'diameter' | 'material' | 'class' | 'wavespeed' | 'velocity' | 'elevation';
 export type ValueLabel = 'none' | 'elevation' | 'demand' | 'diameter' | 'length' | 'steadyPressure' | 'maxPressure' | 'minPressure' | 'flow' | 'velocity';
-export interface ViewOpts { ids: boolean; values: ValueLabel; grid: boolean; snap: boolean; colorBy: ColorBy; north: boolean }
+export type ContourBy = 'none' | 'elevation' | 'steadyPressure' | 'maxPressure' | 'minPressure' | 'maxHead';
+export interface ViewOpts { ids: boolean; values: ValueLabel; grid: boolean; snap: boolean; colorBy: ColorBy; north: boolean; contour?: ContourBy }
 
 interface Theme { text: string; muted: string; faint: string; panel: string; line: string; line1: string; accent: string; cyan: string; warn: string; bad: string; good: string; neutral: string; bg: string; dark: boolean }
 function readTheme(): Theme {
@@ -210,6 +212,18 @@ export function Canvas({
   // follow size changes until the user pans or zooms
   useEffect(() => { if (!userMoved.current) fit(); }, [size.w, size.h]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // contour lines of a node value
+  const contourBy = vo.contour ?? 'none';
+  const contours = useMemo(() => {
+    if (contourBy === 'none') return null;
+    if (contourBy !== 'elevation' && !result) return null;
+    const pts = netIn.nodes.filter((n) => n.kind === 'junction' || contourBy === 'elevation').map((n) => {
+      const v = contourBy === 'elevation' ? n.elev : contourBy === 'steadyPressure' ? (result!.steady.heads[n.id] ?? NaN) - n.elev
+        : contourBy === 'maxPressure' ? result!.nodeMax[n.id] - n.elev : contourBy === 'minPressure' ? result!.nodeMin[n.id] - n.elev : result!.nodeMax[n.id];
+      return { x: n.x, y: -n.y, v };
+    });
+    return computeContours(pts);
+  }, [contourBy, netIn.nodes, result]);
   // background picture
   const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
   const bgSrc = netIn.background?.src;
@@ -282,6 +296,30 @@ export function Canvas({
       ctx.globalAlpha = Math.max(0.05, Math.min(1, bg.opacity));
       ctx.drawImage(bgImg, X(bg.x0), Y(-bg.y1), (bg.x1 - bg.x0) * s, (bg.y1 - bg.y0) * s);
       ctx.globalAlpha = 1;
+    }
+    // contours (under the pipes)
+    if (contours) {
+      const q = contourBy === 'elevation' ? 'elevation' : contourBy === 'maxHead' ? 'head' : 'pressureHead';
+      const pal = ['#2563eb', '#0891b2', '#059669', '#65a30d', '#ca8a04', '#ea580c', '#dc2626', '#be185d', '#7c3aed', '#4338ca'];
+      const nL = contours.levels.length;
+      const byK: Path2D[] = contours.levels.map(() => new Path2D());
+      for (const g of contours.segs) { byK[g.k].moveTo(X(g.x1), Y(g.y1)); byK[g.k].lineTo(X(g.x2), Y(g.y2)); }
+      ctx.lineWidth = 1.3; ctx.setLineDash([]);
+      byK.forEach((p2, k) => { ctx.strokeStyle = pal[Math.round((k * (pal.length - 1)) / Math.max(nL - 1, 1))]; ctx.globalAlpha = 0.75; ctx.stroke(p2); });
+      ctx.globalAlpha = 1;
+      // a label on every ~40th segment of each level
+      ctx.font = '600 10px IBM Plex Sans, system-ui';
+      const seen = new Map<number, number>();
+      for (const g of contours.segs) {
+        const c = (seen.get(g.k) ?? 0) + 1; seen.set(g.k, c);
+        if (c % 40 !== 5) continue;
+        const sx2 = X((g.x1 + g.x2) / 2), sy2 = Y((g.y1 + g.y2) / 2);
+        if (sx2 < 0 || sx2 > w || sy2 < 0 || sy2 > h) continue;
+        const txt = toShow(contours.levels[g.k], q, units).toFixed(0);
+        const tw = ctx.measureText(txt).width;
+        ctx.fillStyle = theme.dark ? 'rgba(7,17,31,0.85)' : 'rgba(255,255,255,0.9)'; ctx.fillRect(sx2 - tw / 2 - 2, sy2 - 6, tw + 4, 12);
+        ctx.fillStyle = pal[Math.round((g.k * (pal.length - 1)) / Math.max(nL - 1, 1))]; ctx.textAlign = 'center'; ctx.fillText(txt, sx2, sy2 + 4); ctx.textAlign = 'left';
+      }
     }
     // screen polylines
     const SP = new Map<string, number[]>();
@@ -462,7 +500,18 @@ export function Canvas({
       ctx.beginPath(); ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(b.x), Y(b.y)); ctx.stroke();
       if (isS) { ctx.beginPath(); ctx.arc(mx, my, r + 7, 0, Math.PI * 2); ctx.fillStyle = theme.accent; ctx.globalAlpha = 0.25; ctx.fill(); ctx.globalAlpha = 1; }
       ctx.save(); ctx.translate(mx, my); ctx.rotate(ang);
-      if (kind === 'orifice') {
+      if (kind === 'turbine') {
+        const rt = r0 * 1.05;
+        ctx.restore(); ctx.save(); ctx.translate(mx, my);
+        ctx.beginPath(); ctx.arc(0, 0, rt, 0, Math.PI * 2); ctx.fillStyle = theme.panel; ctx.fill();
+        ctx.strokeStyle = isS ? theme.accent : theme.cyan; ctx.lineWidth = isS ? 2.5 : 1.8; ctx.stroke();
+        const spin = (anim.current.rotor.get(v.id) ?? 0) + (live ? (1 - Math.min(1, open)) * 6 * dtReal + 2 * dtReal : 0);
+        anim.current.rotor.set(v.id, spin);
+        ctx.rotate(spin);
+        ctx.strokeStyle = theme.cyan; ctx.lineWidth = 1.6;
+        for (let k = 0; k < 4; k++) { ctx.rotate(Math.PI / 2); ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(rt * 0.55, -rt * 0.15, rt * 0.7, rt * 0.35); ctx.stroke(); }
+        if (open < 0.999) { ctx.rotate(-spin); ctx.fillStyle = theme.bad; ctx.globalAlpha = 0.8; ctx.fillRect(-rt, rt + 3, 2 * rt * (1 - open), 3); ctx.globalAlpha = 1; }
+      } else if (kind === 'orifice') {
         ctx.fillStyle = theme.panel; ctx.fillRect(-2.5, -r, 5, 2 * r);
         ctx.strokeStyle = isS ? theme.accent : theme.text; ctx.lineWidth = 1.6; ctx.strokeRect(-2.5, -r, 5, 2 * r);
         ctx.clearRect(-2, -r * 0.3, 4, r * 0.6); ctx.fillStyle = theme.muted; ctx.fillRect(-0.5, -r * 0.3, 1, r * 0.6);
@@ -743,7 +792,7 @@ export function Canvas({
         ctx.font = '700 10px IBM Plex Sans, system-ui'; ctx.textAlign = 'center'; ctx.fillText('N', nx, ny + 16); ctx.textAlign = 'left';
       }
     }
-  }, [theme, size, geo, result, envMap, sScale, lut, pumpGroups, net, editing, colorFn, bottomInset, bgImg]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [theme, size, geo, result, envMap, sScale, lut, pumpGroups, net, editing, colorFn, bottomInset, bgImg, contours, contourBy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const liveFrame = mode === 'surge' || mode === 'pressure' ? framePos : -1;
   useEffect(() => {

@@ -308,7 +308,23 @@ export interface Valve {
   owner?: string;
   /** Fixed restriction (inline orifice): drawn and listed as an orifice; it is a valve that is never operated. */
   orifice?: boolean;
+  /** Hydro turbine: modelled through its wicket gates (a valve whose fully open loss passes the rated flow at the
+   *  rated head); the runner speed is found from the power balance after a load change. */
+  turbine?: TurbineSpec;
   label?: string;
+}
+
+export interface TurbineSpec {
+  /** Rated net head across the turbine, m. */
+  ratedHead: number;
+  /** Rated flow, m³/s. */
+  ratedFlow: number;
+  /** Efficiency at the rated point (0–1). */
+  efficiency: number;
+  /** Synchronous speed, rpm. */
+  speed: number;
+  /** Turbine + generator inertia, kg·m². */
+  inertia: number;
 }
 
 export type EventKind = 'pumpTrip' | 'valveClose' | 'valveOpen' | 'none';
@@ -330,6 +346,8 @@ export interface TransientEvent {
    *  forced linearly to zero over `duration`; 'start' = pump start, off in steady state and speed raised
    *  linearly to full over `duration`. */
   pumpMode?: 'trip' | 'ramp' | 'start';
+  /** Valve events on turbines: load rejection (generator disconnects, gates close) or load acceptance (gates open). */
+  turbineOp?: 'rejection' | 'acceptance';
 }
 
 /** Time-varying head at a reservoir boundary (tide, wave, sloshing tank, upstream pump station). */

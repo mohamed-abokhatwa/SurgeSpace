@@ -133,6 +133,34 @@ export function elHazek(): Network {
 /** Examples are drawn in screen coordinates; networks use engineering coordinates (y up). */
 import bwsn1 from './bwsn1.json';
 
+/** Hydropower scheme: headrace tunnel, open surge shaft, steel penstock and a turbine that rejects its full load. */
+export function hydroPlant(): Network {
+  const D = 1.6, Qr = 6, Hr = 160;
+  const A = (Math.PI / 4) * 1.2 * 1.2, V = Qr / A;
+  return {
+    name: 'Hydropower plant · load rejection',
+    description: 'A 3 km headrace tunnel, an open surge shaft and a 1.2 km steel penstock feed a 8.4 MW turbine. The generator trips and the governor closes the wicket gates in 10 s.',
+    nodes: [
+      { id: 'LAKE', kind: 'reservoir', x: 0, y: 60, elev: 395, head: 400 },
+      { id: 'SHAFT', kind: 'junction', x: 600, y: 60, elev: 385, tank: { diameter: 8, bottomElev: 375, topElev: 420, connDiameter: 1.6, kIn: 0.5, kOut: 0.5 } },
+      { id: 'BEND', kind: 'junction', x: 750, y: 180, elev: 330 },
+      { id: 'INLET', kind: 'junction', x: 900, y: 300, elev: 232 },
+      { id: 'OUTLET', kind: 'junction', x: 960, y: 300, elev: 231 },
+      { id: 'TAIL', kind: 'reservoir', x: 1080, y: 300, elev: 228, head: 232 },
+    ],
+    pipes: [
+      { id: 'TUNNEL', from: 'LAKE', to: 'SHAFT', length: 3000, diameter: D, roughness: 0.5, wavespeed: 1100, pressureClass: 60, material: 'Reinforced concrete' },
+      { id: 'PEN1', from: 'SHAFT', to: 'BEND', length: 500, diameter: 1.2, roughness: 0.045, wavespeed: 1150, pressureClass: 160, material: 'Carbon steel (lined)' },
+      { id: 'PEN2', from: 'BEND', to: 'INLET', length: 700, diameter: 1.2, roughness: 0.045, wavespeed: 1150, pressureClass: 260, material: 'Carbon steel (lined)' },
+      { id: 'DRAFT', from: 'OUTLET', to: 'TAIL', length: 40, diameter: 1.6, roughness: 0.3, wavespeed: 1000, pressureClass: 30 },
+    ],
+    pumps: [],
+    valves: [{ id: 'TU-1', from: 'INLET', to: 'OUTLET', diameter: 1.2, k0: Math.round(((2 * 9.80665 * Hr) / (V * V)) * 100) / 100, opening: 1, law: 'area', turbine: { ratedHead: Hr, ratedFlow: Qr, efficiency: 0.9, speed: 600, inertia: 60000 } }],
+    event: { kind: 'valveClose', turbineOp: 'rejection', targets: ['TU-1'], start: 1, duration: 10, finalOpening: 0, exponent: 1 },
+    settings: { ...defaultSettings(), duration: 120 },
+  };
+}
+
 const yUp = (n: Network): Network => ({ ...n, nodes: n.nodes.map((x) => ({ ...x, y: -x.y })) });
 
 export const EXAMPLES: { id: string; make: () => Network }[] = [
@@ -141,6 +169,7 @@ export const EXAMPLES: { id: string; make: () => Network }[] = [
   { id: 'gravity', make: () => yUp(gravityValve()) },
   { id: 'loop', make: () => yUp(loopedNetwork()) },
   { id: 'elhazek', make: () => yUp(elHazek()) },
+  { id: 'hydro', make: () => yUp(hydroPlant()) },
   // real network with a published HAMMER result (see validation/README.md)
   { id: 'bwsn1', make: () => structuredClone(bwsn1 as unknown as Network) },
 ];

@@ -1,12 +1,13 @@
 // Detailed transient analysis report: a self-contained HTML document (tables and SVG charts, no external files)
 // that prints to A4 / PDF. Sections follow the usual surge study layout: title page, summary of findings,
 // model and method, input data, steady state, transient results, protection devices, checks, time histories.
-import type { Check } from '../engine/analysis';
+import { turbineSpeeds, type Check } from '../engine/analysis';
 import { valveArea } from '../engine/devices';
 import type { TransientResult } from '../engine/transient';
 import { G, HB, HV, area, type CheckValveSpec, type Network } from '../engine/types';
 import { buildProfile } from '../ui/ProfileView';
 import { defaultRoute } from '../ui/util';
+import { unitOf, type UnitPrefs } from '../app/units';
 
 export interface ReportOptions {
   version: string;
@@ -14,6 +15,8 @@ export interface ReportOptions {
   route?: [string, string];
   /** Extra nodes to plot over time (the selected nodes in the app). */
   nodes?: string[];
+  /** Display units (default SI: m, L/s, m head). */
+  units?: UnitPrefs;
 }
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -98,6 +101,20 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   const now = new Date();
   const info = net.report ?? {};
   const st = net.settings;
+  // display units
+  const U = opt.units ?? { system: 'SI', flow: 'L/s', pressure: 'm' };
+  const uq = (q: Parameters<typeof unitOf>[0]) => unitOf(q, U);
+  const [fl, fd, fq, fp, fh, fv] = (['length', 'diameter', 'flow', 'pressureHead', 'head', 'velocity'] as const).map(uq);
+  const uL = fl.u, uD = fd.u, uQ = fq.u, uP = fp.u, uH = fh.u, uV = fv.u;
+  const Lx = (v: number | undefined, d = 1) => f(v === undefined ? v : v * fl.f, d);
+  const Dx = (v: number | undefined, d = 1) => f(v === undefined ? v : v * fd.f, U.system === 'US' ? 2 : d);
+  const Qx = (v: number | undefined, d = 1) => f(v === undefined ? v : v * fq.f, d);
+  const Px = (v: number | undefined, d = 1) => f(v === undefined ? v : v * fp.f, d);
+  const Hx = (v: number | undefined, d = 2) => f(v === undefined ? v : v * fh.f, d);
+  const Vx = (v: number | undefined, d = 2) => f(v === undefined ? v : v * fv.f, d);
+  const arrH = (a: ArrayLike<number>) => Array.from(a, (v) => v * fh.f);
+  const arrP = (a: ArrayLike<number>) => Array.from(a, (v) => v * fp.f);
+  const arrL = (a: ArrayLike<number>) => Array.from(a, (v) => v * fl.f);
   const nodeById = new Map(net.nodes.map((n) => [n.id, n]));
   const junctions = net.nodes.filter((n) => n.kind === 'junction');
   const envById = new Map(r.envelopes.map((e) => [e.id, e]));
@@ -110,7 +127,7 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
     const e = envById.get(p.id);
     const q = r.steady.flows[p.id] ?? 0;
     const A = area(p.diameter);
-    if (!e) { pipeRows.push([p.id, p.from, p.to, f(q * 1000, 1), f(q / A, 2), '–', '–', '–', '–', '–', '–', p.closed ? 'closed' : '–']); continue; }
+    if (!e) { pipeRows.push([p.id, p.from, p.to, Qx(q, 1), Vx(q / A, 2), '–', '–', '–', '–', '–', '–', p.closed ? 'closed' : '–']); continue; }
     let iMax = 0, iMin = 0, vC = 0;
     for (let i = 0; i < e.s.length; i++) {
       if (e.hMax[i] - e.z[i] > e.hMax[iMax] - e.z[iMax]) iMax = i;
@@ -122,7 +139,7 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
     if (pMax > worstMax.p) worstMax = { p: pMax, pipe: p.id, s: e.s[iMax], cls, t: e.tMax[iMax] };
     if (pMin < worstMin.p) worstMin = { p: pMin, pipe: p.id, s: e.s[iMin], t: e.tMin[iMin] };
     if (vC > cav.v) cav = { v: vC, pipe: p.id, s: e.s[e.cavMax.indexOf(vC)] };
-    pipeRows.push([p.id, p.from, p.to, f(q * 1000, 1), f(q / A, 2), f(pMax, 1), `${f(e.s[iMax], 0)} @ ${f(e.tMax[iMax], 2)} s`, f(pMin, 1), `${f(e.s[iMin], 0)} @ ${f(e.tMin[iMin], 2)} s`, `${f(cls, 0)} (${Math.round((pMax / cls) * 100)} %)`, vC > 1e-6 ? f(vC * 1000, 1) : '0', r.rigidPipes.includes(p.id) ? 'rigid' : `${f((r.pipeAdjust[p.id] ?? 0) * 100, 3)} %`]);
+    pipeRows.push([p.id, p.from, p.to, Qx(q, 1), Vx(q / A, 2), Px(pMax, 1), `${Lx(e.s[iMax], 0)} @ ${f(e.tMax[iMax], 2)} s`, Px(pMin, 1), `${Lx(e.s[iMin], 0)} @ ${f(e.tMin[iMin], 2)} s`, `${Px(cls, 0)} (${Math.round((pMax / cls) * 100)} %)`, vC > 1e-6 ? f(vC * 1000, 1) : '0', r.rigidPipes.includes(p.id) ? 'rigid' : `${f((r.pipeAdjust[p.id] ?? 0) * 100, 3)} %`]);
   }
   // node results with time of extremes from the pipe ends
   const tAt = (id: string, which: 'tMax' | 'tMin') => {
@@ -136,20 +153,20 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   };
   const nodeRows = junctions.map((n) => {
     const h0 = r.steady.heads[n.id];
-    return [n.id, f(n.elev, 2), f((n.demand ?? 0) * 1000, 2), f(h0, 2), f(h0 - n.elev, 2), f(r.nodeMax[n.id], 2), f(r.nodeMax[n.id] - n.elev, 2), f(tAt(n.id, 'tMax'), 2), f(r.nodeMin[n.id], 2), f(r.nodeMin[n.id] - n.elev, 2), f(tAt(n.id, 'tMin'), 2)];
+    return [n.id, Hx(n.elev, 2), Qx(n.demand ?? 0, 2), Hx(h0, 2), Px(h0 - n.elev, 2), Hx(r.nodeMax[n.id], 2), Px(r.nodeMax[n.id] - n.elev, 2), f(tAt(n.id, 'tMax'), 2), Hx(r.nodeMin[n.id], 2), Px(r.nodeMin[n.id] - n.elev, 2), f(tAt(n.id, 'tMin'), 2)];
   });
 
   // ── charts ──
   const route = opt.route ?? defaultRoute(net);
   const prof = route[0] && route[1] ? buildProfile(net, r, route[0], route[1]) : null;
   const profSvg = prof && prof.ch.length > 1 ? svgChart([
-    { name: 'Pipe', color: '#6b7280', x: prof.ch, y: prof.z, width: 2 },
-    { name: 'Pipe class', color: '#a855f7', x: prof.ch, y: prof.cls, dash: '6 4', width: 1 },
-    { name: 'Steady HGL', color: '#2563eb', x: prof.ch, y: prof.steady },
-    { name: 'Max head', color: '#dc2626', x: prof.ch, y: prof.max },
-    { name: 'Min head', color: '#0891b2', x: prof.ch, y: prof.min },
-    { name: 'Vapour', color: '#9ca3af', x: prof.ch, y: prof.z.map((z) => z - HB + HV), dash: '2 3', width: 1 },
-  ], { xLabel: `Chainage from ${route[0]} to ${route[1]} (m)`, yLabel: 'Elevation / head (m)', height: 320, markers: prof.markers.length < 25 ? prof.markers : undefined }) : '';
+    { name: 'Pipe', color: '#6b7280', x: arrL(prof.ch), y: arrH(prof.z), width: 2 },
+    { name: 'Pipe class', color: '#a855f7', x: arrL(prof.ch), y: arrH(prof.cls), dash: '6 4', width: 1 },
+    { name: 'Steady HGL', color: '#2563eb', x: arrL(prof.ch), y: arrH(prof.steady) },
+    { name: 'Max head', color: '#dc2626', x: arrL(prof.ch), y: arrH(prof.max) },
+    { name: 'Min head', color: '#0891b2', x: arrL(prof.ch), y: arrH(prof.min) },
+    { name: 'Vapour', color: '#9ca3af', x: arrL(prof.ch), y: arrH(prof.z.map((z) => z - HB + HV)), dash: '2 3', width: 1 },
+  ], { xLabel: `Chainage from ${route[0]} to ${route[1]} (${uL})`, yLabel: `Elevation / head (${uH})`, height: 320, markers: prof.markers.length < 25 ? prof.markers.map((m) => ({ ...m, x: m.x * fl.f })) : undefined }) : '';
   const t = r.times;
   const keyNodes: string[] = [];
   const add = (id?: string) => { if (id && nodeById.get(id)?.kind === 'junction' && !keyNodes.includes(id) && r.nodeHead[id]) keyNodes.push(id); };
@@ -160,12 +177,12 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   const wn = net.pipes.find((p) => p.id === worstMin.pipe); if (wn) add(worstMin.s < wn.length / 2 ? wn.from : wn.to);
   const histCharts = keyNodes.slice(0, 10).map((id) => {
     const n = nodeById.get(id)!;
-    return `<figure>${svgChart([{ name: `${id} pressure head`, color: '#e0620c', x: t, y: Array.from(r.nodeHead[id], (h) => h - n.elev) }, { name: 'steady', color: '#9ca3af', x: [t[0], t[t.length - 1]], y: [r.steady.heads[id] - n.elev, r.steady.heads[id] - n.elev], dash: '4 3', width: 1 }], { xLabel: 'Time (s)', yLabel: 'Pressure head (m)', height: 220 })}<figcaption>Pressure head at ${esc(id)} (level ${f(n.elev, 2)} m)</figcaption></figure>`;
+    return `<figure>${svgChart([{ name: `${id} pressure head`, color: '#e0620c', x: t, y: arrP(Array.from(r.nodeHead[id], (h) => h - n.elev)) }, { name: 'steady', color: '#9ca3af', x: [t[0], t[t.length - 1]], y: arrP([r.steady.heads[id] - n.elev, r.steady.heads[id] - n.elev]), dash: '4 3', width: 1 }], { xLabel: 'Time (s)', yLabel: `Pressure (${uP})`, height: 220 })}<figcaption>Pressure head at ${esc(id)} (level ${f(n.elev, 2)} m)</figcaption></figure>`;
   }).join('');
   const devCharts: string[] = [];
   const pumpE = Object.entries(r.pumps);
   if (pumpE.length) devCharts.push(`<figure>${svgChart(pumpE.slice(0, 4).map(([id, p], k) => ({ name: `${id} speed %`, color: ['#e0620c', '#2563eb', '#16a34a', '#a855f7'][k], x: t, y: Array.from(p.speed, (v) => v * 100) })), { xLabel: 'Time (s)', yLabel: 'Speed (%)', height: 220 })}<figcaption>Pump speed</figcaption></figure>`,
-    `<figure>${svgChart(pumpE.slice(0, 4).map(([id, p], k) => ({ name: `${id} flow L/s`, color: ['#e0620c', '#2563eb', '#16a34a', '#a855f7'][k], x: t, y: Array.from(p.flow, (v) => v * 1000) })), { xLabel: 'Time (s)', yLabel: 'Flow per pump (L/s)', height: 220 })}<figcaption>Pump flow</figcaption></figure>`);
+    `<figure>${svgChart(pumpE.slice(0, 4).map(([id, p], k) => ({ name: `${id} flow ${uQ}`, color: ['#e0620c', '#2563eb', '#16a34a', '#a855f7'][k], x: t, y: Array.from(p.flow, (v) => v * fq.f) })), { xLabel: 'Time (s)', yLabel: `Flow per pump (${uQ})`, height: 220 })}<figcaption>Pump flow</figcaption></figure>`);
   for (const [id, v] of Object.entries(r.vessels)) devCharts.push(`<figure>${svgChart([{ name: 'gas volume', color: '#16a34a', x: t, y: v.gas }, { name: 'tank volume', color: '#9ca3af', x: [t[0], t[t.length - 1]], y: [v.volume, v.volume], dash: '4 3', width: 1 }], { xLabel: 'Time (s)', yLabel: 'Volume (m³)', height: 220 })}<figcaption>Air vessel ${esc(id)}: gas volume</figcaption></figure>`);
   for (const [id, tk] of Object.entries(r.tanks ?? {})) devCharts.push(`<figure>${svgChart([{ name: 'water level', color: '#0891b2', x: t, y: tk.level }, { name: 'top', color: '#9ca3af', x: [t[0], t[t.length - 1]], y: [tk.top, tk.top], dash: '4 3', width: 1 }, { name: 'bottom', color: '#9ca3af', x: [t[0], t[t.length - 1]], y: [tk.bottom, tk.bottom], dash: '2 3', width: 1 }], { xLabel: 'Time (s)', yLabel: 'Level (m)', height: 220 })}<figcaption>${tk.oneWay ? 'One-way' : 'Surge'} tank ${esc(id)}: water level</figcaption></figure>`);
   for (const [id, c] of Object.entries(r.checkValves ?? {})) if (c.mode !== 'ideal') devCharts.push(`<figure>${svgChart([{ name: 'flow L/s', color: '#2563eb', x: t, y: Array.from(c.flow, (q) => q * 1000) }], { xLabel: 'Time (s)', yLabel: 'Flow (L/s)', height: 220 })}<figcaption>Check valve ${esc(id)}: flow (negative = reverse)</figcaption></figure>`);
@@ -193,7 +210,7 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   }
   for (const p of net.pipes) if (p.checkValve) devRows.push([p.id, 'Check valve in pipe', `at ${p.from}; ${cvText(p.checkValve)}; K ${p.checkValve.kOpen ?? 1}`]);
 
-  const opText = (ev: typeof net.event) => ev.kind === 'pumpTrip'
+  const opText = (ev: typeof net.event) => ev.turbineOp ? `Turbine load ${ev.turbineOp} of ${ev.targets.join(', ')} at ${ev.start} s, gate stroke ${ev.duration ?? 0} s.` : ev.kind === 'pumpTrip'
     ? `${ev.pumpMode === 'start' ? 'Pump start' : ev.pumpMode === 'ramp' ? 'Controlled pump stop' : 'Pump trip (power failure)'} of ${ev.targets.join(', ') || '—'} at ${ev.start} s${ev.pumpMode && ev.pumpMode !== 'trip' ? `, ramp ${ev.duration ?? 0} s` : ''}.`
     : ev.kind === 'none' ? 'No event (steady state held).'
       : `Valve ${ev.kind === 'valveClose' ? 'closure' : 'opening'} of ${ev.targets.join(', ')} at ${ev.start} s: ${ev.curve ? `operating curve ${ev.curve.map(([a, b]) => `${a} s → ${b}`).join(', ')}` : `stroke ${ev.duration ?? 0} s to ${ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1)}, law exponent ${ev.exponent ?? 1}`}.`;
@@ -202,10 +219,10 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
 
   const slams = (r.slams ?? []).filter((s) => s.joukowsky >= 0.5);
   const summaryRows: (string | number)[][] = [
-    ['Highest pressure', `${f(worstMax.p, 1)} m in ${worstMax.pipe} at ${f(worstMax.s, 0)} m, t = ${f(worstMax.t, 2)} s (${Math.round((worstMax.p / worstMax.cls) * 100)} % of class ${f(worstMax.cls, 0)} m)`],
-    ['Lowest pressure', `${f(worstMin.p, 1)} m in ${worstMin.pipe} at ${f(worstMin.s, 0)} m, t = ${f(worstMin.t, 2)} s (limit ${st.minPressure} m)`],
-    ['Column separation', cav.v > 1e-4 ? `largest cavity ${f(cav.v * 1000, 0)} L in ${cav.pipe} at ${f(cav.s, 0)} m` : 'none'],
-    ['Slams', slams.length ? slams.slice(0, 5).map((s) => `${s.kind === 'airValve' ? 'air valve' : 'check valve'} ${s.id} at ${f(s.t, 2)} s, a·v/g = ${f(s.joukowsky, 1)} m`).join('; ') : 'none'],
+    ['Highest pressure', `${Px(worstMax.p, 1)} ${uP} in ${worstMax.pipe} at ${Lx(worstMax.s, 0)} ${uL}, t = ${f(worstMax.t, 2)} s (${Math.round((worstMax.p / worstMax.cls) * 100)} % of class ${Px(worstMax.cls, 0)} ${uP})`],
+    ['Lowest pressure', `${Px(worstMin.p, 1)} ${uP} in ${worstMin.pipe} at ${Lx(worstMin.s, 0)} ${uL}, t = ${f(worstMin.t, 2)} s (limit ${Px(st.minPressure, 1)} ${uP})`],
+    ['Column separation', cav.v > 1e-4 ? `largest cavity ${f(cav.v * 1000, 0)} L in ${cav.pipe} at ${Lx(cav.s, 0)} ${uL}` : 'none'],
+    ['Slams', slams.length ? slams.slice(0, 5).map((s) => `${s.kind === 'airValve' ? 'air valve' : 'check valve'} ${s.id} at ${f(s.t, 2)} s, a·v/g = ${Hx(s.joukowsky, 1)} ${uH}`).join('; ') : 'none'],
     ['Design checks', `${fails.length} to fix, ${warns.length} warnings, ${checks.filter((c) => c.level === 'pass').length} passed`],
   ];
 
@@ -247,7 +264,9 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
     ['Wave-speed adjustment', `at most ${f(r.maxAdjust * 100, 3)} % (target ${f(st.maxAdjust * 100, 2)} %); pipe lengths unchanged${r.rigidPipes.length ? `; ${r.rigidPipes.length} short pipe(s) as rigid columns` : ''}`],
     ['Simulation length', `${st.duration} s`],
     ['Demands', st.pressureDependentDemand ? 'Pressure-dependent during the transient' : 'Fixed'],
-    ['Minimum pressure limit', `${st.minPressure} m`],
+    ['Minimum pressure limit', `${Px(st.minPressure, 1)} ${uP}`],
+    ['Liquid', `${st.fluid?.name ?? 'Water 20 °C'}${st.siteElevation ? `, site ${Lx(st.siteElevation, 0)} ${uL} above sea level` : ''}`],
+    ['Units', `${U.system}: length ${uL}, diameter ${uD}, flow ${uQ}, pressure ${uP}, head ${uH}`],
   ];
   const checkRows = [...checks].sort((a, b) => ({ fail: 0, warn: 1, info: 2, pass: 3 })[a.level] - ({ fail: 0, warn: 1, info: 2, pass: 3 })[b.level]);
   const pumpRows = net.pumps.map((p) => [p.id, p.from, p.to, p.curve.map(([q, h]) => `${f(q * 1000, 1)} L/s @ ${f(h, 1)} m`).join('; '), `${Math.round(p.efficiency * 100)} %`, p.speed, f(p.inertia, 2), p.checkValve ? cvText(p.checkSpec) : 'none', p.on ? 'running' : 'off', f((r.steady.flows[p.id] ?? 0) * 1000, 1)]);
@@ -259,6 +278,7 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   for (const [id, v] of Object.entries(r.reliefs ?? {})) resDev.push([id, 'Relief valve', v.maxFlow > 1e-6 ? `max ${f(v.maxFlow * 1000, 0)} L/s, ${f(v.volume, 2)} m³` : 'did not open']);
   for (const [id, a] of Object.entries(r.airValves)) resDev.push([id, 'Air valve', a.maxAir > 1e-6 ? `up to ${f(a.maxAir * 1000, 1)} L of air${a.air[a.air.length - 1] > 1e-4 ? ', some left at the end' : ''}` : 'no air admitted']);
   for (const [id, c] of Object.entries(r.checkValves ?? {})) resDev.push([id, `Check valve (${c.where})`, `${c.mode}; ${c.closures ? `closed ${c.closures}×, ` : ''}max reverse ${f(c.maxReverseVelocity, 3)} m/s${c.closures ? `, ${f(c.reverseVelocityAtClosure, 3)} m/s at closure` : ''}`]);
+  for (const tr of turbineSpeeds(net, r)) resDev.push([tr.id, 'Turbine', tr.mode === 'rejection' ? `load rejection: speed rise ${f((tr.maxSpeed - 1) * 100, 1)} % at ${f(tr.tMax, 2)} s; rated output ${f(tr.ratedPower, 0)} kW` : `synchronised; rated output ${f(tr.ratedPower, 0)} kW`]);
   for (const [id, o] of Object.entries(r.outlets ?? {})) resDev.push([id, 'Outlet / burst disc', o.openedAt >= 0 ? `opened ${f(o.openedAt, 2)} s, max ${f(o.maxFlow * 1000, 0)} L/s, ${f(o.volume, 2)} m³` : 'did not open']);
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(net.name)} · transient analysis report</title><style>${css}</style></head><body>
@@ -295,23 +315,23 @@ ${table(['Setting', 'Value'], settingsRows, { cls: 'kv' })}
 
 <h2>3. Input data</h2>
 <h3>3.1 Pipes</h3>
-${table(['Pipe', 'From', 'To', 'Length (m)', 'ID (mm)', st.friction === 'DW' ? 'ε (mm)' : 'C', 'a (m/s)', 'Minor K', 'Class (m)', 'Check valve'], net.pipes.map((p) => [p.id, p.from, p.to, f(p.length, 1), f(p.diameter * 1000, 1), p.roughness, p.wavespeed, p.minorLoss ?? 0, p.pressureClass ?? `${DEFAULT_CLASS}*`, p.checkValve ? cvText(p.checkValve) : (p.closed ? 'closed' : '–')]))}
+${table(['Pipe', 'From', 'To', `Length (${uL})`, `ID (${uD})`, st.friction === 'DW' ? 'ε (mm)' : 'C', `a (${uV})`, 'Minor K', `Class (${uP})`, 'Check valve'], net.pipes.map((p) => [p.id, p.from, p.to, Lx(p.length, 1), Dx(p.diameter, 1), p.roughness, Vx(p.wavespeed, 0), p.minorLoss ?? 0, p.pressureClass ? Px(p.pressureClass, 0) : `${Px(DEFAULT_CLASS, 0)}*`, p.checkValve ? cvText(p.checkValve) : (p.closed ? 'closed' : '–')]))}
 <h3>3.2 Nodes</h3>
-${table(['Node', 'Type', 'Level (m)', 'Demand (L/s)', 'Water level (m)'], net.nodes.map((n) => [n.id, n.kind, f(n.elev, 2), n.kind === 'junction' ? f((n.demand ?? 0) * 1000, 2) : '–', n.kind === 'reservoir' ? f(n.head ?? n.elev, 2) : '–']))}
+${table(['Node', 'Type', `Level (${uH})`, `Demand (${uQ})`, `Water level (${uH})`], net.nodes.map((n) => [n.id, n.kind === 'reservoir' ? (n.headSchedule ? 'varying-level source' : 'source') : 'junction', Hx(n.elev, 2), n.kind === 'junction' ? Qx(n.demand ?? 0, 2) : '–', n.kind === 'reservoir' ? Hx(n.head ?? n.elev, 2) : '–']))}
 ${pumpRows.length ? `<h3>3.3 Pumps</h3>${table(['Pump', 'Suction', 'Discharge', 'Head curve', 'Eff.', 'rpm', 'I (kg·m²)', 'Check valve', 'Status', 'Steady Q (L/s)'], pumpRows)}` : ''}
 ${valveRows.length ? `<h3>3.4 Valves</h3>${table(['Valve', 'From', 'To', 'D (mm)', 'K open', 'Stroke', 'Characteristic', 'Check valve', 'Control', 'Steady Q (L/s)'], valveRows)}` : ''}
 ${devRows.length ? `<h3>3.5 Protection devices</h3>${table(['Where', 'Device', 'Data'], devRows)}` : ''}
-<p class="muted">* no class given; ${DEFAULT_CLASS} m assumed for the checks.</p>
+<p class="muted">* no class given; ${Px(DEFAULT_CLASS, 0)} ${uP} assumed for the checks. Device data below are given in SI units.</p>
 
 <h2 class="page">4. Results by node</h2>
-${table(['Node', 'Level (m)', 'Demand (L/s)', 'Steady head (m)', 'Steady p (m)', 'Max head (m)', 'Max p (m)', 't max (s)', 'Min head (m)', 'Min p (m)', 't min (s)'], nodeRows)}
+${table(['Node', `Level (${uH})`, `Demand (${uQ})`, `Steady head (${uH})`, `Steady p (${uP})`, `Max head (${uH})`, `Max p (${uP})`, 't max (s)', `Min head (${uH})`, `Min p (${uP})`, 't min (s)'], nodeRows)}
 
 <h2>5. Results by pipe</h2>
-${table(['Pipe', 'From', 'To', 'Steady Q (L/s)', 'V (m/s)', 'Max p (m)', 'at (m) @ t', 'Min p (m)', 'at (m) @ t', 'Class (% used)', 'Cavity (L)', 'a adjusted'], pipeRows)}
+${table(['Pipe', 'From', 'To', `Steady Q (${uQ})`, `V (${uV})`, `Max p (${uP})`, `at (${uL}) @ t`, `Min p (${uP})`, `at (${uL}) @ t`, 'Class (% used)', 'Cavity (L)', 'a adjusted'], pipeRows)}
 
 ${resDev.length || slams.length ? `<h2 class="page">6. Protection devices and slams</h2>
 ${resDev.length ? table(['Where', 'Device', 'Result'], resDev) : ''}
-${slams.length ? `<h3>Slams</h3>${table(['Time (s)', 'Where', 'Water stopped (m/s)', 'Slam surge a·v/g (m)', 'Peak pressure after (m)'], slams.slice(0, 60).map((s) => [f(s.t, 3), `${s.kind === 'airValve' ? 'Air valve' : 'Check valve'} ${s.id}`, f(s.velocity, 3), f(s.joukowsky, 1), f(s.peakPressure, 1)]))}` : ''}` : ''}
+${slams.length ? `<h3>Slams</h3>${table(['Time (s)', 'Where', `Water stopped (${uV})`, `Slam surge a·v/g (${uH})`, `Peak pressure after (${uP})`], slams.slice(0, 60).map((s) => [f(s.t, 3), `${s.kind === 'airValve' ? 'Air valve' : 'Check valve'} ${s.id}`, Vx(s.velocity, 3), Hx(s.joukowsky, 1), Px(s.peakPressure, 1)]))}` : ''}` : ''}
 
 <h2 class="page">7. Design checks</h2>
 ${table(['Level', 'Check', 'Detail'], checkRows.map((c) => [{ html: `<span class="lvl ${c.level}">${c.level}</span>` }, c.title, c.detail]))}

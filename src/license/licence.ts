@@ -10,7 +10,7 @@ import { emptyData, memoryStore, type MemoryData } from './server/memoryStore';
 
 export const DEMO = !PUBLIC_KEY;
 export { CONTACT_EMAIL };
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '2.0.0';
 
 export interface LicenceState {
   plan: Plan;

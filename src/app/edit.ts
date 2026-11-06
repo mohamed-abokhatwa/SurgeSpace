@@ -110,6 +110,14 @@ export function addLink(net: Network, kind: ElementKind, from: string, to: strin
     const pump: Pump = like ? { ...like, id, from, to, label: undefined } : { id, from, to, curve: [[0, 60], [0.1, 45], [0.15, 32]], efficiency: 0.8, speed: 1480, inertia: 2, checkValve: true, on: true };
     return { net: { ...net, pumps: [...net.pumps, pump] }, id };
   }
+  if (kind === 'turbine') {
+    const id = uniqueId(net, 'TU-');
+    const D = Math.max(d.pipeDiameter, 0.1);
+    const spec = { ratedHead: 50, ratedFlow: Math.round(((Math.PI / 4) * D * D * 3) * 1000) / 1000, efficiency: 0.9, speed: 750, inertia: 2000 };
+    const A = (Math.PI / 4) * D * D, V = spec.ratedFlow / A;
+    const v: Valve = { id, from, to, diameter: D, k0: Math.round(((2 * 9.80665 * spec.ratedHead) / (V * V)) * 100) / 100, opening: 1, law: 'area', turbine: spec };
+    return { net: { ...net, valves: [...net.valves, v] }, id };
+  }
   const prefix = kind === 'nrv' ? 'NRV-' : kind === 'prv' ? 'PRV-' : kind === 'psv' ? 'PSV-' : kind === 'fcv' ? 'FCV-' : kind === 'orifice' ? 'OR-' : 'V-';
   const id = uniqueId(net, prefix);
   const v: Valve = { id, from, to, diameter: d.pipeDiameter, k0: kind === 'orifice' ? 5 : 0.3, opening: 1, law: kind === 'lineValve' ? 'gate' : undefined };
