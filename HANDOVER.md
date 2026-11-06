@@ -151,7 +151,7 @@ Commands: `npm install`, `npm run dev`, `npx tsc -b`, `npx tsx tests/<name>.test
 
 ## 7. Open items
 
-- Microsoft Store: submit 2.0.<n>.0 (from the `store-builds` branch or the Actions artifact) with the updated listing and the new screenshots (`store/microsoft-store-listing.md`, `store/images/`).
+- Microsoft Store: **2.0.10.0 submitted for certification on 6 Nov 2026** with the new listing and 10 screenshots; it publishes automatically when it passes.
 - The GitHub token pasted in chat (Nov 2026) should be revoked and replaced.
 - Mac: add the Apple secrets to GitHub, then run Desktop builds for a notarized DMG; decide where to host it.
 - Optional: Resend key for licence e-mail alerts.
