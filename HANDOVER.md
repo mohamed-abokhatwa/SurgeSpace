@@ -14,6 +14,33 @@ hostname). Never mix the two.
 - Owner / commit identity: `git -c user.email=mohamed.abokhatwa@hotmail.com -c user.name="Mohamed"`
 - Version: 1.0.x (MSIX builds are `1.0.<run>.0`; the last one sent was **1.0.9.0**)
 
+## 1a. Version 2 workspace (branch `v2-workspace`)
+
+The single-page app was rebuilt into a full desktop-style workspace. Engine results are unchanged (all 344 baseline
+values identical; HAMMER Tnet0 exact).
+
+- **Shell**: menu bar (File, Edit, View, Model, Analysis, Results, Tools, Help), tool ribbon, Model Explorer +
+  Operations (left), Properties (right), results dock (Profile, Graphs, Design checks, Data sheets, Cases, Protection
+  sizing, Uncertainty, Run log), status bar with live coordinates, units and run state. Light / dark themes.
+- **Drawing canvas** (`src/ui/Canvas.tsx`): real map coordinates, world grid, snap, scale bar, north arrow,
+  background picture (site plan / aerial). Tools for every element: draw pipes node-to-node with bends (Shift+click),
+  click a pipe to split it or insert a pump / valve / device, drag nodes and bends, box select (Shift+drag),
+  double-click a pipe to add a bend, right-click menus, undo / redo, duplicate, find.
+- **Elements** (`src/app/elements.ts`, own names): Junction, Fixed-Level Source, Varying-Level Source (sine or time
+  table), Pipe, Pump, Line Valve, Non-Return Valve, Pressure Reducer, Pressure Sustainer, Flow Limiter, Inline Orifice,
+  Air Vessel, Air Valve, Open Standpipe, Feed Tank, Anticipator Valve, Relief Valve, Timed Blow-off, Burst Disc.
+- **Operations**: any number per run (`Network.extraEvents`), each with its own pumps / valves and timing.
+- **Cases**: named full-copy variants in the project file; run all and compare side by side.
+- **Data sheets**: every element type and node / pipe results; sort, filter, edit, paste from Excel, CSV export.
+- **Units**: SI / US with flow and pressure unit choice (`src/app/units.ts`); the model is always stored in SI.
+- **Run Setup**: liquids catalogue (water 0–100 °C, sea water, brine, fuels) and site elevation feed the engine
+  (`applyFluid` in `types.ts` sets density, vapour pressure, viscosity and atmospheric head per solve);
+  design limits (max pressure cap), animation frames, element defaults.
+- **Catalogues**: pipe materials, liquids, wave speed calculator (Korteweg with restraint, thick-wall correction).
+- **Model Health Check** (`src/app/health.ts`) before every run; **Graph builder** for any element variable.
+- Tests: `tests/workspace.test.ts` (26 tests: multi-operation runs, fluid/site, head schedule, editing operations,
+  units, wave speed, health check).
+
 ## 2. Features
 
 **Model and data**
@@ -91,6 +118,7 @@ Run everything: `bash scripts/full-check.sh <baseline.json> <reference folder> <
 | `tests/valves.test.ts` | 43 tests: valve curves, PRV/PSV/FCV, operating curve, pump start, check valves and slam = a·v/g, air-valve slam, outlets |
 | `tests/report.test.ts` | report builds for every example with the right numbers |
 | `tests/license.test.ts` | 60 licensing tests |
+| `tests/workspace.test.ts` | 26 tests for the v2 workspace and engine additions |
 | Examples vs baseline | 344 values identical |
 | HAMMER Tnet0 / Tnet3 | exact / mean 1.6 m max, 0.8 m min, 92 % within 3 m |
 | EPANET steady (Net3, ky4, Net6) | worst 0.012 m; control valves vs EPANET 0.005 m |

@@ -159,7 +159,7 @@ export function OutletEditor({ n, setOutlet }: { n: NetNode; setOutlet: (p: Part
         <label className="field" style={{ gridColumn: '1 / -1' }}><span>Opens</span>
           <select value={o.trigger} onChange={(e) => setOutlet({ trigger: e.target.value as Outlet['trigger'] })}>
             <option value="time">At a set time (blow-off, hydrant, burst)</option>
-            <option value="pressure">At a bursting pressure (rupture disk)</option>
+            <option value="pressure">At a bursting pressure (burst disc)</option>
           </select>
         </label>
         <Num label="Opening Ø (mm)" value={o.diameter} scale={1000} digits={0} list="dn-sizes" onChange={(x) => setOutlet({ diameter: Math.max(x ?? 0.05, 0.002) })} />
@@ -168,7 +168,7 @@ export function OutletEditor({ n, setOutlet }: { n: NetNode; setOutlet: (p: Part
           : <Num label="Bursting pressure (m)" value={o.burstHead} onChange={(x) => setOutlet({ burstHead: x })} />}
         <Num label="Opening time (s)" value={o.openTime ?? 0} step={0.1} onChange={(x) => setOutlet({ openTime: Math.max(x ?? 0, 0) })} />
       </div>
-      <p className="muted dev-note">Closed in the steady state. Discharges to air: Q = Cd·A·opening·√(2g·p). A rupture disk stays open once it bursts.</p>
+      <p className="muted dev-note">Closed in the steady state. Discharges to air: Q = Cd·A·opening·√(2g·p). A burst disc stays open once it bursts.</p>
     </>
   );
 }

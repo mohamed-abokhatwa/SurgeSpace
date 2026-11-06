@@ -7,7 +7,7 @@ import { estimateInertia, pumpRatedQ } from '../engine/hydraulics';
 import type { TransientResult } from '../engine/transient';
 import type { EventKind, Network, NetNode, Pipe, Pump, Valve } from '../engine/types';
 import { Grid, num, type Col } from './Grid';
-import type { Selection } from './MapView';
+import type { Selection } from './Canvas';
 import { fmt } from './util';
 
 type SetNet = (f: (n: Network) => Network) => void;

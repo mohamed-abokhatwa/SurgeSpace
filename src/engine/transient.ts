@@ -14,7 +14,7 @@
 //    pressure-dependent demands.
 import { frictionF, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpQuadratic, pumpTorqueQuadratic, solveDense, type PumpCurve } from './hydraulics';
 import { solveSteady, type SteadyResult } from './steady';
-import { G, HB, HV, RHO, area, type CheckValveSpec, type Network, type NetNode } from './types';
+import { G, HB, HV, NU, RHO, allEvents, applyFluid, area, type CheckValveSpec, type Network, type NetNode, type TransientEvent } from './types';
 import { RAIR, TAIR, airValveMassRate, airValveModel, controlArea, dynamicReverseVelocity, interpTable, outletOpening, prechargeGas, reliefFlow, savOpening, solveDecreasing, valveArea, vesselGeometry, waterDepthOf, waterVolumeAt } from './devices';
 import { prepareNetwork } from './prepare';
 
@@ -179,6 +179,7 @@ type Element =
 export function runTransient(net: Network, opt: RunOptions = {}): TransientResult {
   const t0 = performance.now();
   const warnings: string[] = [];
+  applyFluid(net.settings);
   net = prepareNetwork(net);
   const st = net.settings;
   const steady = opt.steady ?? solveSteady(net);
@@ -195,7 +196,18 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const nodes = net.nodes;
   const nIdx = new Map(nodes.map((n, i) => [n.id, i]));
   const NN = nodes.length;
-  const ev = net.event;
+  // every operation of the run (main event + extra events); each element follows the first one that names it
+  const evs = allEvents(net);
+  const isValveEv = (e: TransientEvent) => e.kind === 'valveClose' || e.kind === 'valveOpen';
+  const valveEv = new Map<string, TransientEvent>();
+  const pumpEv = new Map<string, TransientEvent>();
+  for (const e of evs) for (const id of e.targets) {
+    if (isValveEv(e) && !valveEv.has(id)) valveEv.set(id, e);
+    if (e.kind === 'pumpTrip' && !pumpEv.has(id)) pumpEv.set(id, e);
+  }
+  const curveOf = (e: TransientEvent) => (isValveEv(e) && e.curve && e.curve.length >= 2 ? [...e.curve].sort((a, b) => a[0] - b[0]).map(([tc, sc]) => [tc * (opt.strokeFactor ?? 1), sc] as [number, number]) : null);
+  const evCurves = new Map(evs.map((e) => [e, curveOf(e)]));
+  const strokeOfEv = (e: TransientEvent) => (e.duration ?? 0) * (opt.strokeFactor ?? 1);
 
   // ── time step and geometry ─────────────────────────────────────────────
   const waveF = opt.waveFactor ?? 1;
@@ -207,13 +219,16 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const rigidPipes = livePipes.filter((p) => !openPipes.includes(p));
   if (openPipes.length === 0) throw new Error('All pipes are shorter than the rigid-column limit; lower it in the settings.');
   const travel = openPipes.map((p) => p.length / (p.wavespeed * waveF));
-  const stroke = (ev.duration ?? 0) * (opt.strokeFactor ?? 1);
   let dtMax = opt.dtMax ?? 0.05;
-  const evCurve = (ev.kind === 'valveClose' || ev.kind === 'valveOpen') && ev.curve && ev.curve.length >= 2 ? [...ev.curve].sort((a, b) => a[0] - b[0]).map(([tc, sc]) => [tc * (opt.strokeFactor ?? 1), sc] as [number, number]) : null;
-  if (evCurve) {
-    const seg = Math.min(...evCurve.slice(1).map((c, k) => c[0] - evCurve[k][0]).filter((d) => d > 0), Infinity);
-    if (Number.isFinite(seg)) dtMax = Math.min(dtMax, Math.max(seg / 20, 1e-3));
-  } else if ((ev.kind === 'valveClose' || ev.kind === 'valveOpen') && stroke > 0) dtMax = Math.min(dtMax, Math.max(stroke / 20, 1e-3));
+  for (const e of evs) {
+    if (!isValveEv(e)) continue;
+    const evCurve = evCurves.get(e);
+    const stroke = strokeOfEv(e);
+    if (evCurve) {
+      const seg = Math.min(...evCurve.slice(1).map((c, k) => c[0] - evCurve[k][0]).filter((d) => d > 0), Infinity);
+      if (Number.isFinite(seg)) dtMax = Math.min(dtMax, Math.max(seg / 20, 1e-3));
+    } else if (stroke > 0) dtMax = Math.min(dtMax, Math.max(stroke / 20, 1e-3));
+  }
   const sel = opt.fixedDt
     ? (() => {
         const fdt = opt.fixedDt!;
@@ -251,7 +266,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     nodeC3[from] += alpha0 * A * (dx / 2) * HB;
     nodeC3[to] += alpha0 * A * (dx / 2) * HB;
     const q0 = steady.flows.get(p.id) ?? 0;
-    const re = (Math.abs(q0) / A) * p.diameter / 1.004e-6;
+    const re = (Math.abs(q0) / A) * p.diameter / NU;
     const h1 = steady.heads.get(p.from)!;
     const h2 = steady.heads.get(p.to)!;
     const H = new Float64Array(N + 1);
@@ -281,6 +296,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const Hprev = new Float64Array(NN);
   nodes.forEach((n, i) => (Hprev[i] = Hn[i] = steady.heads.get(n.id)!));
   const isRes = nodes.map((n) => n.kind === 'reservoir');
+  // reservoirs with a time-varying head (tide, wave, upstream station): offset from the steady level
+  const resSched = nodes.map((n) => (n.kind === 'reservoir' && n.headSchedule ? n.headSchedule : null));
+  const resH0 = nodes.map((n) => n.head ?? n.elev);
   const demK = new Float64Array(NN); // orifice coefficient (pressure-dependent) or constant demand
   const demConst = new Float64Array(NN);
   nodes.forEach((n, i) => {
@@ -303,10 +321,10 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     if (v.gasInput === 'precharge') {
       const pc = prechargeGas(Vt, v.prechargeHead ?? 0, gasHeadAt);
       Vg0 = pc.gas;
-      if (!pc.holdsWater) warnings.push(`Hydropneumatic tank at ${n.id}: the pre-charge pressure is at or above the operating pressure, so the tank holds no water. Lower the pre-charge.`);
+      if (!pc.holdsWater) warnings.push(`Air vessel at ${n.id}: the pre-charge pressure is at or above the operating pressure, so the tank holds no water. Lower the pre-charge.`);
     }
     const minWater = v.dipTubeHeight && v.dipTubeHeight > 0 ? waterVolumeAt(geo, v.dipTubeHeight) : 0;
-    if (Vt - Vg0 < minWater) warnings.push(`Hydropneumatic tank at ${n.id}: the initial water level is below the dip tube.`);
+    if (Vt - Vg0 < minWater) warnings.push(`Air vessel at ${n.id}: the initial water level is below the dip tube.`);
     const pAbs0 = gasHeadAt(Vg0);
     if (pAbs0 <= 0) warnings.push(`Surge vessel at ${n.id}: steady pressure is below vacuum; check its elevation.`);
     const Ac = area(v.connDiameter);
@@ -333,8 +351,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       if (z0 >= Hprev[i]) warnings.push(`One-way tank at ${n.id}: its water level (${z0.toFixed(2)} m) is not below the steady head (${Hprev[i].toFixed(2)} m), so it would feed the pipe in steady state. Lower it.`);
     } else {
       z0 = Hprev[i];
-      if (z0 > t.topElev) { warnings.push(`Surge tank at ${n.id}: the steady head (${z0.toFixed(2)} m) is above its top (${t.topElev} m); it would overflow continuously. Make it taller.`); }
-      if (z0 < t.bottomElev) warnings.push(`Surge tank at ${n.id}: the steady head is below the tank bottom; the tank is empty.`);
+      if (z0 > t.topElev) { warnings.push(`Standpipe at ${n.id}: the steady head (${z0.toFixed(2)} m) is above its top (${t.topElev} m); it would overflow continuously. Make it taller.`); }
+      if (z0 < t.bottomElev) warnings.push(`Standpipe at ${n.id}: the steady head is below the tank bottom; the tank is empty.`);
       z0 = Math.max(t.bottomElev, Math.min(t.topElev, z0));
     }
     return { node: i, cfg: t, As, z: z0, Qt: 0, minZ: z0, maxZ: z0, spilled: 0, emptied: false, oneWay: !!t.oneWay, rin: t.kIn / (2 * G * Ac * Ac), rout: t.kOut / (2 * G * Ac * Ac) };
@@ -347,7 +365,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const outlets = nodes.map((n, i) => {
     if (!n.outlet || n.kind === 'reservoir') return null;
     const o = n.outlet;
-    if (o.trigger === 'pressure' && o.burstHead !== undefined && Hprev[i] - n.elev >= o.burstHead) warnings.push(`Rupture disk at ${n.id}: the steady pressure is already above its bursting pressure.`);
+    if (o.trigger === 'pressure' && o.burstHead !== undefined && Hprev[i] - n.elev >= o.burstHead) warnings.push(`Burst disc at ${n.id}: the steady pressure is already above its bursting pressure.`);
     return { node: i, cfg: o, A: area(o.diameter), cd: o.cd ?? 0.6, tOpen: o.trigger === 'time' ? Math.max(o.time ?? 0, 0) : -1, open: 0, Q: 0, maxQ: 0, vol: 0 };
   });
   // pipes meeting each node (wave speed and area, for slam estimates)
@@ -377,7 +395,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   // identical pumps in parallel are merged into one exact equivalent element (m units)
   const pumpGroups = new Map<string, number[]>();
   net.pumps.forEach((p, k) => {
-    const trip = ev.kind === 'pumpTrip' && ev.targets.includes(p.id);
+    const trip = pumpEv.has(p.id);
     const key = JSON.stringify([p.from, p.to, p.curve, p.efficiency, p.speed, p.inertia, p.checkValve, p.checkValve ? p.checkSpec ?? null : null, p.on, trip]);
     pumpGroups.set(key, [...(pumpGroups.get(key) ?? []), k]);
     if (trip && !p.on) warnings.push(`Pump ${p.id} is set to trip but is not running.`);
@@ -492,7 +510,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const nodeMax = new Float64Array(NN).fill(-Infinity);
   const nodeMin = new Float64Array(NN).fill(Infinity);
 
-  const isValveTarget = (e: Extract<Element, { kind: 'valve' }>) => (ev.kind === 'valveClose' || ev.kind === 'valveOpen') && ev.targets.includes(net.valves[e.idx].id);
+  const isValveTarget = (e: Extract<Element, { kind: 'valve' }>) => valveEv.has(net.valves[e.idx].id);
   /** Stroke that gives a relative area (control valves start from their steady opening). */
   const strokeOf = (v: Network['valves'][number], a: number) => {
     let lo = 0, hi = 1;
@@ -501,8 +519,11 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   };
   const valveOpening = (e: Extract<Element, { kind: 'valve' }>, t: number) => {
     const v = net.valves[e.idx];
-    if (!isValveTarget(e) || t <= ev.start) return e.base;
+    const ev = valveEv.get(v.id);
+    if (!ev || t <= ev.start) return e.base;
     const s0 = v.control ? strokeOf(v, e.base) : v.opening;
+    const evCurve = evCurves.get(ev);
+    const stroke = strokeOfEv(ev);
     if (evCurve) return valveArea(v, t - ev.start < evCurve[0][0] ? s0 : interpTable(evCurve, t - ev.start));
     const tf = ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1);
     const s = stroke > 0 ? Math.min((t - ev.start) / stroke, 1) : 1;
@@ -922,7 +943,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const t = step * dt;
     // events
     elements.forEach((e) => {
-      if (e.kind === 'pump' && ev.kind === 'pumpTrip' && ev.pumpMode === 'start' && ev.targets.includes(e.ids[0]) && t >= ev.start) {
+      const ev = e.kind === 'pump' ? pumpEv.get(e.ids[0]) : undefined;
+      if (e.kind === 'pump' && ev && ev.pumpMode === 'start' && t >= ev.start) {
         // pump start: speed raised linearly to full over the ramp time
         if (!e.on) {
           e.on = true;
@@ -931,7 +953,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         const T = Math.max((ev.duration ?? 0) * (opt.strokeFactor ?? 1), 1e-9);
         e.alphaSet = Math.min(1, (t - ev.start) / T);
         e.alpha = e.alphaSet;
-      } else if (e.kind === 'pump' && ev.kind === 'pumpTrip' && ev.targets.includes(e.ids[0]) && t >= ev.start && e.on) {
+      } else if (e.kind === 'pump' && ev && t >= ev.start && e.on) {
         if (ev.pumpMode === 'ramp') {
           // controlled stop: speed forced linearly to zero over the ramp time
           const T = Math.max((ev.duration ?? 0) * (opt.strokeFactor ?? 1), 1e-9);
@@ -1021,7 +1043,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     }
     // node heads
     for (let i = 0; i < NN; i++) {
-      if (isRes[i]) Hn[i] = Hprev[i];
+      if (isRes[i]) Hn[i] = resSched[i] ? resH0[i] + schedHead(resSched[i]!, t) : Hprev[i];
     }
     clusters.forEach((c) => solveCluster(c));
     for (let i = 0; i < NN; i++) {
@@ -1225,9 +1247,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     if (!tk) return;
     const o = tankOut[nodes[tk.node].id];
     Object.assign(o, { minLevel: tk.minZ, maxLevel: tk.maxZ, spilled: tk.spilled, emptied: tk.emptied });
-    const kind = tk.oneWay ? 'One-way tank' : 'Surge tank';
+    const kind = tk.oneWay ? 'One-way tank' : 'Standpipe';
     if (tk.emptied) warnings.push(`${kind} at ${nodes[tk.node].id} emptied: air could enter the pipe. Make it larger.`);
-    if (tk.spilled > 1e-6) warnings.push(`Surge tank at ${nodes[tk.node].id} overflowed (${tk.spilled.toFixed(2)} m³ spilled). Raise its top or enlarge it.`);
+    if (tk.spilled > 1e-6) warnings.push(`Standpipe at ${nodes[tk.node].id} overflowed (${tk.spilled.toFixed(2)} m³ spilled). Raise its top or enlarge it.`);
   });
   savs.forEach((sv) => sv && Object.assign(savOut[nodes[sv.node].id], { opened: sv.opened, maxFlow: sv.maxQ }));
   reliefs.forEach((rv) => rv && Object.assign(reliefOut[nodes[rv.node].id], { maxFlow: rv.maxQ, volume: rv.vol }));
@@ -1274,4 +1296,18 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     warnings,
     runtimeMs: performance.now() - t0,
   };
+}
+
+/** Change of reservoir head from its steady level at time t. Starts at zero, so the steady state is unchanged. */
+export function schedHead(s: import('./types').HeadSchedule, t: number): number {
+  if (s.mode === 'sine') {
+    const T = Math.max(s.period ?? 10, 1e-6);
+    const ph = ((s.phase ?? 0) * Math.PI) / 180;
+    return (s.amplitude ?? 0) * (Math.sin((2 * Math.PI * t) / T + ph) - Math.sin(ph));
+  }
+  const tb = s.table ?? [];
+  if (!tb.length) return 0;
+  if (t <= tb[0][0]) return tb[0][1];
+  for (let k = 1; k < tb.length; k++) if (t <= tb[k][0]) { const [t0, h0] = tb[k - 1], [t1, h1] = tb[k]; return h0 + ((h1 - h0) * (t - t0)) / Math.max(t1 - t0, 1e-12); }
+  return tb[tb.length - 1][1];
 }

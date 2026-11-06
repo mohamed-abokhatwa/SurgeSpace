@@ -5,6 +5,7 @@ import { airValveModel, orificeCurve, vesselGeometry, waterDepthOf } from '../en
 import type { TransientResult } from '../engine/transient';
 import type { AirValve, AirValveType, NetNode, OpenTank, ReliefValve, SurgeAnticipationValve, SurgeVessel, VesselShape } from '../engine/types';
 import { fmt } from './util';
+import { convertLabel, unitOf, useUnits } from '../app/units';
 import { OutletEditor } from './ValveEditors';
 
 type SetNode = (id: string, f: (n: NetNode) => NetNode) => void;
@@ -12,11 +13,17 @@ const num = (s: string) => (s.trim() === '' ? NaN : Number(s));
 
 /** Number input; `scale` converts stored SI units to the shown unit (e.g. 1000 for m → mm). Empty = undefined. */
 export function Num({ label, value, onChange, scale = 1, step, list, digits = 3, optional }: { label: string; value: number | undefined; onChange: (v: number | undefined) => void; scale?: number; step?: number; list?: string; digits?: number; optional?: boolean }) {
-  const shown = value === undefined || !Number.isFinite(value) ? '' : String(+(value * scale).toFixed(digits));
+  // the SI unit written in the label picks the display unit (m → ft, mm → in, L/s → gpm …) from the unit settings
+  const units = useUnits();
+  const cv = convertLabel(label, units);
+  const k = cv.q && (units.system !== 'SI' || cv.q === 'flow' || cv.q === 'pressureHead') ? unitOf(cv.q, units).f : scale;
+  const shownLabel = cv.q && k !== scale ? cv.label : label;
+  const useList = k === scale ? list : undefined;
+  const shown = value === undefined || !Number.isFinite(value) ? '' : String(+(value * k).toFixed(digits));
   return (
-    <label className="field"><span>{label}</span>
-      <input type="number" step={step ?? 'any'} list={list} value={shown} placeholder={optional ? 'optional' : undefined}
-        onChange={(e) => { const v = num(e.target.value); onChange(Number.isFinite(v) ? v / scale : undefined); }} />
+    <label className="field"><span>{shownLabel}</span>
+      <input type="number" step={step && k === scale ? step : 'any'} list={useList} value={shown} placeholder={optional ? 'optional' : undefined}
+        onChange={(e) => { const v = num(e.target.value); onChange(Number.isFinite(v) ? v / k : undefined); }} />
     </label>
   );
 }
@@ -198,7 +205,7 @@ function TankEditor({ n, setNode }: { n: NetNode; setNode: SetNode }) {
       <div className="grid2">
         <label className="field" style={{ gridColumn: '1 / -1' }}><span>Kind</span>
           <select value={t.oneWay ? 'oneway' : 'open'} onChange={(e) => set({ oneWay: e.target.value === 'oneway' })}>
-            <option value="open">Open surge tank (standpipe)</option>
+            <option value="open">Open standpipe (standpipe)</option>
             <option value="oneway">One-way (feed) tank</option>
           </select>
         </label>
@@ -241,7 +248,7 @@ export function DeviceEditors({ n, setNode, result }: { n: NetNode; setNode: Set
   return (
     <div className="devices">
       <DeviceDatalists />
-      <Section title="Hydropneumatic tank" on={!!n.vessel} hint="Closed tank with an air cushion (surge vessel), with or without a bladder."
+      <Section title="Air vessel" on={!!n.vessel} hint="Closed tank with an air cushion (surge vessel), with or without a bladder."
         onAdd={() => setNode(n.id, (x) => ({ ...x, vessel: { volume: 10, gasVolume: 5, n: 1.2, connDiameter: 0.3, kIn: 2.5, kOut: 0.5 } }))}
         onRemove={() => setNode(n.id, (x) => ({ ...x, vessel: undefined }))}>
         <VesselEditor n={n} setNode={setNode} steadyHead={H0} />
@@ -251,12 +258,12 @@ export function DeviceEditors({ n, setNode, result }: { n: NetNode; setNode: Set
         onRemove={() => setNode(n.id, (x) => ({ ...x, airValve: undefined }))}>
         <AirValveEditor key={n.id} n={n} setNode={setNode} />
       </Section>
-      <Section title="Surge tank" on={!!n.tank} hint="Open standpipe, or a one-way feed tank with a non-return valve."
+      <Section title="Standpipe or feed tank" on={!!n.tank} hint="Open standpipe, or a one-way feed tank with a non-return valve."
         onAdd={() => setNode(n.id, (x) => ({ ...x, tank: { diameter: 2, bottomElev: n.elev, topElev: Math.ceil((H0 ?? n.elev + 20) + 10), connDiameter: 0.3, kIn: 1, kOut: 1 } }))}
         onRemove={() => setNode(n.id, (x) => ({ ...x, tank: undefined }))}>
         <TankEditor n={n} setNode={setNode} />
       </Section>
-      <Section title="Surge anticipation valve" on={!!n.sav} hint="Opens on the low-pressure wave so the returning up-surge is discharged."
+      <Section title="Anticipator valve" on={!!n.sav} hint="Opens on the low-pressure wave so the returning up-surge is discharged."
         onAdd={() => setNode(n.id, (x) => ({ ...x, sav: { diameter: 0.15, cd: 0.6, lowSet: Math.max(Math.round((p0 ?? 30) * 0.8), 1), openTime: 2, holdTime: 10, closeTime: 30 } }))}
         onRemove={() => setNode(n.id, (x) => ({ ...x, sav: undefined }))}>
         <SavEditor n={n} setNode={setNode} />
@@ -266,7 +273,7 @@ export function DeviceEditors({ n, setNode, result }: { n: NetNode; setNode: Set
         onRemove={() => setNode(n.id, (x) => ({ ...x, relief: undefined }))}>
         <ReliefEditor n={n} setNode={setNode} />
       </Section>
-      <Section title="Discharge to atmosphere" on={!!n.outlet} hint="Blow-off, hydrant or burst that opens at a set time, or a rupture disk that bursts at a set pressure."
+      <Section title="Blow-off" on={!!n.outlet} hint="Blow-off, hydrant or burst that opens at a set time, or a burst disc that bursts at a set pressure."
         onAdd={() => setNode(n.id, (x) => ({ ...x, outlet: { diameter: 0.1, cd: 0.6, trigger: 'time', time: 1, openTime: 0.5 } }))}
         onRemove={() => setNode(n.id, (x) => ({ ...x, outlet: undefined }))}>
         <OutletEditor n={n} setOutlet={(p) => setNode(n.id, (x) => ({ ...x, outlet: { ...x.outlet!, ...p } }))} />

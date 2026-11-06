@@ -8,6 +8,7 @@ echo "== engine tests";  npx tsx tests/engine.test.ts | tail -1
 echo "== device tests";  npx tsx tests/devices.test.ts | grep -E "FAIL|passed"
 echo "== valve tests";   npx tsx tests/valves.test.ts | grep -E "FAIL|passed"
 echo "== report tests";  npx tsx tests/report.test.ts | grep -E "FAIL|passed"
+echo "== workspace tests"; npx tsx tests/workspace.test.ts | grep -E "FAIL|passed"
 echo "== licence tests"; npx tsx tests/license.test.ts 2>/dev/null | tail -1
 echo "== examples vs baseline"; npx tsx validation/baseline.ts compare "$BASE"
 echo "== HAMMER Tnet0"; npx tsx validation/vs-hammer-tnet0.ts | tail -2

@@ -1,7 +1,7 @@
 // Design checks, uncertainty envelopes and automatic surge-protection sizing.
 import { solveSteady } from './steady';
 import { runTransient, type PipeEnvelope, type RunOptions, type TransientResult } from './transient';
-import type { Network } from './types';
+import { allEvents, type Network } from './types';
 
 export type CheckLevel = 'fail' | 'warn' | 'pass' | 'info';
 export interface Check {
@@ -22,7 +22,8 @@ export function designChecks(net: Network, r: TransientResult, envs: PipeEnvelop
   let cav = { v: 0, pipe: '', s: 0 };
   for (const e of envs) {
     const pipe = net.pipes.find((p) => p.id === e.id)!;
-    const cls = pipe.pressureClass ?? DEFAULT_CLASS;
+    // a project-wide maximum (Run Setup → Design limits) tightens the pipe class where it is lower
+    const cls = Math.min(pipe.pressureClass ?? DEFAULT_CLASS, net.settings.maxPressure ?? Infinity);
     for (let i = 0; i < e.s.length; i++) {
       const pMax = e.hMax[i] - e.z[i];
       const pMin = e.hMin[i] - e.z[i];
@@ -48,21 +49,21 @@ export function designChecks(net: Network, r: TransientResult, envs: PipeEnvelop
     out.push({ level: 'fail', title: 'Column separation (vapour cavity)', detail: `Largest cavity ${(cav.v * 1000).toFixed(0)} L in ${cav.pipe} at ${fmt(cav.s)} m. The collapse can cause pressure peaks above the normal surge.`, where: { pipe: cav.pipe, s: cav.s } });
   for (const [id, v] of Object.entries(r.vessels)) {
     const reserve = v.minWater > 1e-9 ? ` (dip tube keeps ${v.minWater.toFixed(2)} m³)` : '';
-    if (v.emptied) out.push({ level: 'fail', title: `Hydropneumatic tank ${id} empties`, detail: `The usable water ran out${reserve}. Increase its volume or its initial water volume (less gas or a lower pre-charge).`, where: { node: id } });
+    if (v.emptied) out.push({ level: 'fail', title: `Air vessel ${id} empties`, detail: `The usable water ran out${reserve}. Increase its volume or its initial water volume (less gas or a lower pre-charge).`, where: { node: id } });
     else {
       const minWater = v.volume - v.maxGas;
       const usable = minWater - v.minWater;
-      out.push({ level: usable < 0.1 * v.volume ? 'warn' : 'pass', title: `Hydropneumatic tank ${id}`, detail: `Gas volume ${v.minGas.toFixed(2)}–${v.maxGas.toFixed(2)} m³ of ${v.volume} m³ (start ${v.initialGas.toFixed(2)} m³); lowest water volume ${minWater.toFixed(2)} m³${reserve}.`, where: { node: id } });
+      out.push({ level: usable < 0.1 * v.volume ? 'warn' : 'pass', title: `Air vessel ${id}`, detail: `Gas volume ${v.minGas.toFixed(2)}–${v.maxGas.toFixed(2)} m³ of ${v.volume} m³ (start ${v.initialGas.toFixed(2)} m³); lowest water volume ${minWater.toFixed(2)} m³${reserve}.`, where: { node: id } });
     }
   }
   for (const [id, tk] of Object.entries(r.tanks ?? {})) {
-    const kind = tk.oneWay ? 'One-way tank' : 'Surge tank';
+    const kind = tk.oneWay ? 'One-way tank' : 'Standpipe';
     if (tk.emptied) out.push({ level: 'fail', title: `${kind} ${id} empties`, detail: 'The tank ran dry, so air can enter the pipe. Make it larger or raise its water level.', where: { node: id } });
-    else if (tk.spilled > 1e-6) out.push({ level: 'warn', title: `Surge tank ${id} overflows`, detail: `${tk.spilled.toFixed(2)} m³ spilled over the top (${tk.top} m). Raise the top or enlarge the tank.`, where: { node: id } });
+    else if (tk.spilled > 1e-6) out.push({ level: 'warn', title: `Standpipe ${id} overflows`, detail: `${tk.spilled.toFixed(2)} m³ spilled over the top (${tk.top} m). Raise the top or enlarge the tank.`, where: { node: id } });
     else out.push({ level: 'pass', title: `${kind} ${id}`, detail: `Water level ${tk.minLevel.toFixed(2)}–${tk.maxLevel.toFixed(2)} m (bottom ${tk.bottom} m, top ${tk.top} m).`, where: { node: id } });
   }
   for (const [id, v] of Object.entries(r.savs ?? {}))
-    out.push({ level: 'info', title: `Surge anticipation valve ${id}`, detail: v.opened ? `Opened ${v.opened} time${v.opened > 1 ? 's' : ''}; largest discharge ${(v.maxFlow * 1000).toFixed(0)} L/s.` : 'Did not open (the pressure stayed above its low set point).', where: { node: id } });
+    out.push({ level: 'info', title: `Anticipator valve ${id}`, detail: v.opened ? `Opened ${v.opened} time${v.opened > 1 ? 's' : ''}; largest discharge ${(v.maxFlow * 1000).toFixed(0)} L/s.` : 'Did not open (the pressure stayed above its low set point).', where: { node: id } });
   for (const [id, v] of Object.entries(r.reliefs ?? {}))
     out.push({ level: 'info', title: `Relief valve ${id}`, detail: v.maxFlow > 1e-6 ? `Opened; largest discharge ${(v.maxFlow * 1000).toFixed(0)} L/s, ${v.volume.toFixed(2)} m³ released.` : 'Did not open.', where: { node: id } });
   for (const [id, a] of Object.entries(r.airValves))
@@ -89,7 +90,7 @@ export function designChecks(net: Network, r: TransientResult, envs: PipeEnvelop
   }
   for (const [id, o] of Object.entries(r.outlets ?? {})) {
     const node = net.nodes.find((x) => x.id === id);
-    const what = node?.outlet?.trigger === 'pressure' ? 'Rupture disk' : 'Discharge to atmosphere';
+    const what = node?.outlet?.trigger === 'pressure' ? 'Burst disc' : 'Blow-off';
     out.push({ level: o.openedAt >= 0 && node?.outlet?.trigger === 'pressure' ? 'warn' : 'info', title: `${what} ${id}`, detail: o.openedAt >= 0 ? `${node?.outlet?.trigger === 'pressure' ? 'Burst' : 'Opened'} at ${o.openedAt.toFixed(2)} s; largest discharge ${(o.maxFlow * 1000).toFixed(0)} L/s, ${o.volume.toFixed(2)} m³ released.` : node?.outlet?.trigger === 'pressure' ? 'Did not burst.' : 'Did not open during the run.', where: { node: id } });
   }
   for (const v of net.valves) {
@@ -143,10 +144,11 @@ export function uncertainty(net: Network, base: TransientResult, onProgress?: (d
     { label: 'Wave speed −10 %', opt: { waveFactor: 0.9 } },
     { label: 'Wave speed +10 %', opt: { waveFactor: 1.1 } },
   ];
-  if (net.event.kind === 'valveClose' || net.event.kind === 'valveOpen') {
+  const kinds = new Set(allEvents(net).map((e) => e.kind));
+  if (kinds.has('valveClose') || kinds.has('valveOpen')) {
     variants.push({ label: 'Valve stroke −20 %', opt: { strokeFactor: 0.8 } }, { label: 'Valve stroke +20 %', opt: { strokeFactor: 1.2 } });
   }
-  if (net.event.kind === 'pumpTrip') {
+  if (kinds.has('pumpTrip')) {
     variants.push({ label: 'Pump inertia −15 %', opt: { inertiaFactor: 0.85 } }, { label: 'Pump inertia +15 %', opt: { inertiaFactor: 1.15 } });
   }
   const hasCavity = base.envelopes.some((e) => e.cavMax.some((v) => v > 1e-4));

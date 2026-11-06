@@ -1,9 +1,40 @@
 // SurgeSpace network model. SI units throughout the engine: m, s, m³/s, m (head), kg·m², Pa.
 
 export const G = 9.80665;
-export const RHO = 998.2; // water at 20 °C, kg/m³
-export const HB = 10.33; // barometric head, m (sea level)
-export const HV = 0.24; // vapour pressure head at 20 °C, m absolute
+// Fluid and site constants. They are live bindings: applyFluid() sets them from the model's settings at the start of
+// every steady and transient solve (defaults = water at 20 °C at sea level, as before).
+export let RHO = 998.2; // density, kg/m³
+export let HB = 10.33; // barometric head, m
+export let HV = 0.24; // vapour pressure head, m absolute
+export let NU = 1.004e-6; // kinematic viscosity, m²/s
+
+/** Barometric head (m of the liquid) at a site elevation (m), standard atmosphere. */
+export const barometricHead = (siteElev: number, rho = 998.2) => (101325 * (1 - 2.25577e-5 * siteElev) ** 5.25588) / (rho * G);
+
+/** Set density, vapour head and barometric head from the settings (call at the start of each solve). */
+export function applyFluid(s: Partial<Settings> | undefined) {
+  const f = s?.fluid;
+  RHO = f?.density ?? 998.2;
+  HV = f ? (f.vapourPressure * 1000) / (RHO * G) : 0.24;
+  NU = f?.viscosity ?? 1.004e-6;
+  HB = s?.siteElevation || f ? barometricHead(s?.siteElevation ?? 0, RHO) : 10.33;
+}
+
+/** Liquid properties used by the engine. */
+export interface FluidSpec {
+  /** Display name (e.g. "Water 20 °C"). */
+  name: string;
+  /** Temperature, °C (informative). */
+  temperature?: number;
+  /** Density, kg/m³. */
+  density: number;
+  /** Absolute vapour pressure, kPa. */
+  vapourPressure: number;
+  /** Kinematic viscosity, m²/s. */
+  viscosity?: number;
+  /** Bulk modulus, GPa (wave speed calculator). */
+  bulkModulus?: number;
+}
 
 export type NodeKind = 'junction' | 'reservoir';
 
@@ -140,6 +171,10 @@ export interface NetNode {
   demand?: number;
   /** Fixed water surface elevation, m (reservoirs and tanks). */
   head?: number;
+  /** Reservoirs: head varies with time during the transient. */
+  headSchedule?: HeadSchedule;
+  /** Free text label shown on the drawing. */
+  label?: string;
   vessel?: SurgeVessel;
   airValve?: AirValve;
   relief?: ReliefValve;
@@ -164,6 +199,13 @@ export interface Pipe {
   /** Optional intermediate profile points: distance from `from` (m) and elevation (m). */
   profile?: { s: number; z: number }[];
   closed?: boolean;
+  /** Drawing bend points between the two end nodes (map coordinates, m). */
+  vertices?: { x: number; y: number }[];
+  /** Pipe material (catalogue name, informative). */
+  material?: string;
+  /** Wall thickness, mm (wave speed calculator). */
+  wall?: number;
+  label?: string;
   /** Check valve at the start of the pipe (flow only from `from` to `to`). */
   checkValve?: CheckValveSpec;
 }
@@ -222,6 +264,7 @@ export interface Outlet {
 
 export interface Pump {
   id: string;
+  label?: string;
   from: string; // suction node
   to: string; // discharge node
   /** Three points of the head curve at rated speed: shutoff, rated, maximum flow (m³/s, m). */
@@ -263,6 +306,9 @@ export interface Valve {
   control?: ControlValve;
   /** Set internally for the valve that models a pipe's check valve. */
   owner?: string;
+  /** Fixed restriction (inline orifice): drawn and listed as an orifice; it is a valve that is never operated. */
+  orifice?: boolean;
+  label?: string;
 }
 
 export type EventKind = 'pumpTrip' | 'valveClose' | 'valveOpen' | 'none';
@@ -286,6 +332,17 @@ export interface TransientEvent {
   pumpMode?: 'trip' | 'ramp' | 'start';
 }
 
+/** Time-varying head at a reservoir boundary (tide, wave, sloshing tank, upstream pump station). */
+export interface HeadSchedule {
+  mode: 'sine' | 'table';
+  /** 'sine': amplitude (m) and period (s); phase in degrees. */
+  amplitude?: number;
+  period?: number;
+  phase?: number;
+  /** 'table': [time s, change of head from the steady level m]. */
+  table?: [number, number][];
+}
+
 export interface Settings {
   friction: 'DW' | 'HW';
   /** Simulation length, s. */
@@ -304,6 +361,14 @@ export interface Settings {
   pressureDependentDemand: boolean;
   /** Minimum allowed pressure head, m (checks). */
   minPressure: number;
+  /** Liquid (default water at 20 °C). */
+  fluid?: FluidSpec;
+  /** Site elevation above sea level, m (sets the atmospheric pressure). Default 0. */
+  siteElevation?: number;
+  /** Maximum allowed pressure head, m (checks; pipe class is used when not given). */
+  maxPressure?: number;
+  /** Number of animation frames kept (default 600). */
+  frames?: number;
 }
 
 /** Details printed on the report's title page. */
@@ -325,8 +390,42 @@ export interface Network {
   pumps: Pump[];
   valves: Valve[];
   event: TransientEvent;
+  /** More operations in the same run (each with its own targets and timing), e.g. a pump trip followed by a
+   *  valve closure. The engine applies all of them; the first one is `event`. */
+  extraEvents?: TransientEvent[];
   settings: Settings;
+  /** Unit system for display (the model is always stored in SI). */
+  units?: 'SI' | 'US';
+  /** Cases: named variants of the model (each a full snapshot), managed in the Cases manager. */
+  cases?: ModelCase[];
+  /** Id of the active case. */
+  activeCase?: string;
+  /** Saved long-section routes. */
+  profiles?: { name: string; path: string[] }[];
+  /** Background picture under the drawing (site plan, aerial photo, scanned drawing), placed by its corners. */
+  background?: BackgroundImage;
 }
+
+export interface BackgroundImage {
+  /** Image as a data URL. */
+  src: string;
+  /** Map coordinates of the lower-left (x0, y0) and upper-right (x1, y1) corners, m. */
+  x0: number; y0: number; x1: number; y1: number;
+  opacity: number;
+  visible: boolean;
+}
+
+/** A named variant of the model (what-if): stored as a full copy so it can be run and compared on its own. */
+export interface ModelCase {
+  id: string;
+  name: string;
+  notes?: string;
+  /** The model of this case (without its own cases list). */
+  model: Omit<Network, 'cases' | 'activeCase'>;
+}
+
+/** All operations of a run: the main event plus the extra ones. */
+export const allEvents = (net: Pick<Network, 'event' | 'extraEvents'>): TransientEvent[] => [net.event, ...(net.extraEvents ?? [])].filter((e) => e && e.kind !== 'none');
 
 export const defaultSettings = (): Settings => ({
   friction: 'DW',

@@ -1,3 +1,4 @@
+import { unitOf, useUnits } from '../app/units';
 import { useMemo } from 'react';
 import type { PipeEnvelope, TransientResult } from '../engine/transient';
 import { HB, HV, type Network } from '../engine/types';
@@ -56,7 +57,8 @@ export function buildProfile(net: Network, r: TransientResult, a: string, b: str
   return out;
 }
 
-export function ProfileView({ net, result, a, b, framePos, uEnv, showNow }: { net: Network; result: TransientResult; a: string; b: string; framePos: number; uEnv?: PipeEnvelope[]; showNow: boolean }) {
+export function ProfileView({ net, result, a, b, framePos, uEnv, showNow, height }: { net: Network; result: TransientResult; a: string; b: string; framePos: number; uEnv?: PipeEnvelope[]; showNow: boolean; height?: number }) {
+  const units = useUnits();
   const prof = useMemo(() => buildProfile(net, result, a, b, uEnv), [net, result, a, b, uEnv]);
   // route samples for the live line: chainage and an index into each pipe's frame data
   const live = useMemo(() => {
@@ -125,5 +127,12 @@ export function ProfileView({ net, result, a, b, framePos, uEnv, showNow }: { ne
     const t = T[f0] + (T[f1] - T[f0]) * (framePos - f0);
     series.push({ name: `Head at ${t.toFixed(2)} s`, color: 'var(--accent)', x: live.ch, y: now.h, width: 2.4 });
   }
-  return <Chart series={series} bands={bands.filter((b) => b.name)} markers={prof.markers} xLabel="Chainage along route (m)" yLabel="Elevation / head (m)" height={250} />;
+  // display units: chainage in length units, levels in head units
+  const fL = unitOf('length', units).f, fH = unitOf('head', units).f, uL = unitOf('length', units).u, uH = unitOf('head', units).u;
+  const sx = (a: ArrayLike<number>) => (fL === 1 ? a : Array.from(a, (v) => v * fL));
+  const sy = (a: ArrayLike<number>) => (fH === 1 ? a : Array.from(a, (v) => v * fH));
+  const S = series.map((q) => ({ ...q, x: sx(q.x), y: sy(q.y) }));
+  const B = bands.filter((b) => b.name).map((q) => ({ ...q, x: sx(q.x), lo: sy(q.lo), hi: sy(q.hi) }));
+  const M = prof.markers.map((m) => ({ ...m, x: m.x * fL }));
+  return <Chart series={S} bands={B} markers={M} xLabel={`Chainage along route (${uL})`} yLabel={`Elevation / head (${uH})`} yUnit={uH} xUnit={uL} height={height ?? 250} />;
 }

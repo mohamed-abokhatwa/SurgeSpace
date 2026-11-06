@@ -48,7 +48,7 @@ export function HistoryView({ net, result, nodes, tNow }: { net: Network; result
       )}
       {tanks.length > 0 && (
         <>
-          <div className="label">Surge tanks</div>
+          <div className="label">Standpipes</div>
           <Chart series={tanks.flatMap(([id, tk], k) => [
             { name: `${id} water level`, color: COLORS[(k + 1) % COLORS.length], x: t, y: tk.level },
             { name: `${id} top`, color: 'var(--faint)', x: [t[0], t[t.length - 1]], y: [tk.top, tk.top], dash: '4 4', width: 1 },
@@ -58,7 +58,7 @@ export function HistoryView({ net, result, nodes, tNow }: { net: Network; result
       )}
       {vessels.length > 0 && (
         <>
-          <div className="label">Hydropneumatic tank water level</div>
+          <div className="label">Air vessel water level</div>
           <Chart series={vessels.flatMap(([id, v], k) => [
             { name: `${id} water level`, color: COLORS[(k + 2) % COLORS.length], x: t, y: v.level },
             { name: `${id} tank top`, color: 'var(--faint)', x: [t[0], t[t.length - 1]], y: [v.top, v.top], dash: '4 4', width: 1 },
@@ -88,9 +88,9 @@ export function HistoryView({ net, result, nodes, tNow }: { net: Network; result
         <>
           <div className="label">Discharge valves</div>
           <Chart series={[
-            ...savs.map(([id, v], k) => ({ name: `${id} anticipation valve`, color: COLORS[(k + 3) % COLORS.length], x: t, y: Array.from(v.flow, (q) => q * 1000) })),
+            ...savs.map(([id, v], k) => ({ name: `${id} anticipator valve`, color: COLORS[(k + 3) % COLORS.length], x: t, y: Array.from(v.flow, (q) => q * 1000) })),
             ...reliefs.map(([id, v], k) => ({ name: `${id} relief valve`, color: COLORS[(k + 4) % COLORS.length], x: t, y: Array.from(v.flow, (q) => q * 1000) })),
-            ...outlets.map(([id, v], k) => ({ name: `${id} ${net.nodes.find((x) => x.id === id)?.outlet?.trigger === 'pressure' ? 'rupture disk' : 'outlet'}`, color: COLORS[(k + 5) % COLORS.length], x: t, y: Array.from(v.flow, (q) => q * 1000) })),
+            ...outlets.map(([id, v], k) => ({ name: `${id} ${net.nodes.find((x) => x.id === id)?.outlet?.trigger === 'pressure' ? 'burst disc' : 'outlet'}`, color: COLORS[(k + 5) % COLORS.length], x: t, y: Array.from(v.flow, (q) => q * 1000) })),
           ]} xLabel="Time (s)" yLabel="Discharge (L/s)" vLine={now} height={170} yUnit="L/s" xUnit="s" />
         </>
       )}

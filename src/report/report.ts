@@ -98,7 +98,6 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   const now = new Date();
   const info = net.report ?? {};
   const st = net.settings;
-  const ev = net.event;
   const nodeById = new Map(net.nodes.map((n) => [n.id, n]));
   const junctions = net.nodes.filter((n) => n.kind === 'junction');
   const envById = new Map(r.envelopes.map((e) => [e.id, e]));
@@ -167,7 +166,7 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   const pumpE = Object.entries(r.pumps);
   if (pumpE.length) devCharts.push(`<figure>${svgChart(pumpE.slice(0, 4).map(([id, p], k) => ({ name: `${id} speed %`, color: ['#e0620c', '#2563eb', '#16a34a', '#a855f7'][k], x: t, y: Array.from(p.speed, (v) => v * 100) })), { xLabel: 'Time (s)', yLabel: 'Speed (%)', height: 220 })}<figcaption>Pump speed</figcaption></figure>`,
     `<figure>${svgChart(pumpE.slice(0, 4).map(([id, p], k) => ({ name: `${id} flow L/s`, color: ['#e0620c', '#2563eb', '#16a34a', '#a855f7'][k], x: t, y: Array.from(p.flow, (v) => v * 1000) })), { xLabel: 'Time (s)', yLabel: 'Flow per pump (L/s)', height: 220 })}<figcaption>Pump flow</figcaption></figure>`);
-  for (const [id, v] of Object.entries(r.vessels)) devCharts.push(`<figure>${svgChart([{ name: 'gas volume', color: '#16a34a', x: t, y: v.gas }, { name: 'tank volume', color: '#9ca3af', x: [t[0], t[t.length - 1]], y: [v.volume, v.volume], dash: '4 3', width: 1 }], { xLabel: 'Time (s)', yLabel: 'Volume (m³)', height: 220 })}<figcaption>Hydropneumatic tank ${esc(id)}: gas volume</figcaption></figure>`);
+  for (const [id, v] of Object.entries(r.vessels)) devCharts.push(`<figure>${svgChart([{ name: 'gas volume', color: '#16a34a', x: t, y: v.gas }, { name: 'tank volume', color: '#9ca3af', x: [t[0], t[t.length - 1]], y: [v.volume, v.volume], dash: '4 3', width: 1 }], { xLabel: 'Time (s)', yLabel: 'Volume (m³)', height: 220 })}<figcaption>Air vessel ${esc(id)}: gas volume</figcaption></figure>`);
   for (const [id, tk] of Object.entries(r.tanks ?? {})) devCharts.push(`<figure>${svgChart([{ name: 'water level', color: '#0891b2', x: t, y: tk.level }, { name: 'top', color: '#9ca3af', x: [t[0], t[t.length - 1]], y: [tk.top, tk.top], dash: '4 3', width: 1 }, { name: 'bottom', color: '#9ca3af', x: [t[0], t[t.length - 1]], y: [tk.bottom, tk.bottom], dash: '2 3', width: 1 }], { xLabel: 'Time (s)', yLabel: 'Level (m)', height: 220 })}<figcaption>${tk.oneWay ? 'One-way' : 'Surge'} tank ${esc(id)}: water level</figcaption></figure>`);
   for (const [id, c] of Object.entries(r.checkValves ?? {})) if (c.mode !== 'ideal') devCharts.push(`<figure>${svgChart([{ name: 'flow L/s', color: '#2563eb', x: t, y: Array.from(c.flow, (q) => q * 1000) }], { xLabel: 'Time (s)', yLabel: 'Flow (L/s)', height: 220 })}<figcaption>Check valve ${esc(id)}: flow (negative = reverse)</figcaption></figure>`);
   for (const [id, a] of Object.entries(r.airValves)) if (a.maxAir > 1e-4) devCharts.push(`<figure>${svgChart([{ name: 'air volume L', color: '#d97706', x: t, y: Array.from(a.air, (v) => v * 1000) }], { xLabel: 'Time (s)', yLabel: 'Air (L)', height: 220 })}<figcaption>Air valve ${esc(id)}: air in the pipe</figcaption></figure>`);
@@ -180,24 +179,26 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   const devRows: (string | number)[][] = [];
   for (const n of net.nodes) {
     const v = n.vessel;
-    if (v) devRows.push([n.id, 'Hydropneumatic tank', `${f(v.volume, 2)} m³ ${v.shape ?? 'vertical'}${v.diameter ? ` Ø${f(v.diameter, 2)} m` : ''}; ${v.gasInput === 'precharge' ? `pre-charge ${f(v.prechargeHead, 1)} m${v.bladder ? ', bladder' : ''}` : `gas ${f(v.gasVolume, 2)} m³`}; n = ${v.n}; connection Ø${f(v.connDiameter * 1000, 0)} mm${v.connLength ? ` × ${f(v.connLength, 1)} m` : ''}; ${v.inlet === 'checkBypass' ? `check valve with Ø${f((v.bypassDiameter ?? 0) * 1000, 0)} mm bypass (K ${v.bypassK ?? 1})` : `K in ${v.kIn} / out ${v.kOut}`}${v.dipTubeHeight ? `; dip tube ${f(v.dipTubeHeight, 2)} m` : ''}`]);
+    if (v) devRows.push([n.id, 'Air vessel', `${f(v.volume, 2)} m³ ${v.shape ?? 'vertical'}${v.diameter ? ` Ø${f(v.diameter, 2)} m` : ''}; ${v.gasInput === 'precharge' ? `pre-charge ${f(v.prechargeHead, 1)} m${v.bladder ? ', bladder' : ''}` : `gas ${f(v.gasVolume, 2)} m³`}; n = ${v.n}; connection Ø${f(v.connDiameter * 1000, 0)} mm${v.connLength ? ` × ${f(v.connLength, 1)} m` : ''}; ${v.inlet === 'checkBypass' ? `check valve with Ø${f((v.bypassDiameter ?? 0) * 1000, 0)} mm bypass (K ${v.bypassK ?? 1})` : `K in ${v.kIn} / out ${v.kOut}`}${v.dipTubeHeight ? `; dip tube ${f(v.dipTubeHeight, 2)} m` : ''}`]);
     const a = n.airValve;
     if (a) devRows.push([n.id, 'Air valve', `${a.type ?? 'double'}${a.treatAsJunction ? ' (treated as junction: off)' : ''}; in Ø${f(a.inDiameter * 1000, 1)} mm, out Ø${f(a.outDiameter * 1000, 1)} mm${a.smallDiameter ? `, small Ø${f(a.smallDiameter * 1000, 1)} mm` : ''}${a.switchHead ? `, switch ${a.switchHead} m` : ''}; Cd ${a.cdIn ?? 0.6}/${a.cdOut ?? 0.6}`]);
     const tk = n.tank;
-    if (tk) devRows.push([n.id, tk.oneWay ? 'One-way tank' : 'Surge tank', `Ø${f(tk.diameter, 2)} m, bottom ${f(tk.bottomElev, 2)} m, top ${f(tk.topElev, 2)} m; connection Ø${f(tk.connDiameter * 1000, 0)} mm, K in ${tk.kIn} / out ${tk.kOut}${tk.oneWay ? `; level ${f(tk.initialLevel, 2)} m` : ''}`]);
+    if (tk) devRows.push([n.id, tk.oneWay ? 'One-way tank' : 'Standpipe', `Ø${f(tk.diameter, 2)} m, bottom ${f(tk.bottomElev, 2)} m, top ${f(tk.topElev, 2)} m; connection Ø${f(tk.connDiameter * 1000, 0)} mm, K in ${tk.kIn} / out ${tk.kOut}${tk.oneWay ? `; level ${f(tk.initialLevel, 2)} m` : ''}`]);
     const sv = n.sav;
-    if (sv) devRows.push([n.id, 'Surge anticipation valve', `Ø${f(sv.diameter * 1000, 0)} mm, Cd ${sv.cd ?? 0.6}; opens below ${f(sv.lowSet, 1)} m${sv.highSet ? ` or above ${f(sv.highSet, 1)} m` : ''}; open ${sv.openTime} s, hold ${sv.holdTime} s, close ${sv.closeTime} s`]);
+    if (sv) devRows.push([n.id, 'Anticipator valve', `Ø${f(sv.diameter * 1000, 0)} mm, Cd ${sv.cd ?? 0.6}; opens below ${f(sv.lowSet, 1)} m${sv.highSet ? ` or above ${f(sv.highSet, 1)} m` : ''}; open ${sv.openTime} s, hold ${sv.holdTime} s, close ${sv.closeTime} s`]);
     const rv = n.relief;
     if (rv) devRows.push([n.id, 'Pressure relief valve', `set ${f(rv.setHead, 1)} m; ${rv.diameter ? `Ø${f(rv.diameter * 1000, 0)} mm, Cd ${rv.cd ?? 0.7}${rv.accumulation ? `, full open at +${rv.accumulation} m` : ''}` : `${f(rv.capacity * 1000, 1)} L/s at +10 m`}`]);
     const o = n.outlet;
-    if (o) devRows.push([n.id, o.trigger === 'pressure' ? 'Rupture disk' : 'Discharge to atmosphere', `Ø${f(o.diameter * 1000, 0)} mm, Cd ${o.cd ?? 0.6}; ${o.trigger === 'pressure' ? `bursts at ${f(o.burstHead, 1)} m` : `opens at ${f(o.time ?? 0, 2)} s`}, opening time ${f(o.openTime ?? 0, 2)} s`]);
+    if (o) devRows.push([n.id, o.trigger === 'pressure' ? 'Burst disc' : 'Blow-off', `Ø${f(o.diameter * 1000, 0)} mm, Cd ${o.cd ?? 0.6}; ${o.trigger === 'pressure' ? `bursts at ${f(o.burstHead, 1)} m` : `opens at ${f(o.time ?? 0, 2)} s`}, opening time ${f(o.openTime ?? 0, 2)} s`]);
   }
   for (const p of net.pipes) if (p.checkValve) devRows.push([p.id, 'Check valve in pipe', `at ${p.from}; ${cvText(p.checkValve)}; K ${p.checkValve.kOpen ?? 1}`]);
 
-  const evText = ev.kind === 'pumpTrip'
+  const opText = (ev: typeof net.event) => ev.kind === 'pumpTrip'
     ? `${ev.pumpMode === 'start' ? 'Pump start' : ev.pumpMode === 'ramp' ? 'Controlled pump stop' : 'Pump trip (power failure)'} of ${ev.targets.join(', ') || '—'} at ${ev.start} s${ev.pumpMode && ev.pumpMode !== 'trip' ? `, ramp ${ev.duration ?? 0} s` : ''}.`
     : ev.kind === 'none' ? 'No event (steady state held).'
       : `Valve ${ev.kind === 'valveClose' ? 'closure' : 'opening'} of ${ev.targets.join(', ')} at ${ev.start} s: ${ev.curve ? `operating curve ${ev.curve.map(([a, b]) => `${a} s → ${b}`).join(', ')}` : `stroke ${ev.duration ?? 0} s to ${ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1)}, law exponent ${ev.exponent ?? 1}`}.`;
+  const evs = [net.event, ...(net.extraEvents ?? [])].filter((e) => e.kind !== 'none');
+  const evText = evs.length ? evs.map((e, k) => (evs.length > 1 ? `(${k + 1}) ` : '') + opText(e)).join(' ') : opText(net.event);
 
   const slams = (r.slams ?? []).filter((s) => s.joukowsky >= 0.5);
   const summaryRows: (string | number)[][] = [
@@ -252,13 +253,13 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   const pumpRows = net.pumps.map((p) => [p.id, p.from, p.to, p.curve.map(([q, h]) => `${f(q * 1000, 1)} L/s @ ${f(h, 1)} m`).join('; '), `${Math.round(p.efficiency * 100)} %`, p.speed, f(p.inertia, 2), p.checkValve ? cvText(p.checkSpec) : 'none', p.on ? 'running' : 'off', f((r.steady.flows[p.id] ?? 0) * 1000, 1)]);
   const valveRows = net.valves.map((v) => [v.id, v.from, v.to, f(v.diameter * 1000, 0), v.k0, `${v.opening} (${f(valveArea(v, v.opening) * 100, 1)} % area)`, v.law ?? 'area', v.check ? cvText(v.checkSpec) : '–', v.control ? `${v.control.type} ${v.control.type === 'FCV' ? `${f(v.control.set * 1000, 1)} L/s` : `${f(v.control.set, 1)} m`}${v.control.active ? `, active (τ ${v.control.responseTime ?? 3} s)` : ', locked'}` : '–', f((r.steady.flows[v.id] ?? 0) * 1000, 1)]);
   const resDev: (string | number)[][] = [];
-  for (const [id, v] of Object.entries(r.vessels)) resDev.push([id, 'Hydropneumatic tank', `gas ${f(v.minGas, 2)}–${f(v.maxGas, 2)} m³ (start ${f(v.initialGas, 2)}); lowest water ${f(v.volume - v.maxGas, 2)} m³${v.emptied ? '; EMPTIED' : ''}`]);
-  for (const [id, tk] of Object.entries(r.tanks ?? {})) resDev.push([id, tk.oneWay ? 'One-way tank' : 'Surge tank', `level ${f(tk.minLevel, 2)}–${f(tk.maxLevel, 2)} m${tk.spilled > 1e-6 ? `; spilled ${f(tk.spilled, 2)} m³` : ''}${tk.emptied ? '; EMPTIED' : ''}`]);
-  for (const [id, v] of Object.entries(r.savs ?? {})) resDev.push([id, 'Surge anticipation valve', v.opened ? `opened ${v.opened}×, max ${f(v.maxFlow * 1000, 0)} L/s` : 'did not open']);
+  for (const [id, v] of Object.entries(r.vessels)) resDev.push([id, 'Air vessel', `gas ${f(v.minGas, 2)}–${f(v.maxGas, 2)} m³ (start ${f(v.initialGas, 2)}); lowest water ${f(v.volume - v.maxGas, 2)} m³${v.emptied ? '; EMPTIED' : ''}`]);
+  for (const [id, tk] of Object.entries(r.tanks ?? {})) resDev.push([id, tk.oneWay ? 'One-way tank' : 'Standpipe', `level ${f(tk.minLevel, 2)}–${f(tk.maxLevel, 2)} m${tk.spilled > 1e-6 ? `; spilled ${f(tk.spilled, 2)} m³` : ''}${tk.emptied ? '; EMPTIED' : ''}`]);
+  for (const [id, v] of Object.entries(r.savs ?? {})) resDev.push([id, 'Anticipator valve', v.opened ? `opened ${v.opened}×, max ${f(v.maxFlow * 1000, 0)} L/s` : 'did not open']);
   for (const [id, v] of Object.entries(r.reliefs ?? {})) resDev.push([id, 'Relief valve', v.maxFlow > 1e-6 ? `max ${f(v.maxFlow * 1000, 0)} L/s, ${f(v.volume, 2)} m³` : 'did not open']);
   for (const [id, a] of Object.entries(r.airValves)) resDev.push([id, 'Air valve', a.maxAir > 1e-6 ? `up to ${f(a.maxAir * 1000, 1)} L of air${a.air[a.air.length - 1] > 1e-4 ? ', some left at the end' : ''}` : 'no air admitted']);
   for (const [id, c] of Object.entries(r.checkValves ?? {})) resDev.push([id, `Check valve (${c.where})`, `${c.mode}; ${c.closures ? `closed ${c.closures}×, ` : ''}max reverse ${f(c.maxReverseVelocity, 3)} m/s${c.closures ? `, ${f(c.reverseVelocityAtClosure, 3)} m/s at closure` : ''}`]);
-  for (const [id, o] of Object.entries(r.outlets ?? {})) resDev.push([id, 'Outlet / rupture disk', o.openedAt >= 0 ? `opened ${f(o.openedAt, 2)} s, max ${f(o.maxFlow * 1000, 0)} L/s, ${f(o.volume, 2)} m³` : 'did not open']);
+  for (const [id, o] of Object.entries(r.outlets ?? {})) resDev.push([id, 'Outlet / burst disc', o.openedAt >= 0 ? `opened ${f(o.openedAt, 2)} s, max ${f(o.maxFlow * 1000, 0)} L/s, ${f(o.volume, 2)} m³` : 'did not open']);
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(net.name)} · transient analysis report</title><style>${css}</style></head><body>
 <section class="title">

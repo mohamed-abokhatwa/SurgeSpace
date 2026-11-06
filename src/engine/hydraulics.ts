@@ -1,7 +1,6 @@
 // Shared hydraulic relations: friction, pump curves, valve losses.
-import { G, RHO, area, type Pipe, type Pump, type Valve } from './types';
+import { G, NU, RHO, area, type Pipe, type Pump, type Valve } from './types';
 
-const NU = 1.004e-6; // kinematic viscosity at 20 °C, m²/s
 
 /** Darcy friction factor: laminar 64/Re, Swamee–Jain turbulent, blended through transition. */
 export function darcyF(q: number, d: number, epsMm: number): number {

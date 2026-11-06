@@ -1,7 +1,7 @@
 // Steady state by the global gradient algorithm (Todini & Pilati), the method EPANET uses.
 // Gives the initial heads and flows for the transient.
 import { pipeR, pumpCurve, valveKv } from './hydraulics';
-import { G, area, type Network } from './types';
+import { G, applyFluid, area, type Network } from './types';
 import { controlArea, valveArea } from './devices';
 import { prepareNetwork } from './prepare';
 
@@ -26,6 +26,7 @@ interface Link {
 }
 
 export function solveSteady(netIn: Network): SteadyResult {
+  applyFluid(netIn.settings);
   const net = prepareNetwork(netIn);
   const areas = new Map(net.valves.map((v) => [v.id, valveArea(v, v.opening)] as [string, number]));
   const ctl = net.valves.filter((v) => v.control && v.opening > 0);

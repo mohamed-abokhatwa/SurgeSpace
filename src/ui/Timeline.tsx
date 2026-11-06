@@ -1,3 +1,4 @@
+import { fmtQ } from '../app/units';
 // Scrubber that doubles as an overview: the largest rise (red) and drop (blue) anywhere in the network at
 // each moment, with the event and the peaks marked. Click or drag to jump; arrow keys step.
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -97,8 +98,8 @@ export function Timeline({ net, result, framePos: fpIn, onSeek }: { net: Network
         <circle cx={X(framePos)} cy={mid} r="4.5" fill="var(--accent)" stroke="var(--panel)" strokeWidth="1.5" />
       </svg>
       <div className="row small timeline-keys" onPointerDown={(e) => e.stopPropagation()}>
-        <button className="linkish" onClick={() => onSeek(tr.fMax)} title="Jump to the highest rise">▲ +{fmt(tr.rise[tr.fMax], 1)} m at {fmt(T[tr.fMax], 2)} s</button>
-        <button className="linkish" onClick={() => onSeek(tr.fMin)} title="Jump to the deepest drop">▼ {fmt(tr.drop[tr.fMin], 1)} m at {fmt(T[tr.fMin], 2)} s</button>
+        <button className="linkish" onClick={() => onSeek(tr.fMax)} title="Jump to the highest rise">▲ +{fmtQ(tr.rise[tr.fMax], 'head', 1)} at {fmt(T[tr.fMax], 2)} s</button>
+        <button className="linkish" onClick={() => onSeek(tr.fMin)} title="Jump to the deepest drop">▼ {fmtQ(tr.drop[tr.fMin], 'head', 1)} at {fmt(T[tr.fMin], 2)} s</button>
       </div>
     </div>
   );

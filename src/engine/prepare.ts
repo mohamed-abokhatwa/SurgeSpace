@@ -1,14 +1,14 @@
 // Turns the user's network into the one both solvers work on:
 //  • a pipe with a check valve becomes a check valve (an extra valve link) followed by the pipe;
 //  • pumps that start in the transient are off in the steady state.
-import type { Network } from './types';
+import { allEvents, type Network } from './types';
 
 export const cvNodeId = (pipeId: string, from: string) => `${from}~${pipeId}`;
 export const cvValveId = (pipeId: string) => `${pipeId}-CV`;
 
 export function prepareNetwork(net: Network): Network {
   const cvPipes = net.pipes.filter((p) => p.checkValve && !p.closed);
-  const starting = net.event.kind === 'pumpTrip' && net.event.pumpMode === 'start' ? net.event.targets : [];
+  const starting = allEvents(net).filter((e) => e.kind === 'pumpTrip' && e.pumpMode === 'start').flatMap((e) => e.targets);
   if (!cvPipes.length && !starting.some((id) => net.pumps.find((p) => p.id === id)?.on)) return net;
   const nodes = net.nodes.slice();
   const valves = net.valves.slice();
