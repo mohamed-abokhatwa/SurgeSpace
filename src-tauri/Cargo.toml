@@ -1,6 +1,6 @@
 [package]
 name = "surgespace"
-version = "2.0.0"
+version = "2.0.1"
 description = "SurgeSpace: network surge analysis"
 authors = ["Engineering Workspace (engspace.app)"]
 edition = "2021"

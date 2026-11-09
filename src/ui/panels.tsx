@@ -194,7 +194,7 @@ export function SettingsPanel({ net, setNet }: { net: Network; setNet: SetNet })
         <label className="field"><span>Rigid-column limit (s, 0 = auto)</span><input type="number" step="0.005" value={s.rigidTravel} onChange={(e) => set({ rigidTravel: num(e.target.value) })} /></label>
       </div>
       <p className="hint" style={{ marginTop: 10 }}>
-        SurgeSpace keeps every pipe's real length and adjusts wave speeds by at most the value above (default 0.5 %; HAMMER's default tolerance is 75 %).
+        SurgeSpace keeps every pipe's real length and adjusts wave speeds by at most the value above (default 0.5 %; fixed-step solvers commonly allow far more).
         Pipes too short to carry a wave at the chosen time step are modelled as rigid water columns instead of being distorted.
         Column separation uses the discrete gas cavity model with the free gas fraction above (1e-7 is the research-recommended value).
       </p>

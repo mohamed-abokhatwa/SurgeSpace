@@ -94,14 +94,14 @@ export function loopedNetwork(): Network {
 }
 
 /**
- * Published HAMMER study (El-Hazek, Ahmed & Badawy, J. Water and Land Development 47, 2020):
+ * Published surge study (El-Hazek, Ahmed & Badawy, J. Water and Land Development 47, 2020):
  * 5 duty pumps, 6 m³/s, 1800 mm steel header 30 m, two 1200 mm GRE mains 1,600 m to 111.41 m.
  * Not published (assumed here): pump curve, inertia, GRE wave speed, roughness.
  */
 export function elHazek(): Network {
   return {
     name: 'Published case · El-Hazek et al. 2020',
-    description: 'Pump power failure, 6 m³/s through two 1,600 m DN1200 GRE mains. HAMMER reported max head 185.97 m and min 78.43 m unprotected. Pump curve, inertia and wave speed are assumed (not published).',
+    description: 'Pump power failure, 6 m³/s through two 1,600 m DN1200 GRE mains. The published study reported max head 185.97 m and min 78.43 m unprotected. Pump curve, inertia and wave speed are assumed (not published).',
     nodes: [
       { id: 'SUCTION', kind: 'reservoir', x: 0, y: 260, elev: 79.81, head: 79.81 + 3 },
       { id: 'PS-S', kind: 'junction', x: 60, y: 260, elev: 80 },
@@ -170,6 +170,6 @@ export const EXAMPLES: { id: string; make: () => Network }[] = [
   { id: 'loop', make: () => yUp(loopedNetwork()) },
   { id: 'elhazek', make: () => yUp(elHazek()) },
   { id: 'hydro', make: () => yUp(hydroPlant()) },
-  // real network with a published HAMMER result (see validation/README.md)
+  // real network with a published benchmark result (see validation/README.md)
   { id: 'bwsn1', make: () => structuredClone(bwsn1 as unknown as Network) },
 ];

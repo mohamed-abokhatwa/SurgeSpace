@@ -105,7 +105,7 @@ export function designChecks(net: Network, r: TransientResult, envs: PipeEnvelop
   if (r.maxAdjust > net.settings.maxAdjust)
     out.push({ level: 'warn', title: 'Wave speeds adjusted beyond the target', detail: `Up to ${(r.maxAdjust * 100).toFixed(2)} %.` });
   else
-    out.push({ level: 'pass', title: 'Exact geometry', detail: `Wave speeds adjusted by at most ${(r.maxAdjust * 100).toFixed(2)} % (HAMMER's default tolerance is 75 %); pipe lengths unchanged.${r.rigidPipes.length ? ` ${r.rigidPipes.length} very short pipe(s) modelled as rigid columns.` : ''}` });
+    out.push({ level: 'pass', title: 'Exact geometry', detail: `Wave speeds adjusted by at most ${(r.maxAdjust * 100).toFixed(2)} %; pipe lengths unchanged.${r.rigidPipes.length ? ` ${r.rigidPipes.length} very short pipe(s) modelled as rigid columns.` : ''}` });
   for (const tr of turbineSpeeds(net, r)) {
     if (tr.mode !== 'rejection') { out.push({ level: 'info', title: `Turbine ${tr.id}`, detail: `Synchronised to the grid; rated output ${tr.ratedPower.toFixed(0)} kW.` }); continue; }
     const pct = Math.round((tr.maxSpeed - 1) * 100);

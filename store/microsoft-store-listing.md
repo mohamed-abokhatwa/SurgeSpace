@@ -27,7 +27,7 @@ Copy each block into Partner Center → SurgeSpace → Submission → the matchi
 | Website | https://engspace.app |
 | Support contact info | https://surgespace-licences.engspace.app/support (or support@engspace.app) |
 | Game settings / Display mode | Not applicable |
-| Product declarations | Tick: "This app has been tested to meet accessibility guidelines" only if you have checked it. Leave the others as they are |
+| Product declarations | **Tick "This app allows users to make purchases, but does not use the Microsoft Store commerce system"** (required since Nov 2026: licences are sold on engspace.app; policy 10.8.2). Tick "tested to meet accessibility guidelines" only if you have checked it. Leave the others as they are |
 | System requirements, minimum | Windows 10 version 1809 or later, 64-bit; 8 GB RAM; DirectX 9 graphics; 1366×768 display; keyboard and mouse |
 | System requirements, recommended | Windows 11, 16 GB RAM, 1920×1080 display |
 
@@ -108,7 +108,7 @@ DETAILED REPORT
 AN ENGINE YOU CAN TRUST
 • Method of characteristics that keeps every pipe at its real length (wave speeds adjusted by at most 0.5 %).
 • Column separation with the discrete gas cavity model, unsteady friction, pump run-down with inertia, and every device solved together at each node.
-• Validated against published Bentley HAMMER cases (exact on the Tnet0 benchmark; mean difference 1.6 m on a 126-junction network), TSNet, and EPANET steady state on networks up to 3,323 junctions.
+• Validated against published benchmark cases (exact on the Tnet0 valve-closure benchmark; mean difference 1.6 m on a 126-junction network), TSNet, and EPANET steady state on networks up to 3,323 junctions.
 
 WORKS WITH YOUR DATA
 • EPANET .inp files (from EPANET, WaterGEMS, WaterCAD, InfoWater and others), Excel and CSV tables, long-section profiles and CAD drawings (DXF).
@@ -149,7 +149,7 @@ Analysis results for existing models are unchanged.
 15. Liquids catalogue, site elevation and wave speed calculator
 16. Model Health Check before every run
 17. Contours, colour-by-attribute, labels and background site plans
-18. Validated against HAMMER benchmarks, TSNet and EPANET
+18. Validated against published benchmarks, TSNet and EPANET
 19. Import EPANET .inp, Excel/CSV, long sections and DXF; export EPANET, CSV and PDF
 20. Detailed report in your units, saved as PDF
 

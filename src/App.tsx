@@ -708,7 +708,7 @@ export default function App() {
                         <div className="label">Messages</div>
                         {result.warnings.length ? <ul className="small">{result.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul> : <p className="small muted">No warnings.</p>}
                         <div className="label">Engine</div>
-                        <p className="small muted">Method of characteristics with pipe lengths kept exactly (wave speeds within {(net.settings.maxAdjust * 100).toFixed(1)} %), discrete gas cavity model (free gas {net.settings.gasFraction}), {net.settings.unsteadyFriction ? 'unsteady friction (Brunone–Vítkovský, Vardy)' : 'quasi-steady friction'}, {net.settings.fluid?.name ?? 'water 20 °C'}{net.settings.siteElevation ? ` at ${fmtQ(net.settings.siteElevation, 'elevation', 0, units)} above sea level` : ''}. Validated against closed-form theory, EPANET 2.2, TSNet and published HAMMER cases (see Help → About).</p>
+                        <p className="small muted">Method of characteristics with pipe lengths kept exactly (wave speeds within {(net.settings.maxAdjust * 100).toFixed(1)} %), discrete gas cavity model (free gas {net.settings.gasFraction}), {net.settings.unsteadyFriction ? 'unsteady friction (Brunone–Vítkovský, Vardy)' : 'quasi-steady friction'}, {net.settings.fluid?.name ?? 'water 20 °C'}{net.settings.siteElevation ? ` at ${fmtQ(net.settings.siteElevation, 'elevation', 0, units)} above sea level` : ''}. Validated against closed-form theory, EPANET 2.2, TSNet and published benchmark cases (see Help → About).</p>
                       </div>
                     )}
                   </>

@@ -5,7 +5,7 @@ Everything a new conversation (or developer) needs to continue SurgeSpace. No se
 ## 1. What it is
 
 SurgeSpace is a **water hammer / pressure surge (transient) analysis** app for pipelines and water networks, aimed at
-engineers who would otherwise use Bentley HAMMER, AFT Impulse or similar. It runs in the browser and as a desktop app
+engineers who would otherwise use the established commercial transient tools. It runs in the browser and as a desktop app
 (Windows from the **Microsoft Store only**, and Mac). The owner's other engineering app is *Engineering Workspace*
 (engspace.app); SurgeSpace lives on the same domain but is **kept completely separate** (own licence server, database,
 hostname). Never mix the two.
@@ -17,7 +17,7 @@ hostname). Never mix the two.
 ## 1a. Version 2 workspace (branch `v2-workspace`)
 
 The single-page app was rebuilt into a full desktop-style workspace. Engine results are unchanged (all 344 baseline
-values identical; HAMMER Tnet0 exact).
+values identical; Tnet0 benchmark exact).
 
 - **Shell**: menu bar (File, Edit, View, Model, Analysis, Results, Tools, Help), tool ribbon, Model Explorer +
   Operations (left), Properties (right), results dock (Profile, Graphs, Design checks, Data sheets, Cases, Protection
@@ -64,7 +64,7 @@ values identical; HAMMER Tnet0 exact).
 **Engine** (`src/engine/transient.ts`, `steady.ts`)
 - Steady state by the global gradient algorithm (as EPANET), including **control valves solved EPANET-style**
   (active / open / closed statuses inside one solve; 7 s on a 3,323-junction network).
-- Method of characteristics on **exact geometry**: wave speeds adjusted ≤ 0.5 % (HAMMER's default tolerance 75 %),
+- Method of characteristics on **exact geometry**: wave speeds adjusted ≤ 0.5 % ,
   very short pipes as rigid columns.
 - Column separation by the discrete gas cavity model (closed form), unsteady friction (Brunone–Vítkovský, Vardy),
   gas start-up equilibrium, pressure-dependent demands, implicit device boundaries solved together per node cluster
@@ -127,7 +127,7 @@ Run everything: `bash scripts/full-check.sh <baseline.json> <reference folder> <
 | `tests/license.test.ts` | 60 licensing tests |
 | `tests/workspace.test.ts` | 33 tests: v2 workspace, engine additions, turbine, contours, US-unit report |
 | Examples vs baseline | 344 values identical |
-| HAMMER Tnet0 / Tnet3 | exact / mean 1.6 m max, 0.8 m min, 92 % within 3 m |
+| Benchmarks Tnet0 / Tnet3 | exact / mean 1.6 m max, 0.8 m min, 92 % within 3 m |
 | EPANET steady (Net3, ky4, Net6) | worst 0.012 m; control valves vs EPANET 0.005 m |
 | TSNet Net3 | steady and first waves match |
 
@@ -143,7 +143,7 @@ src/report/   detailed report (HTML + SVG charts)
 src/license/  licensing client, dialog, offline logic
 licence-server/  Cloudflare Worker (licences, evaluations, admin)
 src-tauri/    desktop shell
-validation/   comparisons with HAMMER, EPANET, TSNet
+validation/   comparisons with published benchmarks, EPANET, TSNet
 store/        Microsoft Store listing and images
 ```
 
@@ -151,7 +151,7 @@ Commands: `npm install`, `npm run dev`, `npx tsc -b`, `npx tsx tests/<name>.test
 
 ## 7. Open items
 
-- Microsoft Store: **2.0.10.0 submitted for certification on 6 Nov 2026** with the new listing and 10 screenshots; it publishes automatically when it passes.
+- Microsoft Store: 2.0.10.0 failed certification on 9 Nov 2026 (policy 10.8.2: licences sold outside the Store need the "purchases without Store commerce" declaration in Properties). Fixed by ticking that declaration; all mentions of the competitor product name were removed from the app, listing and repo; resubmitted as 2.0.11.0.
 - The GitHub token pasted in chat (Nov 2026) should be revoked and replaced.
 - Mac: add the Apple secrets to GitHub, then run Desktop builds for a notarized DMG; decide where to host it.
 - Optional: Resend key for licence e-mail alerts.

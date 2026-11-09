@@ -103,7 +103,7 @@ export interface AirValve {
   /** Manufacturer curves: [pressure difference kPa, free air flow Nm³/h], inflow and outflow. */
   inCurve?: [number, number][];
   outCurve?: [number, number][];
-  /** Treat as junction (as in HAMMER): the valve is kept in the model but ignored in the run, so results with and
+  /** Treat as junction: the valve is kept in the model but ignored in the run, so results with and
    *  without it can be compared without deleting its settings. */
   treatAsJunction?: boolean;
 }

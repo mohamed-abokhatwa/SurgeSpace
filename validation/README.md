@@ -2,22 +2,22 @@
 
 Every script here runs from the repository root with `npx tsx validation/<script>.ts …`.
 
-## 1. Against Bentley HAMMER
+## 1. Against the reference program
 
-The TSNet repository (github.com/glorialulu/tsnet, `examples/networks/tnet0_hammer` and `tnet3_hammer`) ships two
-HAMMER projects together with HAMMER's own text reports (HAMMER engine 08.11.06.113). The event settings were read
-from the HAMMER project database, and the reported extremes were compared with SurgeSpace.
+The TSNet repository (github.com/glorialulu/tsnet, `examples/networks/tnet0 reference project` and `tnet3 reference project`) ships two
+reference projects together with the reference program's own text reports (reference engine 08.11.06.113). The event settings were read
+from the reference project database, and the reported extremes were compared with SurgeSpace.
 
-### Tnet0: valve closure, 2 pipes (`vs-hammer-tnet0.ts`)
+### Tnet0: valve closure, 2 pipes (`vs-benchmark-tnet0.ts`)
 
 Reservoir 750 m → 1200 m DN600 → 2400 m DN1200 → valve discharging 0.05 m³/s to air, closing over 2 s.
 
-| Point | Max head HAMMER | Max head SurgeSpace | Min head HAMMER | Min head SurgeSpace |
+| Point | Max head reference | Max head SurgeSpace | Min head reference | Min head SurgeSpace |
 |---|---|---|---|---|
 | Junction 2 | 759.3 m | 759.3 m | 740.6 m | 740.6 m |
 | Valve | 761.8 m | 761.8 m | 738.3 m | 738.3 m |
 
-### Tnet3: BWSN network 1, pump shutdown (`vs-hammer-tnet3.ts`)
+### Tnet3: BWSN network 1, pump shutdown (`vs-benchmark-tnet3.ts`)
 
 126 junctions, 168 pipes, 2 pumps, 8 valves, 2 tanks. PUMP-172 is ramped from full speed to zero over 2 s.
 Wave speed 1200 m/s; 20 s; steady friction. 332 pipe ends compared.
@@ -30,13 +30,13 @@ Wave speed 1200 m/s; 20 s; steady friction. 332 pipe ends compared.
 
 Pipe ends where both max and min agree within 3 m: 92 %; within 5 m: 99 %.
 
-Where they differ: both programs use the same pump curve, but they extend it differently at low speed. HAMMER uses
+Where they differ: both programs use the same pump curve, but they extend it differently at low speed. reference uses
 generic four-quadrant curves based on the pump's specific speed; SurgeSpace applies the affinity laws to the curve
-given. HAMMER's check valve at PUMP-172 closes at 0.46 s, SurgeSpace's at 0.80 s, and the largest differences sit at
-the two pumps and the tank next to PUMP-170 (which HAMMER models as a surge tank with a throat).
+given. the reference program's check valve at PUMP-172 closes at 0.46 s, SurgeSpace's at 0.80 s, and the largest differences sit at
+the two pumps and the tank next to PUMP-170 (which reference models as a surge tank with a throat).
 
-The run time step does not explain the differences. Re-running SurgeSpace at HAMMER's own 0.002 s step with
-fixed-step wave-speed rounding (`HAMMER_LIKE=1`) gives the same numbers within 0.2 m.
+The run time step does not explain the differences. Re-running SurgeSpace at the reference program's own 0.002 s step with
+fixed-step wave-speed rounding (`FIXED_STEP=1`) gives the same numbers within 0.2 m.
 
 ## 2. Against TSNet (open-source MOC), Net3 (`transient-vs-tsnet.ts`)
 

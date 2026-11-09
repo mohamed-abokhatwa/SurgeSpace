@@ -1,6 +1,6 @@
-// SurgeSpace against Bentley HAMMER on "Tnet0" (TSNet repository, which ships the HAMMER project and report):
+// SurgeSpace against the reference program on "Tnet0" (TSNet repository, which ships the reference project and report):
 // reservoir at 750 m → 1200 m of DN600 → 2400 m of DN1200 → valve discharging 0.05 m³/s to atmosphere,
-// which closes over 2 s. Wave speed 1200 m/s, 60 s. HAMMER's reported extremes are typed in below.
+// which closes over 2 s. Wave speed 1200 m/s, 60 s. the reference program's reported extremes are typed in below.
 import { runTransient } from '../src/engine/transient';
 import { area, defaultSettings, G, type Network } from '../src/engine/types';
 
@@ -25,8 +25,8 @@ const net: Network = {
 };
 const res = runTransient(net, { constantFriction: true, frames: 600 });
 if (!res.ok) throw new Error('run failed');
-const hammer = { '2': { max: 759.3, min: 740.6 }, '3': { max: 761.8, min: 738.3 } } as const;
+const ref = { '2': { max: 759.3, min: 740.6 }, '3': { max: 761.8, min: 738.3 } } as const;
 console.log(`SurgeSpace dt ${res.dt.toExponential(3)} s, wave-speed change ${(res.maxAdjust * 100).toFixed(2)} %; steady flow ${(res.steady.flows['D2A'] * 1000).toFixed(1)} L/s`);
 for (const id of ['2', '3'] as const) {
-  console.log(`node ${id}: max head HAMMER ${hammer[id].max.toFixed(1)} / SurgeSpace ${res.nodeMax[id].toFixed(1)} m · min head HAMMER ${hammer[id].min.toFixed(1)} / SurgeSpace ${res.nodeMin[id].toFixed(1)} m`);
+  console.log(`node ${id}: max head reference ${ref[id].max.toFixed(1)} / SurgeSpace ${res.nodeMax[id].toFixed(1)} m · min head reference ${ref[id].min.toFixed(1)} / SurgeSpace ${res.nodeMin[id].toFixed(1)} m`);
 }

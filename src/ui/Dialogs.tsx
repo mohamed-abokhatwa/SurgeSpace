@@ -279,7 +279,7 @@ export function HelpDialog({ onClose, initial = 'guide', version }: { onClose: (
         {tab === 'about' && (
           <div>
             <p><b>SurgeSpace {version}</b> — water hammer and surge analysis for pipelines and networks.</p>
-            <p className="small">Method of characteristics on exact geometry (wave speeds within 0.5 %), discrete gas cavity model, unsteady friction, EPANET-compatible steady state, implicit device boundaries. Validated against closed-form theory, EPANET, TSNet and published HAMMER results.</p>
+            <p className="small">Method of characteristics on exact geometry (wave speeds within 0.5 %), discrete gas cavity model, unsteady friction, EPANET-compatible steady state, implicit device boundaries. Validated against closed-form theory, EPANET, TSNet and published benchmark cases.</p>
             <p className="small muted">Engineering for Root Cause Solutions · support@engspace.app</p>
           </div>
         )}
