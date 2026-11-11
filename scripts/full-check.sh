@@ -10,6 +10,9 @@ echo "== valve tests";   npx tsx tests/valves.test.ts | grep -E "FAIL|passed"
 echo "== report tests";  npx tsx tests/report.test.ts | grep -E "FAIL|passed"
 echo "== workspace tests"; npx tsx tests/workspace.test.ts | grep -E "FAIL|passed"
 echo "== AI and command tests"; npx tsx tests/ai.test.ts | grep -E "FAIL|passed"
+echo "== EPS and water quality vs EPANET"; npx tsx tests/eps.test.ts | grep -E "FAIL|passed"
+echo "== four-quadrant pumps"; npx tsx tests/fourq.test.ts | grep -E "FAIL|passed"
+echo "== rigid-column engine"; npx tsx tests/rigid.test.ts | grep -E "FAIL|passed"
 echo "== licence tests"; npx tsx tests/license.test.ts 2>/dev/null | tail -1
 echo "== examples vs baseline"; npx tsx validation/baseline.ts compare "$BASE"
 echo "== Benchmark Tnet0"; npx tsx validation/vs-benchmark-tnet0.ts | tail -2

@@ -196,3 +196,52 @@ export function solveDense(Ain: number[][], bin: number[]): number[] {
   }
   return x;
 }
+
+/** Four-quadrant pump model for one unit: head (m) and hydraulic torque (N·m) for any flow and speed ratio,
+ *  including reverse flow (energy dissipation), reverse rotation (turbine) and the reverse pump zone.
+ *  With Suter data: H = HR (α² + v²) WH(θ), T = TR (α² + v²) WB(θ), θ = atan2(α, v), v = Q/QR.
+ *  Generic (no data): h = A α² + B α v − C v|v| and β = P α|α| + R α v − S v|v| (normalised on the rated point),
+ *  fitted to the pump curve in the normal zone. The centrifugal head A α² does not depend on the direction of
+ *  rotation; reverse flow through a stopped impeller is a head loss and turns it backwards; disc friction always
+ *  opposes the rotation. This is an approximation: use the manufacturer's Suter data for final design. */
+export interface FourQ { head: (q: number, alpha: number) => number; torque: (q: number, alpha: number) => number; HR: number; QR: number; TR: number }
+export function fourQuadrant(pump: Pump): FourQ {
+  const QR = pumpRatedQ(pump);
+  const curve = pumpCurve(pump);
+  const HR = Math.max(curve.h(QR), 1e-6);
+  const wR = omegaRated(pump);
+  const TR = (RHO * G * QR * HR) / (Math.max(pump.efficiency, 0.05) * wR);
+  if (pump.fourQuadrant === 'suter' && pump.suter && pump.suter.theta.length >= 4) {
+    const th = pump.suter.theta.map((d) => (d * Math.PI) / 180);
+    const at = (arr: number[], x: number) => {
+      let t = x % (2 * Math.PI); if (t < 0) t += 2 * Math.PI;
+      for (let i = 1; i < th.length; i++) if (t <= th[i]) return arr[i - 1] + ((arr[i] - arr[i - 1]) * (t - th[i - 1])) / (th[i] - th[i - 1] || 1);
+      // wrap from the last point to 360°
+      const n = th.length - 1, span = 2 * Math.PI - th[n] + th[0];
+      return arr[n] + ((arr[0] - arr[n]) * (t - th[n])) / (span || 1);
+    };
+    return {
+      HR, QR, TR,
+      head: (q, a) => { const v = q / QR; const r2 = a * a + v * v; return r2 < 1e-12 ? 0 : HR * r2 * at(pump.suter!.wh, Math.atan2(a, v)); },
+      torque: (q, a) => { const v = q / QR; const r2 = a * a + v * v; return r2 < 1e-12 ? 0 : TR * r2 * at(pump.suter!.wb, Math.atan2(a, v)); },
+    };
+  }
+  // generic: least squares on the normal zone (α = 1, 0 ≤ v ≤ 1.3)
+  const fit = (f: (v: number) => number) => {
+    const rows: number[][] = [], rhs: number[] = [];
+    for (let i = 0; i <= 26; i++) { const v = (1.3 * i) / 26; rows.push([1, v, -v * v]); rhs.push(f(v)); }
+    const M = [0, 1, 2].map((r) => [0, 1, 2].map((c) => rows.reduce((s, x) => s + x[r] * x[c], 0)));
+    const b = [0, 1, 2].map((r) => rows.reduce((s, x, k) => s + x[r] * rhs[k], 0));
+    return solveDense(M, b);
+  };
+  let [A, B, C] = fit((v) => curve.h(v * QR) / HR);
+  if (C < 0.05) { C = 0.05; B = 1 - A + C; } // keep a loss for reverse flow through the impeller
+  const tq = pumpTorqueQuadratic(pump);
+  let [P, R, S] = fit((v) => (tq.ta + tq.tb * v * QR + tq.tc * (v * QR) ** 2) / TR);
+  if (S < 0.2) { S = 0.2; R = Math.max(1 - P + S, 0); } // flow through a stopped impeller turns it (turbine torque)
+  return {
+    HR, QR, TR,
+    head: (q, a) => { const v = q / QR; return HR * (A * a * a + B * a * v - C * v * Math.abs(v)); },
+    torque: (q, a) => { const v = q / QR; return TR * (P * a * Math.abs(a) + R * a * v - S * v * Math.abs(v)); },
+  };
+}

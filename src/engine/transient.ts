@@ -12,7 +12,8 @@
 //    anti-slam, vacuum breaker, air release, manufacturer curves; Wylie–Streeter air flow); open surge
 //    tank with overflow; one-way (feed) tank; surge anticipation valve; pressure relief valve;
 //    pressure-dependent demands.
-import { frictionF, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpQuadratic, pumpTorqueQuadratic, solveDense, type PumpCurve } from './hydraulics';
+import { runRigid } from './rigid';
+import { fourQuadrant, frictionF, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpQuadratic, pumpTorqueQuadratic, solveDense, type FourQ, type PumpCurve } from './hydraulics';
 import { solveSteady, type SteadyResult } from './steady';
 import { G, HB, HV, NU, RHO, allEvents, applyFluid, area, type CheckValveSpec, type Network, type NetNode, type TransientEvent } from './types';
 import { RAIR, TAIR, airValveMassRate, airValveModel, controlArea, dynamicReverseVelocity, interpTable, outletOpening, prechargeGas, reliefFlow, savOpening, solveDecreasing, valveArea, vesselGeometry, waterDepthOf, waterVolumeAt } from './devices';
@@ -172,11 +173,12 @@ interface CvState {
 }
 
 type Element =
-  | { kind: 'pump'; idx: number; ids: string[]; m: number; curve: PumpCurve; i: number; j: number; Q: number; alpha: number; alphaSet: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; cv?: CvState; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number }
+  | { kind: 'pump'; idx: number; ids: string[]; m: number; curve: PumpCurve; i: number; j: number; Q: number; alpha: number; alphaSet: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; cv?: CvState; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number; fq?: FourQ }
   | { kind: 'valve'; idx: number; i: number; j: number; Q: number; open: number; base: number; closed: boolean; check: boolean; cv?: CvState; kq: number }
   | { kind: 'rigid'; idx: number; i: number; j: number; Q: number; Qold: number; closed: boolean; check: false; inert: number; pipe: number };
 
 export function runTransient(net: Network, opt: RunOptions = {}): TransientResult {
+  if (net.settings.engine === 'rigid') return runRigid(net, opt);
   const t0 = performance.now();
   const warnings: string[] = [];
   applyFluid(net.settings);
@@ -392,6 +394,10 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
 
   // ── elements (pumps, valves) and clusters ──────────────────────────────
   const elements: Element[] = [];
+  /** Pump head per unit (m) and hydraulic torque per unit (N·m) for the element flow Q (all units) and speed ratio. */
+  const pHead = (e: Extract<Element, { kind: 'pump' }>, Q: number, alpha: number) => (e.fq ? e.fq.head(Q / e.m, alpha) : pumpHeadAt(e.curve, Q / e.m, alpha));
+  const pTorque = (e: Extract<Element, { kind: 'pump' }>, alpha: number, Q: number) => (e.fq ? e.fq.torque(Q / e.m, alpha) : e.ta * alpha * alpha + e.tb * alpha * Q + e.tc * Q * Q);
+  const minAlpha = (e: Element) => (e.kind === 'pump' && e.fq ? -3 : 0);
   // identical pumps in parallel are merged into one exact equivalent element (m units)
   const pumpGroups = new Map<string, number[]>();
   net.pumps.forEach((p, k) => {
@@ -411,8 +417,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       closed: !p.on || q <= 0, check: p.checkValve && (!p.checkSpec || p.checkSpec.mode === 'ideal'),
       cv: p.checkValve ? makeCv(p.checkSpec, area(p.checkSpec?.diameter ?? net.pipes.find((x) => x.from === p.to || x.to === p.to)?.diameter ?? 0.3)) : undefined, T: 0, I: p.inertia * (opt.inertiaFactor ?? 1), w: omegaRated(p),
       a, b: b / m, c: c / (m * m), ta: tq.ta, tb: tq.tb / m, tc: tq.tc / (m * m),
+      ...(p.fourQuadrant ? { fq: fourQuadrant(p) } : {}),
     };
-    e.T = e.ta * e.alpha ** 2 + e.tb * e.alpha * e.Q + e.tc * e.Q * e.Q;
+    e.T = pTorque(e, e.alpha, e.Q);
     if (e.cv && e.closed) e.cv.state = 'closed';
     elements.push(e);
   }
@@ -652,7 +659,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     if (e.closed) return Q; // residual Q = 0
     if (e.kind === 'valve') return (e.kq + e.open * e.open * cvLoss(e)) * Q * Math.abs(Q) - e.open * e.open * (Hi - Hj);
     if (e.kind === 'rigid') return (e.inert * (Q - e.Qold)) / dt + rigidR(e, Q) * Q * Math.abs(Q) - (Hi - Hj);
-    return Hj - Hi - pumpHeadAt(e.curve, Q / e.m, alpha) + cvLoss(e) * Q * Math.abs(Q);
+    return Hj - Hi - pHead(e, Q, alpha) + cvLoss(e) * Q * Math.abs(Q);
   };
 
 
@@ -663,6 +670,21 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       if (e.kind !== 'pump') return 0;
       if (!e.tripped) return e.on ? e.alphaSet : 0;
       const k = dt / (2 * e.I * e.w);
+      if (e.fq) {
+        // speed from the implicit torque balance α − α₀ + k (T(α) + T₀) = 0, by Newton with bisection safeguard
+        const f = (a: number) => a - e.alpha + k * (pTorque(e, a, Q) + e.T);
+        let lo = -3, hi = Math.max(1.5, e.alpha + 0.5), a = e.alpha;
+        for (let it = 0; it < 60; it++) {
+          const fa = f(a);
+          if (Math.abs(fa) < 1e-12) break;
+          if (fa > 0) hi = a; else lo = a;
+          const d = (f(a + 1e-7) - fa) / 1e-7;
+          let an = d > 0 ? a - fa / d : 0.5 * (lo + hi);
+          if (!(an > lo && an < hi)) an = 0.5 * (lo + hi);
+          a = an;
+        }
+        return a;
+      }
       const A = k * e.ta, B = 1 + k * e.tb * Q, C = k * e.tc * Q * Q - e.alpha + k * e.T;
       let al = Math.abs(A) < 1e-14 ? -C / B : (-B + Math.sqrt(Math.max(B * B - 4 * A * C, 0))) / (2 * A);
       if (!Number.isFinite(al) || al < 0) al = 0;
@@ -682,7 +704,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       const Hj = headAt(e.j, Q);
       if (e.kind === 'valve') return (e.kq + e.open * e.open * cvLoss(e)) * Q * Math.abs(Q) - e.open * e.open * (Hi - Hj);
       if (e.kind === 'rigid') return (e.inert * (Q - e.Qold)) / dt + rigidR(e, Q) * Q * Math.abs(Q) - (Hi - Hj);
-      return Hj - Hi - pumpHeadAt(e.curve, Q / e.m, alphaOf(Q)) + cvLoss(e) * Q * Math.abs(Q);
+      return Hj - Hi - pHead(e, Q, alphaOf(Q)) + cvLoss(e) * Q * Math.abs(Q);
     };
     const hasCheck = e.check;
     if (hasCheck && res(0) >= 0) return finish(0, true); // non-return valve shut: flow would reverse
@@ -756,7 +778,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         speedVars.forEach((e, k) => {
           const a = v[free.length + els.length + k];
           const q = v[free.length + els.indexOf(e)];
-          const T = e.ta * a * a + e.tb * a * q + e.tc * q * q;
+          const T = pTorque(e, a, q);
           r[free.length + els.length + k] = a - e.alpha + (dt * (T + e.T)) / (2 * e.I * e.w);
         });
         return r;
@@ -778,7 +800,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         for (let ls = 0; ls < 12; ls++) {
           const xn = x.map((v, k) => v + lam * dxv[k]);
           free.forEach((i, k) => (xn[k] = Math.max(xn[k], vapourH(i) + 1e-13)));
-          speedVars.forEach((_, k) => (xn[free.length + els.length + k] = Math.max(xn[free.length + els.length + k], 0)));
+          speedVars.forEach((e, k) => (xn[free.length + els.length + k] = Math.max(xn[free.length + els.length + k], minAlpha(e))));
           const rn = resid(xn);
           if (Math.max(...rn.map(Math.abs)) < norm || ls === 11) {
             for (let k = 0; k < nv; k++) x[k] = xn[k];
@@ -807,7 +829,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
           });
           speedVars.forEach((e, k) => {
             const a2 = q[els.length + k], qq = q[els.indexOf(e)];
-            r.push(a2 - e.alpha + (dt * (e.ta * a2 * a2 + e.tb * a2 * qq + e.tc * qq * qq + e.T)) / (2 * e.I * e.w));
+            r.push(a2 - e.alpha + (dt * (pTorque(e, a2, qq) + e.T)) / (2 * e.I * e.w));
           });
           return { r, hv };
         };
@@ -828,7 +850,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
           let lam = 1, accepted = false;
           for (let ls = 0; ls < 30; ls++) {
             const qn = q.map((v, k) => v + lam * d[k]);
-            speedVars.forEach((_, k) => (qn[els.length + k] = Math.max(qn[els.length + k], 0)));
+            speedVars.forEach((e, k) => (qn[els.length + k] = Math.max(qn[els.length + k], minAlpha(e))));
             const rn = residQ(qn);
             if (Math.max(...rn.r.map(Math.abs)) < norm) { q.splice(0, ne, ...qn); cur = rn; accepted = true; break; }
             lam /= 2;
@@ -853,7 +875,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         } else if (e.closed) {
           const sv = e.kind === 'pump' && e.tripped ? speedVars.indexOf(e) : -1;
           const alpha = e.kind === 'pump' ? (sv >= 0 ? x[free.length + els.length + sv] : e.on ? e.alphaSet : 0) : 0;
-          const lift = e.kind === 'pump' ? pumpHeadAt(e.curve, 0, alpha) : 0;
+          const lift = e.kind === 'pump' ? pHead(e, 0, alpha) : 0;
           if (Hi + lift > Hj + 1e-6 && (e.kind === 'valve' ? e.open > 0 : alpha > 0.01)) {
             e.closed = false;
             changed = true;
@@ -1147,7 +1169,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       const V = e.Q / (cv.A * (e.kind === 'pump' ? e.m : 1));
       if (cv.state === 'closed') {
         const alpha = e.kind === 'pump' ? e.alpha : 0;
-        const lift = e.kind === 'pump' ? pumpHeadAt(e.curve, 0, alpha) : 0;
+        const lift = e.kind === 'pump' ? pHead(e, 0, alpha) : 0;
         const can = e.kind === 'pump' ? e.on && alpha > 0.01 : e.open > 0;
         if (can && Hn[e.i] + lift - Hn[e.j] > (cv.spec.openHead ?? 1e-3)) {
           cv.state = 'open';
@@ -1184,7 +1206,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     elements.forEach((e) => {
       if (e.kind === 'rigid') e.Qold = e.Q;
       if (e.kind === 'pump') {
-        e.T = e.ta * e.alpha ** 2 + e.tb * e.alpha * e.Q + e.tc * e.Q * e.Q;
+        e.T = pTorque(e, e.alpha, e.Q);
         if (e.Q < -1e-6) e.ids.forEach((id) => (pumpOut[id].reverseFlow = true));
       }
     });
@@ -1256,6 +1278,12 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   airv.forEach((a, i) => a && (airOut[nodes[i].id].maxAir = a.maxAir));
   outlets.forEach((ou) => ou && Object.assign(outletOut[nodes[ou.node].id], { openedAt: ou.tOpen >= 0 && ou.tOpen <= st.duration ? ou.tOpen : -1, maxFlow: ou.maxQ, volume: ou.vol }));
   Object.entries(pumpOut).forEach(([id, o]) => {
+    const pp = net.pumps.find((x) => x.id === id);
+    if (pp?.fourQuadrant) {
+      const minS = Math.min(...o.speed);
+      if (minS < -0.01) warnings.push(`Pump ${id} turned backwards (lowest speed ${(minS * 100).toFixed(0)} % of rated${pp.fourQuadrant === 'generic' ? ', generic four-quadrant characteristic: use the manufacturer\'s Suter data for design' : ''}). Check the motor and coupling for reverse rotation.`);
+      return;
+    }
     if (!o.reverseFlow) return;
     if (cvOut[id]) warnings.push(`Pump ${id} ran in reverse until its check valve closed. Results with reverse flow through a pump need full four-quadrant pump data.`);
     else warnings.push(`Pump ${id} ran with reverse flow (no non-return valve). Results after flow reversal need full four-quadrant pump data.`);

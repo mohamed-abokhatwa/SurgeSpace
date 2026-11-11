@@ -181,6 +181,90 @@ export interface NetNode {
   tank?: OpenTank;
   sav?: SurgeAnticipationValve;
   outlet?: Outlet;
+  /** Storage tank with a varying level in extended-period runs (kind 'reservoir'; `elev` is the tank bottom).
+   *  In a surge run the tank holds the level it has at the chosen time. */
+  storage?: StorageTank;
+  /** Pattern id: multiplies a junction's demand, or a fixed-level source's head, in extended-period runs. */
+  pattern?: string;
+  /** Initial water quality (mg/L for a chemical, hours for age, % for trace). Sources keep it. */
+  quality?: number;
+  /** Booster station: water leaving the node has at least this concentration (mg/L). */
+  booster?: number;
+  /** Concentration of water entering the network here (sources and junctions with negative demand), mg/L. */
+  sourceConc?: number;
+  /** Pattern applied to `sourceConc`. */
+  sourcePattern?: string;
+}
+
+/** Storage tank (levels are measured above the tank bottom, the node elevation). */
+export interface StorageTank {
+  initLevel: number;
+  minLevel: number;
+  maxLevel: number;
+  /** Internal diameter of a cylindrical tank, m. */
+  diameter: number;
+  /** Volume at the minimum level, m³ (default: cylinder). */
+  minVolume?: number;
+  /** Volume curve [level m, volume m³] for non-cylindrical tanks. */
+  volumeCurve?: [number, number][];
+}
+
+/** Time pattern: factors applied over consecutive pattern steps (repeats). */
+export interface TimePattern { id: string; factors: number[] }
+
+/** Simple control: change a link when a time is reached or a tank level / node pressure crosses a value. */
+export interface SimpleControl {
+  link: string;
+  /** New status (pumps: open = running). */
+  status?: 'open' | 'closed';
+  /** New setting (control valves: set point in m or m³/s; pumps: relative speed). */
+  setting?: number;
+  /** Time-based: clock time since the start, s. */
+  at?: number;
+  /** Clock-time control: time of day, s (repeats daily). */
+  clock?: number;
+  /** Level / pressure based. */
+  node?: string;
+  op?: 'above' | 'below';
+  /** Tank level (m above the bottom) or junction pressure head (m). */
+  value?: number;
+}
+
+export type QualityMode = 'none' | 'age' | 'trace' | 'chemical';
+
+/** Extended-period simulation settings. */
+export interface EPSSettings {
+  /** Total duration, s (e.g. 86 400 for a day). */
+  duration: number;
+  /** Hydraulic time step, s (default 3600). */
+  hydStep: number;
+  /** Pattern time step, s (default = hydraulic step). */
+  patternStep?: number;
+  /** Pattern start offset, s. */
+  patternStart?: number;
+  /** Report step, s (default = hydraulic step). */
+  reportStep?: number;
+  /** Clock time at the start, s after midnight. */
+  startClock?: number;
+  /** Pattern used by junctions without their own (EPANET default "1"). */
+  defaultPattern?: string;
+  quality: QualityMode;
+  /** Quality step, s (default 300). */
+  qualStep?: number;
+  /** Trace source node. */
+  traceNode?: string;
+  /** Chemical name and units shown in results (default Chlorine, mg/L). */
+  chemical?: string;
+  /** Global bulk reaction coefficient, 1/day (negative = decay). */
+  bulk?: number;
+  /** Global wall reaction coefficient, m/day (negative = decay). */
+  wall?: number;
+  /** Bulk coefficient in tanks (default the global bulk). */
+  tankBulk?: number;
+  /** Molecular diffusivity of the chemical, m²/s (default chlorine 1.208e-9). */
+  diffusivity?: number;
+  /** Quality tolerance: water parcels closer than this in quality are merged (default 0.01, as EPANET). */
+  tolerance?: number;
 }
 
 export interface Pipe {
@@ -208,6 +292,9 @@ export interface Pipe {
   label?: string;
   /** Check valve at the start of the pipe (flow only from `from` to `to`). */
   checkValve?: CheckValveSpec;
+  /** Water quality: bulk (1/day) and wall (m/day) reaction coefficients for this pipe (default the global ones). */
+  bulkCoeff?: number;
+  wallCoeff?: number;
 }
 
 /** How a check (non-return) valve closes. 'ideal' shuts the instant flow reverses, so it never slams.
@@ -282,6 +369,12 @@ export interface Pump {
   on: boolean;
   /** Constant-power pump (EPANET POWER), kW. The head curve is then H = P / (ρ g Q). */
   power?: number;
+  /** Four-quadrant behaviour in the surge run: reverse flow and reverse rotation (turbining) after a trip,
+   *  for pumps without a non-return valve or with a slow one. 'generic' derives the four quadrants from the pump
+   *  curve; 'suter' uses the manufacturer's or a published Suter characteristic. */
+  fourQuadrant?: 'generic' | 'suter';
+  /** Suter characteristic: θ in degrees (0–360), WH = h/(α²+v²), WB = β/(α²+v²), normalised on the rated point. */
+  suter?: { theta: number[]; wh: number[]; wb: number[] };
 }
 
 export interface Valve {
@@ -387,6 +480,9 @@ export interface Settings {
   maxPressure?: number;
   /** Number of animation frames kept (default 600). */
   frames?: number;
+  /** Calculation engine for the surge run: 'wave' (method of characteristics with column separation, default) or
+   *  'rigid' (rigid water columns: slow events, mass oscillation, long runs). */
+  engine?: 'wave' | 'rigid';
 }
 
 /** Details printed on the report's title page. */
@@ -425,6 +521,10 @@ export interface Network {
   profiles?: { name: string; path: string[] }[];
   /** Background picture under the drawing (site plan, aerial photo, scanned drawing), placed by its corners. */
   background?: BackgroundImage;
+  /** Extended-period simulation: patterns, controls and settings (daily operation, tank levels, water quality). */
+  patterns?: TimePattern[];
+  controls?: SimpleControl[];
+  eps?: EPSSettings;
 }
 
 export interface BackgroundImage {

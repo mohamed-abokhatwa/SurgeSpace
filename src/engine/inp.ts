@@ -2,7 +2,20 @@
 // get sensible defaults the user reviews afterwards.
 import { valveArea } from './devices';
 import { estimateInertia } from './hydraulics';
-import { defaultSettings, type Network, type NetNode, type Pipe, type Pump, type Valve } from './types';
+import { defaultSettings, type EPSSettings, type Network, type NetNode, type Pipe, type Pump, type SimpleControl, type TimePattern, type Valve } from './types';
+
+/** EPANET time text ("24:00", "1:30:00", "0:05", "6", "5 MIN", "12 AM") → seconds. */
+export function inpTime(parts: string[]): number {
+  const t = parts[0] ?? '0';
+  const u = (parts[1] ?? '').toUpperCase();
+  if (u === 'AM' || u === 'PM') { const [h, m = '0'] = t.split(':'); const hh = (Number(h) % 12) + (u === 'PM' ? 12 : 0); return hh * 3600 + Number(m) * 60; }
+  if (t.includes(':')) { const a = t.split(':').map(Number); return a[0] * 3600 + (a[1] ?? 0) * 60 + (a[2] ?? 0); }
+  const x = Number(t);
+  if (u.startsWith('SEC')) return x;
+  if (u.startsWith('MIN')) return x * 60;
+  if (u.startsWith('DAY')) return x * 86400;
+  return x * 3600;
+}
 
 const FLOW_TO_SI: Record<string, number> = {
   CFS: 0.0283168466, GPM: 6.30901964e-5, MGD: 0.0438126364, IMGD: 0.0526167, AFD: 0.0142764,
@@ -51,19 +64,33 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
 
   const nodes: NetNode[] = [];
   for (const r of sec('JUNCTIONS')) {
-    nodes.push({ id: r[0], kind: 'junction', x: 0, y: 0, elev: Number(r[1]) * lf, demand: (Number(r[2] ?? 0) || 0) * qf });
+    nodes.push({ id: r[0], kind: 'junction', x: 0, y: 0, elev: Number(r[1]) * lf, demand: (Number(r[2] ?? 0) || 0) * qf, ...(r[3] ? { pattern: r[3] } : {}) });
   }
   for (const r of sec('RESERVOIRS')) {
-    nodes.push({ id: r[0], kind: 'reservoir', x: 0, y: 0, elev: Number(r[1]) * lf, head: Number(r[1]) * lf });
+    nodes.push({ id: r[0], kind: 'reservoir', x: 0, y: 0, elev: Number(r[1]) * lf, head: Number(r[1]) * lf, ...(r[2] ? { pattern: r[2] } : {}) });
   }
   for (const r of sec('TANKS')) {
     const elev = Number(r[1]) * lf;
-    nodes.push({ id: r[0], kind: 'reservoir', x: 0, y: 0, elev, head: elev + Number(r[2]) * lf });
+    const vc = r[7] && r[7] !== '*' ? curves.get(r[7]) : undefined;
+    nodes.push({
+      id: r[0], kind: 'reservoir', x: 0, y: 0, elev, head: elev + Number(r[2]) * lf,
+      storage: {
+        initLevel: Number(r[2]) * lf, minLevel: Number(r[3]) * lf, maxLevel: Number(r[4]) * lf, diameter: Number(r[5]) * lf,
+        ...(Number(r[6]) > 0 ? { minVolume: Number(r[6]) * lf ** 3 } : {}),
+        // volume curves were read with flow units on x; convert back: level (length), volume (length³)
+        ...(vc ? { volumeCurve: vc.map(([x, y]) => [(x / qf) * lf, (y / lf) * lf ** 3] as [number, number]) } : {}),
+      },
+    });
   }
-  if (sec('TANKS').length) notes.push('Tanks are held at their initial level during the transient (seconds to minutes).');
+  if (sec('TANKS').length) notes.push('Tanks vary in level in the extended-period run and hold their level during a surge run.');
+  const multiDemand = new Set<string>();
   for (const r of sec('DEMANDS')) {
     const n = nodes.find((x) => x.id === r[0]);
-    if (n && n.kind === 'junction') n.demand = Number(r[1]) * qf;
+    if (!n || n.kind !== 'junction') continue;
+    if (multiDemand.has(n.id)) { n.demand = (n.demand ?? 0) + Number(r[1]) * qf; notes.push(`Junction ${n.id} has several demand categories; they were added together.`); continue; }
+    multiDemand.add(n.id);
+    n.demand = Number(r[1]) * qf;
+    if (r[2]) n.pattern = r[2]; else delete n.pattern;
   }
   const missing = nodes.filter((n) => !coords.has(n.id)).length;
   nodes.forEach((n, i) => {
@@ -146,6 +173,70 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
     const pi = pipes.find((x) => x.id === id);
     if (pi && st === 'CLOSED') pi.closed = true;
   }
+  // ── extended period ──
+  const patMap = new Map<string, number[]>();
+  for (const r of sec('PATTERNS')) patMap.set(r[0], [...(patMap.get(r[0]) ?? []), ...r.slice(1).map(Number)]);
+  const patterns: TimePattern[] = [...patMap].map(([id, factors]) => ({ id, factors }));
+  const times = new Map(sec('TIMES').map((r) => {
+    const words: string[] = []; let i = 0;
+    while (i < r.length && !/^[\d.:]+$/.test(r[i])) words.push(r[i++].toUpperCase());
+    return [words.join(' '), r.slice(i)] as [string, string[]];
+  }));
+  const tm = (k: string, d: number) => (times.has(k) ? inpTime(times.get(k)!) : d);
+  const hydStep = tm('HYDRAULIC TIMESTEP', 3600);
+  const qualOpt = (opts.get('QUALITY') ?? 'NONE').split(' ');
+  const qmode = qualOpt[0];
+  const eps: EPSSettings = {
+    duration: tm('DURATION', 0), hydStep, patternStep: tm('PATTERN TIMESTEP', hydStep), patternStart: tm('PATTERN START', 0),
+    reportStep: tm('REPORT TIMESTEP', hydStep), startClock: times.has('START CLOCKTIME') ? inpTime(times.get('START CLOCKTIME')!) : 0,
+    qualStep: Math.min(tm('QUALITY TIMESTEP', 300), hydStep),
+    quality: qmode === 'AGE' ? 'age' : qmode === 'TRACE' ? 'trace' : qmode === 'NONE' || qmode === '' ? 'none' : 'chemical',
+    ...(qmode === 'TRACE' ? { traceNode: sec('OPTIONS').find((r) => r[0].toUpperCase() === 'QUALITY')?.[2] } : {}),
+    ...(qmode !== 'AGE' && qmode !== 'TRACE' && qmode !== 'NONE' ? { chemical: sec('OPTIONS').find((r) => r[0].toUpperCase() === 'QUALITY')?.[1] ?? 'Chemical' } : {}),
+  };
+  const defPat = opts.get('PATTERN') ? sec('OPTIONS').find((r) => r[0].toUpperCase() === 'PATTERN')?.[1] : patMap.has('1') ? '1' : undefined;
+  if (defPat && patMap.has(defPat)) eps.defaultPattern = defPat;
+  if (opts.has('TOLERANCE')) eps.tolerance = Number(opts.get('TOLERANCE'));
+  if (opts.has('DIFFUSIVITY')) eps.diffusivity = 1.208e-9 * Number(opts.get('DIFFUSIVITY'));
+  for (const r of sec('REACTIONS')) {
+    const k = r.map((x) => x.toUpperCase());
+    if (k[0] === 'GLOBAL' && k[1] === 'BULK') eps.bulk = Number(r[2]);
+    else if (k[0] === 'GLOBAL' && k[1] === 'WALL') eps.wall = Number(r[2]) * lf;
+    else if (k[0] === 'BULK') { const p = pipes.find((x) => x.id === r[1]); if (p) p.bulkCoeff = Number(r[2]); }
+    else if (k[0] === 'WALL') { const p = pipes.find((x) => x.id === r[1]); if (p) p.wallCoeff = Number(r[2]) * lf; }
+    else if (k[0] === 'ORDER' && Number(r[2]) !== 1 && !(k[1] === 'WALL' && Number(r[2]) === 1)) notes.push(`Reaction order ${r[1]} ${r[2]} is not supported; first order is used.`);
+  }
+  for (const r of sec('QUALITY')) { const n = nodes.find((x) => x.id === r[0]); if (n) n.quality = Number(r[1]); }
+  for (const r of sec('SOURCES')) {
+    const n = nodes.find((x) => x.id === r[0]);
+    if (!n) continue;
+    const type = r[1].toUpperCase();
+    if (type === 'SETPOINT' && n.kind === 'junction') n.booster = Number(r[2]);
+    else if (type === 'CONCEN') { n.sourceConc = Number(r[2]); if (r[3]) n.sourcePattern = r[3]; }
+    else notes.push(`Quality source at ${r[0]} (${type}) is not supported; it was ignored.`);
+  }
+  const controls: SimpleControl[] = [];
+  for (const r of sec('CONTROLS')) {
+    const k = r.map((x) => x.toUpperCase());
+    if (k[0] !== 'LINK') continue;
+    const link = r[1], what = k[2];
+    const c: SimpleControl = { link };
+    if (what === 'OPEN' || what === 'CLOSED') c.status = what === 'OPEN' ? 'open' : 'closed';
+    else {
+      const v = Number(r[2]);
+      const valve = valves.find((x) => x.id === link);
+      c.setting = valve?.control ? (valve.control.type === 'FCV' ? v * qf : v * (us ? 0.70307 : 1)) : v;
+    }
+    if (k[3] === 'AT' && k[4] === 'TIME') c.at = inpTime(r.slice(5));
+    else if (k[3] === 'AT' && k[4] === 'CLOCKTIME') c.clock = inpTime(r.slice(5));
+    else if (k[3] === 'IF' && k[4] === 'NODE') {
+      c.node = r[5]; c.op = k[6] === 'ABOVE' ? 'above' : 'below';
+      const nn = nodes.find((x) => x.id === r[5]);
+      c.value = Number(r[7]) * (nn?.storage ? lf : us ? 0.70307 : 1);
+    } else { notes.push(`Control "${r.join(' ')}" was not understood and was skipped.`); continue; }
+    controls.push(c);
+  }
+  if (sec('RULES').length) notes.push('Rule-based controls ([RULES]) are not supported yet; they were skipped.');
   const title = sec('TITLE').map((r) => r.join(' ')).join(' ').trim();
   return {
     network: {
@@ -154,6 +245,9 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
       nodes, pipes, pumps, valves,
       event: pumps.length ? { kind: 'pumpTrip', targets: pumps.filter((p) => p.on).map((p) => p.id), start: 1 } : valves.length ? { kind: 'valveClose', targets: [valves[0].id], start: 1, duration: 5 } : { kind: 'none', targets: [], start: 0 },
       settings: { ...defaultSettings(), friction },
+      ...(patterns.length ? { patterns } : {}),
+      ...(controls.length ? { controls } : {}),
+      ...(eps.duration > 0 || eps.quality !== 'none' || patterns.length || nodes.some((n) => n.storage) ? { eps: { ...eps, duration: eps.duration || 86400 } } : {}),
     },
     notes,
   };
@@ -163,9 +257,11 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
 export function toInp(net: Network): string {
   const L: string[] = [];
   L.push('[TITLE]', net.name, '', '[JUNCTIONS]', ';ID  Elev  Demand');
-  for (const n of net.nodes.filter((x) => x.kind === 'junction')) L.push(`${n.id}  ${n.elev}  ${((n.demand ?? 0) * 1000).toFixed(4)}`);
-  L.push('', '[RESERVOIRS]', ';ID  Head');
-  for (const n of net.nodes.filter((x) => x.kind === 'reservoir')) L.push(`${n.id}  ${n.head ?? n.elev}`);
+  for (const n of net.nodes.filter((x) => x.kind === 'junction')) L.push(`${n.id}  ${n.elev}  ${((n.demand ?? 0) * 1000).toFixed(4)}${n.pattern ? `  ${n.pattern}` : ''}`);
+  L.push('', '[RESERVOIRS]', ';ID  Head  Pattern');
+  for (const n of net.nodes.filter((x) => x.kind === 'reservoir' && !x.storage)) L.push(`${n.id}  ${n.head ?? n.elev}${n.pattern ? `  ${n.pattern}` : ''}`);
+  L.push('', '[TANKS]', ';ID  Elevation  InitLevel  MinLevel  MaxLevel  Diameter  MinVol');
+  for (const n of net.nodes.filter((x) => x.kind === 'reservoir' && x.storage)) { const t = n.storage!; L.push(`${n.id}  ${n.elev}  ${t.initLevel}  ${t.minLevel}  ${t.maxLevel}  ${t.diameter}  ${t.minVolume ?? 0}`); }
   L.push('', '[PIPES]', ';ID  Node1  Node2  Length  Diameter  Roughness  MinorLoss  Status');
   for (const p of net.pipes) L.push(`${p.id}  ${p.from}  ${p.to}  ${p.length}  ${(p.diameter * 1000).toFixed(1)}  ${p.roughness}  ${p.minorLoss ?? 0}  ${p.closed ? 'CLOSED' : p.checkValve ? 'CV' : 'OPEN'}`);
   L.push('', '[PUMPS]');
@@ -183,7 +279,31 @@ export function toInp(net: Network): string {
   for (const p of net.pumps) for (const [q, h] of p.curve) L.push(`C_${p.id}  ${(q * 1000).toFixed(3)}  ${h}`);
   L.push('', '[STATUS]');
   for (const p of net.pumps.filter((x) => !x.on)) L.push(`${p.id}  CLOSED`);
-  L.push('', '[OPTIONS]', 'Units  LPS', `Headloss  ${net.settings.friction === 'DW' ? 'D-W' : 'H-W'}`, '', '[COORDINATES]');
+  if (net.patterns?.length) { L.push('', '[PATTERNS]'); for (const p of net.patterns) for (let i = 0; i < p.factors.length; i += 6) L.push(`${p.id}  ${p.factors.slice(i, i + 6).join('  ')}`); }
+  if (net.controls?.length) {
+    L.push('', '[CONTROLS]');
+    for (const c of net.controls) {
+      const v = net.valves.find((x) => x.id === c.link);
+      const act = c.status ? c.status.toUpperCase() : String(v?.control?.type === 'FCV' ? (c.setting ?? 0) * 1000 : c.setting);
+      const cond = c.at !== undefined ? `AT TIME ${c.at / 3600}` : c.clock !== undefined ? `AT CLOCKTIME ${Math.floor(c.clock / 3600)}:${String(Math.round((c.clock % 3600) / 60)).padStart(2, '0')}` : `IF NODE ${c.node} ${c.op?.toUpperCase()} ${c.value}`;
+      L.push(`LINK ${c.link} ${act} ${cond}`);
+    }
+  }
+  const e = net.eps;
+  const hms = (t: number) => `${Math.floor(t / 3600)}:${String(Math.round((t % 3600) / 60)).padStart(2, '0')}`;
+  if (e) {
+    L.push('', '[TIMES]', `Duration  ${hms(e.duration)}`, `Hydraulic Timestep  ${hms(e.hydStep)}`, `Pattern Timestep  ${hms(e.patternStep ?? e.hydStep)}`, `Report Timestep  ${hms(e.reportStep ?? e.hydStep)}`, `Quality Timestep  ${hms(e.qualStep ?? 300)}`);
+    if (e.quality === 'chemical') {
+      L.push('', '[REACTIONS]', `Global Bulk  ${e.bulk ?? 0}`, `Global Wall  ${e.wall ?? 0}`);
+      for (const p of net.pipes) { if (p.bulkCoeff !== undefined) L.push(`Bulk  ${p.id}  ${p.bulkCoeff}`); if (p.wallCoeff !== undefined) L.push(`Wall  ${p.id}  ${p.wallCoeff}`); }
+      L.push('', '[QUALITY]');
+      for (const n of net.nodes) if (n.quality) L.push(`${n.id}  ${n.quality}`);
+      const src = net.nodes.filter((n) => n.sourceConc !== undefined || n.booster !== undefined);
+      if (src.length) { L.push('', '[SOURCES]'); for (const n of src) L.push(n.booster !== undefined ? `${n.id}  SETPOINT  ${n.booster}` : `${n.id}  CONCEN  ${n.sourceConc}${n.sourcePattern ? `  ${n.sourcePattern}` : ''}`); }
+    }
+  }
+  const qopt = !e || e.quality === 'none' ? 'None' : e.quality === 'age' ? 'Age' : e.quality === 'trace' ? `Trace ${e.traceNode ?? ''}` : `${e.chemical ?? 'Chlorine'} mg/L`;
+  L.push('', '[OPTIONS]', 'Units  LPS', `Headloss  ${net.settings.friction === 'DW' ? 'D-W' : 'H-W'}`, `Quality  ${qopt}`, ...(e?.defaultPattern ? [`Pattern  ${e.defaultPattern}`] : []), '', '[COORDINATES]');
   for (const n of net.nodes) L.push(`${n.id}  ${n.x}  ${n.y}`);
   L.push('', '[END]');
   return L.join('\n');
