@@ -5,7 +5,7 @@
 //   (needs webkit2gtk-driver and `cargo install tauri-driver`)
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const APP = new URL('../src-tauri/target/release/surgespace', import.meta.url).pathname;
 if (!existsSync(APP)) { console.log(`Build the app first: npx tauri build --no-bundle (${APP} not found)`); process.exit(1); }
@@ -14,12 +14,22 @@ const t = (name, ok, info = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // a local OpenAI-compatible AI server: first turn calls get_model, second turn streams a reply
-const seen = [];
+const seen = [], seenDoc = [];
 const ai = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const j = body ? JSON.parse(body) : {};
+    // model from documents: one page, answered (not streamed) with record_evidence
+    if ((j.tools ?? []).some((x) => x.function?.name === 'record_evidence')) {
+      const content = j.messages?.[1]?.content ?? j.messages?.[0]?.content ?? [];
+      seenDoc.push({ images: Array.isArray(content) ? content.filter((c) => c.type === 'image_url').length : 0, text: JSON.stringify(content).includes('1+950') });
+      const F = (o) => Object.entries(o).map(([name, value]) => ({ name, value: String(value) }));
+      const args = { summary: 'Long section', items: [[0, 100], [2600, 140], [5000, 130]].map(([c, z]) => ({ type: 'profilePoint', fields: F({ chainage_m: c, level_m: z }), box: [0.1, 0.7, 0.2, 0.75], confidence: 0.9 })) };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'r1', type: 'function', function: { name: 'record_evidence', arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
+      return;
+    }
     seen.push({ url: req.url, ua: req.headers['user-agent'] ?? '', accept: req.headers.accept, stream: j.stream, tools: (j.tools ?? []).length, msgs: (j.messages ?? []).length });
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
     const send = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
@@ -62,6 +72,7 @@ try {
   const el = async (css) => (await wd('POST', `${S}/element`, { using: 'css selector', value: css }))['element-6066-11e4-a52e-4f735466cecf'];
 
   t('desktop app starts inside Tauri', await wait(() => js('return !!window.__TAURI_INTERNALS__ && !!document.querySelector(".statusbar")')));
+  t('launch screen ran under the content security policy and gave way to the app', await wait(() => js('return !!window.__boot && !document.getElementById("boot")'), 20000));
   await js(`const b=document.querySelector('.start-go'); b && b.click(); return true;`);
   const ran = await wait(() => js('return (document.querySelector(".statusbar")||{}).textContent||""').then((s) => s.includes('Run OK') && s), 90000);
   t('the example runs in the engine worker under the app’s content security policy', !!ran, String(ran).slice(0, 80));
@@ -90,6 +101,18 @@ try {
   t('copilot reaches the AI server through the native HTTP client (not the web view)', seen.length >= 2 && seen[0].stream === true && seen[0].tools > 10 && !/AppleWebKit/.test(seen[0].ua), JSON.stringify(seen[0] ?? {}));
   t('tool call runs (get_model) and the reply uses its result', !!done && /has \d+ pipes/.test(done), String(done).slice(0, 120));
   t('the reply streams in as it is written', !!partial, partial ? `seen part-way: “${partial.slice(0, 60)}”` : 'no partial text observed');
+  // model from documents: a PDF is rendered by pdf.js (its worker under the CSP) and read by the AI server
+  const pdf = readFileSync(new URL('./fixtures/long-section.pdf', import.meta.url)).toString('base64');
+  await js(`document.querySelector('.menu-btn') && [...document.querySelectorAll('.menu-btn')].find((b) => b.textContent.trim() === 'AI').click(); return true;`);
+  await sleep(300);
+  await js(`[...document.querySelectorAll('.menu-item')].find((b) => b.textContent.includes('Model from documents')).click(); return true;`);
+  await wait(() => js('return !!document.querySelector(".intake .drop input")'), 20000);
+  await js(`const b = Uint8Array.from(atob(arguments[0]), (c) => c.charCodeAt(0)); const dt = new DataTransfer(); dt.items.add(new File([b], 'long-section.pdf', { type: 'application/pdf' })); const i = document.querySelector('.intake .drop input'); i.files = dt.files; i.dispatchEvent(new Event('change', { bubbles: true })); return true;`, [pdf]);
+  const card = await wait(() => js('const c = document.querySelector(".doc-card"); return c && c.querySelector("img") ? c.textContent : false'), 30000);
+  t('PDF rendered in the desktop app (pdf.js worker under the CSP)', !!card && String(card).includes('1 page'), String(card).slice(0, 60));
+  await js(`[...document.querySelectorAll('.intake button')].find((b) => b.textContent.includes('Read with AI')).click(); return true;`);
+  const boxes = await wait(() => js('return document.querySelectorAll(".page-view .ev-box").length || false'), 30000);
+  t('page read by the AI through the native HTTP client, items shown on the page', boxes === 3 && seenDoc.length === 1 && seenDoc[0].images === 5 && seenDoc[0].text, JSON.stringify(seenDoc));
   const errs = await js('return (window.__errs||[]).length');
   t('no script errors', errs === 0);
 } catch (e) {

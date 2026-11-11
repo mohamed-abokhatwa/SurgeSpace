@@ -66,6 +66,25 @@ Open: ArcGIS Pro and AutoCAD plug-ins need testing inside those programs; shared
 an Arabic-speaking engineer should review the Arabic terms; the copilot has been tested against simulated providers
 and a local server, not live accounts; the v3 Store release has not been made (`v3-program` not yet merged or tagged).
 
+## 1c. Big-app finish and AI from documents (v3-program, 11 Nov 2026)
+- **Start-up and workspace**: launch screen in `index.html` (inline, kept at least 0.7 s, `src/app/boot.ts`), start page
+  (`src/ui/StartPage.tsx`; recent projects in IndexedDB via `src/app/recent.ts`), tour (`src/ui/Tour.tsx`), command
+  palette Ctrl+K (`src/ui/Palette.tsx`), run screen fed by progress from the engine workers (`src/ui/RunScreen.tsx`).
+- **Visuals**: results sweep, vapour bubbles, drawing–profile probe (`Canvas.tsx`, `ProfileView.tsx`), waterfall
+  (`Waterfall.tsx`), video export (File menu, MediaRecorder), Play the day in Daily operation.
+- **Model from documents**: `src/app/intake.ts` (reading files: pdf.js renders pages and their text layer, images,
+  Excel/CSV, DXF layers/blocks/texts; header rules for spreadsheets; evidence and gaps; basis with trace; build via the
+  wizard; checks against the documents), `src/ai/intakeAI.ts` (one tool, `record_evidence`, per page: whole page plus
+  four quadrants and the exact PDF text), `src/ui/IntakeWorkspace.tsx` (Documents → Review → Missing data → Build and
+  check → Protection). The basis is stored as `Network.sources` and printed in the report (3.6).
+- **Air valve plan**: `src/app/airValvePlan.ts` (AWWA M51 locations, sizes for draining and filling, apply by
+  splitting pipes, surge test with anti-slam conversion), worker job `avPlan`, copilot command `plan_air_valves`.
+- Tests: `tests/intake.test.ts`, `tests/avplan.test.ts`, `tests/ui-intake.mjs` (interface end to end with a stand-in
+  AI server; fixture `tests/fixtures/long-section.pdf` from `make-long-section.py`), desktop end to end extended
+  (launch screen under the CSP, PDF through pdf.js in the desktop app, page read by the AI through the native client).
+- Next ideas: multi-line networks from plan drawings (DXF geometry plus symbols), pump curves read from graphs,
+  vessel optimisation inside the documents workflow.
+
 ## 2. Features
 
 **Model and data**
@@ -117,8 +136,8 @@ and a local server, not live accounts; the v3 Store release has not been made (`
 - Ed25519-signed keys; the app checks in daily and a key runs 60 days ahead. Evaluations stored by one-way hash; the
   first "more time" request gets +7 days automatically. Plans: Free (examples + own models ≤ 25 pipes), evaluation
   (14 days), licensed (exports, sizing, uncertainty, report).
-- App side: `src/license/` (`publicKey.ts` holds the public key and `LICENCE_API`). A **demo build** for previews is made by
-  temporarily blanking `PUBLIC_KEY`, building, then restoring it (never commit the blank key).
+- App side: `src/license/` (`publicKey.ts` holds the public key and `LICENCE_API`). A **demo build** for previews: `npm run build:demo`
+  (sets `VITE_LICENCE_DEMO=1`, output `dist-demo`); never blank or commit a blank `PUBLIC_KEY`.
 - Secrets (`licence-server/.dev.vars`, private key) are never committed.
 
 ## 4. Desktop and stores

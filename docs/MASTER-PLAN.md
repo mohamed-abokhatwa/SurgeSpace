@@ -37,6 +37,13 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [x] S2.4 Read my documents: attach PDF or image; values extracted into the model for confirmation
 - [x] S2.5 Voice input, conversation saved with the project, streaming replies (Anthropic, OpenAI-compatible, Gemini; falls back to whole answers)
 
+### Phase 6 — Big-app finish and AI from documents (agreed 11 Nov 2026: polish, then visuals, then the documents workflow)
+- [x] S6.1 Launch screen, start page (recent projects with pictures, last session, examples), one-minute tour, command palette (Ctrl+K), saved indicator, staged run screen with the envelope growing live
+- [x] S6.2 Visuals: results sweep in after a run, vapour cavities on the drawing, drawing and long section linked by a probe, waterfall (3D) view, surge animation exported as a video, daily operation played on the drawing with tank levels
+- [x] S6.3 Model from documents: drawings (PDF, images), spreadsheets and DXF read into an evidence register (AI with page boxes and the PDF text layer; spreadsheets by their headers without AI), review against the page, missing data asked for, model built from accepted evidence with a traced basis (report section 3.6), checks against the documents
+- [x] S6.4 Air valve plan (AWWA M51 locations; sizes for draining and filling) tested in surge runs, anti-slam where valves slam; copilot command plan_air_valves and task "Plan the air valves"
+- [ ] S6.5 Next: multi-line networks from plan drawings (DXF geometry plus symbols into a network, not only a single main); vessel optimisation inside the documents workflow; reading pump curves drawn as graphs
+
 ### Phase 1 — Engines to professional grade
 - [x] Engine choice: wave engine (method of characteristics, column separation) and rigid-column engine (mass oscillation, slow events) — checked against Jaeger's surge-tank formula and against each other
 - [x] S1.1 Four-quadrant pumps: generic characteristic from the pump curve, or the manufacturer's Suter data; reverse flow and reverse rotation
@@ -98,6 +105,14 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
   characteristics and governor, independent ODE checks of the differential tank and motor start, the real desktop
   app driven end to end (WebDriver) including the copilot over the native HTTP client, demo builds by setting
   (`npm run build:demo`), version 3.0.0 and release notes (`docs/RELEASE-NOTES-3.0.md`).
+
+- **Big-app finish and AI from documents (11 Nov 2026):** launch screen and start page (`index.html`,
+  `src/ui/StartPage.tsx`, `src/app/recent.ts`), run screen with progress from the engine workers
+  (`src/ui/RunScreen.tsx`), tour and palette (`src/ui/Tour.tsx`, `src/ui/Palette.tsx`); visuals in `Canvas.tsx`,
+  `ProfileView.tsx`, `Waterfall.tsx`, video export and Play the day; model from documents (`src/app/intake.ts`,
+  `src/ai/intakeAI.ts`, `src/ui/IntakeWorkspace.tsx`, pdf.js loaded only when a PDF is opened); air valve plan
+  (`src/app/airValvePlan.ts`, worker job `avPlan`). Tests: `tests/intake.test.ts` (19), `tests/avplan.test.ts` (14),
+  `tests/ui-intake.mjs` (18, interface end to end with a stand-in AI server), smoke test 33, desktop end to end.
 
 ## Working method
 Each slice: one feature with tests and benchmarks, on a branch, with a preview. No Store release until a phase's done criteria are met.

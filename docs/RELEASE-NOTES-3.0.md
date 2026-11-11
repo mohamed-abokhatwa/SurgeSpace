@@ -5,6 +5,12 @@
 SurgeSpace 3.0 adds daily operation and water quality, a second surge engine, an AI copilot that works with your own
 AI account, live plant data, GIS and CAD links, and an Arabic interface.
 
+- Model from documents: drop drawings, long sections, data sheets, spreadsheets or DXF; your AI reads them into
+  items you check against the page, SurgeSpace asks for what is missing, builds the model, checks it against the
+  documents, plans the air valves (AWWA M51 practice) and tests the plan in surge runs.
+- A new start page with recent projects, a staged run screen with the envelope growing live, a one-minute tour, a
+  command palette (Ctrl+K), results that sweep in, vapour cavities on the drawing, a waterfall (3D) view, and the
+  surge animation exported as a video.
 - Daily operation (extended period): storage tanks, demand patterns, pump and valve controls, rule-based controls,
   leakage and pressure-driven demand, water age, source tracing and chlorine — checked against EPANET 2.2.
 - Two surge engines: the wave engine (method of characteristics with column separation) and a rigid-column engine
@@ -36,6 +42,7 @@ AI account, live plant data, GIS and CAD links, and an Arabic interface.
 | Valves | PBV, GPV, TCV | EPANET 2.2 (0.003 m) |
 | Viscoelastic pipes | Kelvin–Voigt creep, implicit in the cavity model | stability and damping tests |
 | Examples | 880 result values held in a baseline | unchanged from 2.x results |
+| Air valve plan | Locations (AWWA M51), sizes for draining (Hazen–Williams) and filling, surge test with anti-slam | orifice capacities against published data; plan on the rising-main example; interface test end to end |
 
 ## Before publishing
 

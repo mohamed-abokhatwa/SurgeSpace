@@ -15,6 +15,11 @@ follows the order of a typical study.
 | Right pane | **Properties** of the selected elements, **Copilot** (AI) |
 | Results dock | Profile, Graphs, Design checks, Data sheets, Cases, Protection sizing, Uncertainty, Daily operation, Live data, Run log |
 
+Start: SurgeSpace opens on the **start page**: new model, wizard, model from documents, open or import, your recent
+projects (with a picture of each), the last session and the examples. File → Start page brings it back; untick
+"Show this page when SurgeSpace starts" to go straight to the workspace. Help → Take the tour gives a one-minute
+tour of the workspace. **Ctrl+K** opens the command palette: every menu command, element and setting by name.
+
 Language: View → Language (English or العربية; the Arabic interface is right to left, with the menus, panels,
 dialogs and report in Arabic). Units: Tools → Units (SI or
 US customary; the model is always stored in SI). Every change can be undone (Ctrl+Z).
@@ -25,6 +30,29 @@ US customary; the model is always stored in SI). Every change can be undone (Ctr
   (chainage, level), give the water levels, pipe size and material, the flow and the pumps or the valve. The wizard
   sets the wave speed from the material, the pump duty from the lift and friction, air valves at high points and a
   run length from the wave period, then (optionally) runs it and sizes an air vessel. Undo removes it.
+- **Model from documents (AI):** start page → Build from drawings with AI, or AI → Model from documents. Five
+  steps:
+  1. *Documents*: drop the drawings (PDF or images), long sections, pump data sheets, spreadsheets (Excel/CSV) and
+     DXF. Spreadsheets with chainage/level, pipe (from, to, length) or pump curve (flow, head) columns are read at
+     once without AI; drawings and other files are read by your AI account (Read with AI). Each PDF page is sent as
+     images plus its exact text, so numbers on vector drawings are read exactly.
+  2. *Review*: every item read (long-section points, reservoirs and tanks, pumps, pipe data, valves, air valves,
+     washouts, design data) is listed with its source — file, page and box on the page, or the cell — and a
+     confidence. Click an item to see its box on the page; accept, edit or reject it. Accept all with confidence
+     ≥ 70 % for a quick pass.
+  3. *Missing data*: what the documents do not give is asked for (critical items first). Answer, use the typical
+     value (then listed as an assumption), or add the data sheet and the AI reads it.
+  4. *Build and check*: the basis of the model is shown with the source of every value (green from a document, blue
+     entered by you, orange assumed). Build the model, then the checks compare it with the documents: flow against
+     the design flow, steady pressure along the line (a high point above the grade line is flagged), pressure class
+     and velocity. Air valves shown on the drawings are placed at their chainage.
+  5. *Protection*: an air valve plan following AWWA M51 practice — high points, decreases in upward slope and
+     increases in downward slope, long runs (600 m spacing), the pump discharge and points above the steady grade
+     line — each sized so the inflow at 35 kPa vacuum passes the gravity draining flow and the outflow at 14 kPa
+     the filling flow. Test the plan in surge runs: before and after (lowest pressure, largest vapour cavity, air
+     valve slams); valves that slam become anti-slam (three-stage). Open the model with the plan; for a pumped main
+     an air vessel is sized at the pump discharge.
+  The documents session stays while the app is open. The basis of the model appears in the report (section 3.6).
 - **Draw:** place a Fixed-Level Source (R), pick Pipe (P) and click from point to point; Shift+click adds bends.
   Click a pipe with a pump, valve or device tool to insert it there.
 - **Import:** File → Import (EPANET .inp with tanks, patterns, controls and rules; spreadsheets of nodes and pipes; a
@@ -53,6 +81,14 @@ US customary; the model is always stored in SI). Every change can be undone (Ctr
 | Protection devices | Air vessel (shape, bladder, dip tube, inlet bypass), air valves (double, three-stage anti-slam, vacuum breaker, release-only, manufacturer curves), surge tank (plain, variable area or differential with riser and ports), feed tank, anticipator valve, relief valve, blow-off, burst disc |
 
 ## 4. Surge analysis
+
+While the analysis runs, the run screen shows its stages (steady state, surge run, design checks) and the pressure
+envelope growing along the main line; Cancel stops it. After the run the results sweep along the pipes; vapour
+cavities show as bubbles on the drawing; moving the mouse over the long section marks the same point on the
+drawing and the other way round. Profile → Waterfall (3D) stacks the pressure along the route over time. File →
+Export surge animation (video) records about 20 seconds of the animation as a WebM film. In Daily operation, Play
+the day colours the drawing hour by hour with the tank levels.
+
 
 1. **Operations** (left pane): pump trip, controlled stop or start, valve closure or opening (linear, by exponent or
    by a stroke curve), turbine load rejection or acceptance. Several operations can run in one case.
@@ -118,7 +154,8 @@ AI → AI accounts: connect your own account (Anthropic, OpenAI, Google, Azure, 
 OpenRouter, Together, or a free model on your computer with Ollama or LM Studio). Keys are encrypted on the device.
 Nothing is sent until you ask. Replies appear as they are written. The copilot works only through SurgeSpace commands, so every change is an undo step
 and every number comes from the engines. One-click tasks: explain the results, review the model, design the
-protection, review daily operation, scope the surge cases, draft the report narrative. Speak instead of typing
+protection, plan the air valves (plan_air_valves: locations, sizes and a surge test), review daily operation,
+scope the surge cases, draft the report narrative. Speak instead of typing
 where the system offers speech recognition.
 
 ## 9. Automation
@@ -135,5 +172,6 @@ Tools → Script console: JavaScript with `await ss.<command>({…})` for every 
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | Ctrl+A, Ctrl+D, Del | Select all, duplicate, delete |
 | Ctrl+F | Find element |
+| Ctrl+K | Command palette |
 | S, H, F | Select, pan, zoom to fit |
 | Space, ← → | Play / pause, step through the animation |
