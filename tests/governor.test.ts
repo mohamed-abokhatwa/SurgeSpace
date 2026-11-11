@@ -28,5 +28,8 @@ t('low-Ns Francis chokes the flow as it speeds up: higher pressure rise than a P
 t('Kaplan passes more flow as it speeds up: lower pressure rise than the Pelton-like runner', maxH(kp) < maxH(pe) - 0.05, `${maxH(kp).toFixed(2)} m vs ${maxH(pe).toFixed(2)} m`);
 const fg = run(withChar('francisLow', true));
 t('characteristic with governor: gates close and the overspeed stays bounded', fg.ts.maxSpeed < 1.8 && fg.ts.maxSpeed > 1.01, `${(fg.ts.maxSpeed * 100).toFixed(1)} %`);
+// the rigid-column engine follows the same runner speed (slow mass oscillation; no pressure waves)
+const rg = run({ ...withChar('francisLow', true), settings: { ...base.settings, engine: 'rigid' } });
+t('rigid-column engine: runner speed in the loop, close to the wave engine', !!rg.r.valves[tv.id].speed && Math.abs(rg.ts.maxSpeed - fg.ts.maxSpeed) < 0.05, `${(rg.ts.maxSpeed * 100).toFixed(1)} % vs ${(fg.ts.maxSpeed * 100).toFixed(1)} %`);
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

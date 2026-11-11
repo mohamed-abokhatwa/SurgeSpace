@@ -98,5 +98,30 @@ const tunnel = (engine: 'wave' | 'rigid'): Network => ({
   }
   t('differential tank: engines agree', Math.abs(mids[0] - mids[1]) / mids[0] < 0.02, `${mids[0].toFixed(2)} m vs ${mids[1].toFixed(2)} m`);
 }
+{
+  // the sparse solve (used above 300 unknowns) gives the same answer as the dense one, and lifts the size limit
+  const net = risingMain(true);
+  net.settings = { ...net.settings, engine: 'rigid' };
+  const st = solveSteady(net);
+  const a = runTransient(net, { steady: st }), b = runTransient(net, { steady: st, sparse: true } as never);
+  let d = 0; for (const k of Object.keys(a.nodeHead)) for (let i = 0; i < a.nodeHead[k].length; i++) d = Math.max(d, Math.abs(a.nodeHead[k][i] - b.nodeHead[k][i]));
+  t('sparse and dense Newton solves agree', d < 1e-4, `${d.toExponential(1)} m`);
+  // a 760-pipe grid (about 1,500 unknowns) runs
+  const n = 20, nodes: Network['nodes'] = [{ id: 'R', kind: 'reservoir', x: -100, y: 0, elev: 0, head: 80 }], pipes: Network['pipes'] = [];
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) nodes.push({ id: `N${i}_${j}`, kind: 'junction', x: i * 100, y: j * 100, elev: (i + j) % 7, demand: 0.0005 });
+  let k = 0;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    if (i + 1 < n) pipes.push({ id: `P${k++}`, from: `N${i}_${j}`, to: `N${i + 1}_${j}`, length: 100, diameter: 0.2, roughness: 0.1, wavespeed: 1000 });
+    if (j + 1 < n) pipes.push({ id: `P${k++}`, from: `N${i}_${j}`, to: `N${i}_${j + 1}`, length: 100, diameter: 0.15, roughness: 0.1, wavespeed: 1000 });
+  }
+  pipes.push({ id: 'MAIN', from: 'R', to: 'N0_0', length: 500, diameter: 1.0, roughness: 0.1, wavespeed: 1000 });
+  nodes.push({ id: 'VX', kind: 'junction', x: n * 100, y: n * 100, elev: 0 }, { id: 'OUT', kind: 'reservoir', x: n * 100 + 10, y: n * 100, elev: 0, head: 0 });
+  pipes.push({ id: 'PV', from: `N${n - 1}_${n - 1}`, to: 'VX', length: 50, diameter: 0.2, roughness: 0.1, wavespeed: 1000 });
+  const grid: Network = { name: 'grid', nodes, pipes, pumps: [], valves: [{ id: 'V', from: 'VX', to: 'OUT', diameter: 0.2, k0: 10, opening: 0.3 }], event: { kind: 'valveClose', targets: ['V'], start: 1, duration: 20 }, settings: { ...defaultSettings(), duration: 30, engine: 'rigid' } };
+  const gs = solveSteady(grid);
+  const r = runTransient(grid, { steady: gs, frames: 30 });
+  const hv = Array.from(r.nodeHead.VX);
+  t('rigid engine runs a 760-pipe grid (sparse solve)', hv.every(Number.isFinite) && hv[hv.length - 1] > hv[0], `${pipes.length} pipes, ${r.runtimeMs.toFixed(0)} ms, valve head ${hv[0].toFixed(1)} → ${hv[hv.length - 1].toFixed(1)} m`);
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

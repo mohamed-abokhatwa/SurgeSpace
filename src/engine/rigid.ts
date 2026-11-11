@@ -3,14 +3,14 @@
 // vessel mass oscillation, slow valve strokes, pump start-up and run-down over minutes, fast screening of
 // options. For fast events (pump trip with a long main, quick valve closure) use the wave engine.
 // Solved implicitly at each step (Newton on all heads, flows, pump speeds and device flows together).
-import { interpTable, motorTorque, valveArea } from './devices';
+import { interpTable, motorTorque, turbineFactors, valveArea } from './devices';
 import { fourQuadrant, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpRatedQ, pumpTorqueQuadratic, solveDense, type FourQ } from './hydraulics';
 import { prepareNetwork } from './prepare';
 import { solveSteady, type SteadyResult } from './steady';
 import type { PipeEnvelope, RunOptions, TransientResult } from './transient';
-import { G, HB, HV, allEvents, applyFluid, area, type Network, type TransientEvent } from './types';
+import { G, HB, HV, RHO, allEvents, applyFluid, area, type Network, type TransientEvent } from './types';
 
-export const RIGID_MAX_UNKNOWNS = 600;
+export const RIGID_MAX_UNKNOWNS = 40000;
 
 export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult {
   const t0 = performance.now();
@@ -60,6 +60,17 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   pumpS.forEach((s, k) => (s.T = torque(k, links[net.pipes.length + k].Q, s.alpha)));
   const valveBase = net.valves.map((v) => steady.openings?.get(v.id) ?? valveArea(v, v.opening));
   const valveOpen = valveBase.slice();
+  const gateOpen = valveBase.slice();
+  const turb = net.valves.map((v) => {
+    const tb = v.turbine;
+    if (!tb || (!tb.characteristic && !tb.governor)) return null;
+    const ev = valveEv.get(v.id);
+    const rejected = !!ev && (ev.turbineOp ?? (ev.kind === 'valveClose' ? 'rejection' : 'acceptance')) === 'rejection';
+    const w0 = (2 * Math.PI * tb.speed) / 60;
+    const dH0 = Math.max((steady.heads.get(v.from) ?? 0) - (steady.heads.get(v.to) ?? 0), 1e-3);
+    const f0 = tb.characteristic ? turbineFactors(tb.characteristic, 1 / Math.sqrt(dH0 / tb.ratedHead)).flow : 1;
+    return { start: ev?.start ?? Infinity, rejected, w: w0, w0, I: 0, stroke: v.opening, ratedP: RHO * G * tb.ratedFlow * tb.ratedHead * tb.efficiency, f0 };
+  });
   // pressure-breaker and general-purpose valves keep their steady head loss as a fixed restriction
   const valveKq = net.valves.map((v, k) => {
     const q = steady.flows.get(v.id) ?? 0;
@@ -103,7 +114,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   });
   const tripped = () => pumpS.map((s, k) => (s.tripped ? k : -1)).filter((k) => k >= 0);
   const nU = () => free.length + links.length + tripped().length + devs.length;
-  if (nU() > RIGID_MAX_UNKNOWNS) throw new Error(`The rigid-column engine handles models up to about ${Math.floor(RIGID_MAX_UNKNOWNS / 2)} pipes; this one is larger. Use the wave engine.`);
+  if (nU() > RIGID_MAX_UNKNOWNS) throw new Error(`The rigid-column engine handles models up to about ${Math.floor(RIGID_MAX_UNKNOWNS / 2).toLocaleString('en')} pipes; this one is larger. Use the wave engine.`);
 
   // ── outputs ──
   const nFrames = Math.max(2, Math.min(opt.frames ?? st.frames ?? 600, steps + 1));
@@ -132,7 +143,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     frameSamples[p.id] = Float64Array.from([0, p.length]);
     frameHeads[p.id] = new Float32Array(fr * 2);
     frameFlows[p.id] = new Float32Array(fr);
-    return { pipe: p, i: nIdx.get(p.from)!, j: nIdx.get(p.to)!, e: { id: p.id, s, z, hSteady: h, hMax: h.slice(), hMin: h.slice(), cavMax: new Float64Array(s.length), tMax: new Float64Array(s.length), tMin: new Float64Array(s.length) } as PipeEnvelope };
+    return { pipe: p, k: net.pipes.indexOf(p), i: nIdx.get(p.from)!, j: nIdx.get(p.to)!, e: { id: p.id, s, z, hSteady: h, hMax: h.slice(), hMin: h.slice(), cavMax: new Float64Array(s.length), tMax: new Float64Array(s.length), tMin: new Float64Array(s.length) } as PipeEnvelope };
   });
 
   // ── state ──
@@ -165,10 +176,32 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     net.valves.forEach((v, k) => {
       const ev = valveEv.get(v.id);
       if (!ev || t <= ev.start) return;
-      if (ev.curve && ev.curve.length >= 2) { valveOpen[k] = valveArea(v, interpTable([...ev.curve].sort((a, b) => a[0] - b[0]), t - ev.start)); return; }
+      if (ev.curve && ev.curve.length >= 2) { gateOpen[k] = valveArea(v, interpTable([...ev.curve].sort((a, b) => a[0] - b[0]), t - ev.start)); return; }
       const tf = ev.finalOpening ?? (ev.kind === 'valveClose' ? 0 : 1);
       const s = (ev.duration ?? 0) > 0 ? Math.min((t - ev.start) / ev.duration!, 1) : 1;
-      valveOpen[k] = valveArea(v, tf + (v.opening - tf) * (1 - s) ** (ev.exponent ?? 1));
+      gateOpen[k] = valveArea(v, tf + (v.opening - tf) * (1 - s) ** (ev.exponent ?? 1));
+    });
+    // turbines: runner speed from the power balance after a load rejection; governor on the gates; flow factor from
+    // the unit speed (runner characteristic) — explicit over the step, as in the wave engine
+    net.valves.forEach((v, k) => {
+      const u = turb[k];
+      if (!u) { valveOpen[k] = gateOpen[k]; return; }
+      const tb = v.turbine!, l = links[net.pipes.length + net.pumps.length + k];
+      const dH = Math.max(H[l.i] - H[l.j], 1e-3), ratio = u.w / u.w0;
+      const fac = tb.characteristic ? turbineFactors(tb.characteristic, ratio / Math.sqrt(dH / tb.ratedHead)) : { flow: 1, eff: Math.max(0, 1 - ((ratio - 1) / 0.8) ** 2) };
+      if (u.rejected && t >= u.start) {
+        const P = RHO * G * Math.max(l.Q, 0) * dH * tb.efficiency * fac.eff;
+        u.w = Math.max(0, u.w + (dt * (P - 0.01 * u.ratedP * ratio ** 3)) / Math.max(tb.inertia * u.w, 1e-6));
+        if (tb.governor) {
+          const err = u.w / u.w0 - 1;
+          u.I += (err * dt) / Math.max(tb.governor.ti ?? 5, 1e-3);
+          const target = Math.min(1, Math.max(0, v.opening - (tb.governor.kp ?? 3) * (err + u.I)));
+          const rate = 1 / Math.max(tb.governor.closeTime, 1e-3);
+          u.stroke += Math.max(-rate * dt, Math.min(rate * dt, target - u.stroke));
+          gateOpen[k] = valveArea(v, u.stroke);
+        }
+      }
+      valveOpen[k] = Math.max(0, (gateOpen[k] * fac.flow) / u.f0);
     });
     nodes.forEach((_, i) => { if (isRes[i]) H[i] = resHead(i, t); });
     const tp = tripped();
@@ -177,68 +210,153 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     const Qold = links.map((l) => l.Q);
     const aOld = tp.map((k) => pumpS[k].alpha);
     const x = [...free.map((i) => H[i]), ...Qold, ...aOld, ...devs.map((d) => d.Qs)];
+    // residual of each element (shared by the dense and the sparse Newton solves)
+    const linkE = (k: number, q: number, a: number, hi: number, hj: number) => {
+      const l = links[k];
+      if (l.closed) return q;
+      if (l.kind === 'pipe') {
+        const p = net.pipes[l.ref];
+        const c = p.length / (G * area(p.diameter) * dt);
+        return c * (q - Qold[k]) + pipeR(p, q, st.friction) * q * Math.abs(q) - (hi - hj);
+      }
+      if (l.kind === 'pump') return hj - hi - head(l.ref, q, a);
+      const vv = net.valves[l.ref], A = area(vv.diameter), o = valveOpen[l.ref];
+      return o <= 0 ? q : (valveKq[l.ref] ?? vv.k0 / (2 * G * A * A)) * q * Math.abs(q) - o * o * (hi - hj);
+    };
+    const speedR = (k: number, a: number, q: number) => { const pk = tp[k], s = pumpS[pk], p = net.pumps[pk]; return a - aOld[k] + (dt * (torque(pk, q, a) + s.T)) / (2 * p.inertia * s.w); };
+    const devR = (k: number, Qs: number, hn: number) => {
+      const d = devs[k];
+      const loss = (Qs > 0 ? d.kIn : d.kOut) * Qs * Math.abs(Qs);
+      let Hd: number;
+      if (d.kind === 'vessel') {
+        const Vg = Math.min(Math.max(d.Vg - Qs * dt, 1e-6), d.total);
+        const zw = d.bottom + (d.total - Vg) / d.area;
+        Hd = d.C / Vg ** d.n - HB + zw;
+      } else Hd = d.z + (Qs * dt) / d.area;
+      return (d.kind === 'tank' && d.oneWay && Qs >= 0 && hn >= Hd) ? Qs : hn - Hd - loss;
+    };
+    const nodeBase = (i: number, hv: number) => -demand[i] - (emC[i] > 0 ? emC[i] * Math.max(hv - nodes[i].elev, 0) ** emG : 0);
+    const tpOf = new Map(tp.map((pk, k) => [net.pipes.length + pk, k]));
     const resid = (v: number[]) => {
       const r = new Array(n).fill(0);
       const h = (i: number) => (isRes[i] ? H[i] : v[fIdx.get(i)!]);
-      free.forEach((i, k) => (r[k] = -demand[i] - (emC[i] > 0 ? emC[i] * Math.max(v[k] - nodes[i].elev, 0) ** emG : 0)));
+      free.forEach((i, k) => (r[k] = nodeBase(i, v[k])));
       links.forEach((l, k) => {
         const q = v[nf + k];
         const fi = fIdx.get(l.i), fj = fIdx.get(l.j);
         if (fi !== undefined) r[fi] -= q;
         if (fj !== undefined) r[fj] += q;
-        let e: number;
-        if (l.closed) e = q;
-        else if (l.kind === 'pipe') {
-          const p = net.pipes[l.ref];
-          const c = p.length / (G * area(p.diameter) * dt);
-          e = c * (q - Qold[k]) + pipeR(p, q, st.friction) * q * Math.abs(q) - (h(l.i) - h(l.j));
-        } else if (l.kind === 'pump') {
-          const s = pumpS[l.ref];
-          const ti = tp.indexOf(l.ref);
-          const a = ti >= 0 ? v[nf + nl + ti] : s.on ? s.alphaSet : 0;
-          e = h(l.j) - h(l.i) - head(l.ref, q, a);
-        } else {
-          const vv = net.valves[l.ref], A = area(vv.diameter), o = valveOpen[l.ref];
-          e = o <= 0 ? q : (valveKq[l.ref] ?? vv.k0 / (2 * G * A * A)) * q * Math.abs(q) - o * o * (h(l.i) - h(l.j));
-        }
-        r[nf + k] = e;
+        const ti = tpOf.get(k);
+        const a = l.kind === 'pump' ? (ti !== undefined ? v[nf + nl + ti] : pumpS[l.ref].on ? pumpS[l.ref].alphaSet : 0) : 0;
+        r[nf + k] = linkE(k, q, a, h(l.i), h(l.j));
       });
-      tp.forEach((pk, k) => {
-        const a = v[nf + nl + k], s = pumpS[pk], p = net.pumps[pk];
-        const q = v[nf + net.pipes.length + pk];
-        r[nf + nl + k] = a - aOld[k] + (dt * (torque(pk, q, a) + s.T)) / (2 * p.inertia * s.w);
-      });
+      tp.forEach((pk, k) => (r[nf + nl + k] = speedR(k, v[nf + nl + k], v[nf + net.pipes.length + pk])));
       devs.forEach((d, k) => {
         const Qs = v[nf + nl + tp.length + k];
         const fi = fIdx.get(d.node)!;
         r[fi] -= Qs;
-        const loss = (Qs > 0 ? d.kIn : d.kOut) * Qs * Math.abs(Qs);
-        let Hd: number;
-        if (d.kind === 'vessel') {
-          const Vg = Math.min(Math.max(d.Vg - Qs * dt, 1e-6), d.total);
-          const zw = d.bottom + (d.total - Vg) / d.area;
-          Hd = d.C / Vg ** d.n - HB + zw;
-        } else Hd = d.z + (Qs * dt) / d.area;
-        r[nf + nl + tp.length + k] = (d.kind === 'tank' && d.oneWay && Qs >= 0 && v[fi] >= Hd) ? Qs : v[fi] - Hd - loss;
+        r[nf + nl + tp.length + k] = devR(k, Qs, v[fi]);
       });
       return r;
     };
+    const normOf = (r: number[]) => { let m = 0; for (const x of r) { const a = Math.abs(x); if (a > m) m = a; } return m; };
+    /** Newton step by eliminating the link, speed and device unknowns (each local to a link or a node), which leaves
+     *  a sparse symmetric system in the node heads — solved by conjugate gradients on large models. */
+    const sparseStep = (v: number[], r: number[]): number[] => {
+      const h = (i: number) => (isRes[i] ? H[i] : v[fIdx.get(i)!]);
+      const rows: Map<number, number>[] = free.map(() => new Map());
+      const b = free.map((_, k) => -r[k]);
+      const add = (row: number, col: number, val: number) => { const m = rows[row]; m.set(col, (m.get(col) ?? 0) + val); };
+      const lin: { a0: number; ai: number; aj: number; s0: number; si: number; sj: number }[] = [];
+      links.forEach((l, k) => {
+        const q = v[nf + k], ti = tpOf.get(k);
+        const a = l.kind === 'pump' ? (ti !== undefined ? v[nf + nl + ti] : pumpS[l.ref].on ? pumpS[l.ref].alphaSet : 0) : 0;
+        const hi = h(l.i), hj = h(l.j), e = r[nf + k];
+        const dq = 1e-7 * Math.max(1, Math.abs(q)), dh = 1e-6;
+        const eq = (linkE(k, q + dq, a, hi, hj) - e) / dq;
+        const ehi = (linkE(k, q, a, hi + dh, hj) - e) / dh, ehj = (linkE(k, q, a, hi, hj + dh) - e) / dh;
+        let L0: number, Li: number, Lj: number, S0 = 0, Si = 0, Sj = 0;
+        if (ti !== undefined) {
+          const da = 1e-7 * Math.max(1, Math.abs(a)), tau = r[nf + nl + ti];
+          const ea = (linkE(k, q, a + da, hi, hj) - e) / da;
+          const tq = (speedR(ti, a, q + dq) - tau) / dq, ta = (speedR(ti, a + da, q) - tau) / da;
+          const det = eq * ta - ea * tq || 1e-30;
+          L0 = (-e * ta + ea * tau) / det; Li = (-ta / det) * ehi; Lj = (-ta / det) * ehj;
+          S0 = (-tau * eq + tq * e) / det; Si = (tq / det) * ehi; Sj = (tq / det) * ehj;
+        } else {
+          const g = Math.abs(eq) > 1e-30 ? eq : 1e-30;
+          L0 = -e / g; Li = -ehi / g; Lj = -ehj / g;
+        }
+        lin.push({ a0: L0, ai: Li, aj: Lj, s0: S0, si: Si, sj: Sj });
+        // continuity: node i loses dq, node j gains it
+        const fi = fIdx.get(l.i), fj = fIdx.get(l.j);
+        if (fi !== undefined) { b[fi] += L0; add(fi, fi, -Li); if (fj !== undefined) add(fi, fj, -Lj); }
+        if (fj !== undefined) { b[fj] -= L0; add(fj, fj, Lj); if (fi !== undefined) add(fj, fi, Li); }
+      });
+      const dl: { d0: number; dh: number }[] = [];
+      devs.forEach((d, k) => {
+        const Qs = v[nf + nl + tp.length + k], fi = fIdx.get(d.node)!, rd = r[nf + nl + tp.length + k];
+        const dq = 1e-7 * Math.max(1, Math.abs(Qs));
+        const rq = (devR(k, Qs + dq, v[fi]) - rd) / dq || 1e-30, rh = (devR(k, Qs, v[fi] + 1e-6) - rd) / 1e-6;
+        const d0 = -rd / rq, dhc = -rh / rq;
+        dl.push({ d0, dh: dhc });
+        b[fi] += d0; add(fi, fi, -dhc);
+      });
+      free.forEach((i, k) => { const g = (nodeBase(i, v[k] + 1e-6) - nodeBase(i, v[k])) / 1e-6; if (g) add(k, k, g); });
+      // solve A·dh = b (A symmetric, negative definite in practice): conjugate gradients on −A
+      const m = free.length;
+      const diag = rows.map((rw, k) => -(rw.get(k) ?? 0) || 1);
+      const mul = (x: Float64Array) => { const y = new Float64Array(m); rows.forEach((rw, k) => { let s2 = 0; rw.forEach((val, c) => (s2 -= val * x[c])); y[k] = s2; }); return y; };
+      const dhv = new Float64Array(m), res = Float64Array.from(b, (x) => -x);
+      const z = res.map((x, k) => x / diag[k]);
+      const pv = Float64Array.from(z);
+      let rz = res.reduce((s2, x, k) => s2 + x * z[k], 0);
+      const bn = Math.sqrt(res.reduce((s2, x) => s2 + x * x, 0)) || 1;
+      for (let it2 = 0; it2 < 4 * m + 50; it2++) {
+        const Ap = mul(pv);
+        const pAp = pv.reduce((s2, x, k) => s2 + x * Ap[k], 0);
+        if (!(Math.abs(pAp) > 1e-300)) break;
+        const al = rz / pAp;
+        for (let k = 0; k < m; k++) { dhv[k] += al * pv[k]; res[k] -= al * Ap[k]; }
+        if (Math.sqrt(res.reduce((s2, x) => s2 + x * x, 0)) < 1e-12 * bn) break;
+        for (let k = 0; k < m; k++) z[k] = res[k] / diag[k];
+        const rzn = res.reduce((s2, x, k) => s2 + x * z[k], 0);
+        const be = rzn / rz; rz = rzn;
+        for (let k = 0; k < m; k++) pv[k] = z[k] + be * pv[k];
+      }
+      // back-substitute the local unknowns
+      const out = new Array(n).fill(0);
+      for (let k = 0; k < m; k++) out[k] = dhv[k];
+      const dH = (i: number) => (isRes[i] ? 0 : dhv[fIdx.get(i)!]);
+      links.forEach((l, k) => {
+        const c = lin[k], ti = tpOf.get(k);
+        out[nf + k] = c.a0 + c.ai * dH(l.i) + c.aj * dH(l.j);
+        if (ti !== undefined) out[nf + nl + ti] = c.s0 + c.si * dH(l.i) + c.sj * dH(l.j);
+      });
+      devs.forEach((d, k) => (out[nf + nl + tp.length + k] = dl[k].d0 + dl[k].dh * dH(d.node)));
+      return out;
+    };
+    const useSparse = n > 300 || (opt as { sparse?: boolean }).sparse === true;
     for (let it = 0; it < 40; it++) {
       const r = resid(x);
-      const norm = Math.max(...r.map(Math.abs));
+      const norm = normOf(r);
       if (norm < 1e-9) break;
-      const J = Array.from({ length: n }, () => new Array(n).fill(0));
-      for (let k = 0; k < n; k++) {
-        const hh = 1e-7 * Math.max(1, Math.abs(x[k]));
-        const xp = x.slice(); xp[k] += hh;
-        const rp = resid(xp);
-        for (let m = 0; m < n; m++) J[m][k] = (rp[m] - r[m]) / hh;
+      let d: number[];
+      if (useSparse) d = sparseStep(x, r);
+      else {
+        const J = Array.from({ length: n }, () => new Array(n).fill(0));
+        for (let k = 0; k < n; k++) {
+          const hh = 1e-7 * Math.max(1, Math.abs(x[k]));
+          const xp = x.slice(); xp[k] += hh;
+          const rp = resid(xp);
+          for (let m2 = 0; m2 < n; m2++) J[m2][k] = (rp[m2] - r[m2]) / hh;
+        }
+        d = solveDense(J, r.map((v) => -v));
       }
-      const d = solveDense(J, r.map((v) => -v));
       let lam = 1;
       for (let ls = 0; ls < 20; ls++) {
         const xn = x.map((v, k) => v + lam * d[k]);
-        if (Math.max(...resid(xn).map(Math.abs)) < norm || ls === 19) { for (let k = 0; k < n; k++) x[k] = xn[k]; break; }
+        if (normOf(resid(xn)) < norm || ls === 19) { for (let k = 0; k < n; k++) x[k] = xn[k]; break; }
         lam /= 2;
       }
       if (it === 39) slow++;
@@ -284,9 +402,9 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   const record = (t: number) => {
     times[frame] = t;
     nodes.forEach((nn, i) => (nodeHead[nn.id][frame] = H[i]));
-    for (const p of env) { frameHeads[p.pipe.id][frame * 2] = H[p.i]; frameHeads[p.pipe.id][frame * 2 + 1] = H[p.j]; frameFlows[p.pipe.id][frame] = links.find((l) => l.id === p.pipe.id)!.Q; }
+    for (const p of env) { frameHeads[p.pipe.id][frame * 2] = H[p.i]; frameHeads[p.pipe.id][frame * 2 + 1] = H[p.j]; frameFlows[p.pipe.id][frame] = links[p.k].Q; }
     net.pumps.forEach((p, k) => { pumps[p.id].speed[frame] = pumpS[k].alpha; pumps[p.id].flow[frame] = links[net.pipes.length + k].Q; });
-    net.valves.forEach((v, k) => { const o = valves[v.owner ?? v.id]; o.opening[frame] = valveOpen[k]; o.flow[frame] = links[net.pipes.length + net.pumps.length + k].Q; });
+    net.valves.forEach((v, k) => { const o = valves[v.owner ?? v.id]; o.opening[frame] = valveOpen[k]; o.flow[frame] = links[net.pipes.length + net.pumps.length + k].Q; const u = turb[k]; if (u) { o.speed ??= new Float32Array(fr); o.speed[frame] = u.w / u.w0; } });
     devs.forEach((d) => {
       const id = nodes[d.node].id;
       if (d.kind === 'vessel') { vessels[id].gas[frame] = d.Vg; vessels[id].flow[frame] = d.Qs; vessels[id].level[frame] = d.z; }

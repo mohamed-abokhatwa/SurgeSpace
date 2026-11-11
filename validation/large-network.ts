@@ -19,3 +19,9 @@ const net: Network = { name: 'grid', nodes, pipes, pumps: [], valves: [{ id: 'V'
 let t0 = performance.now(); const s = solveSteady(net); const ts = performance.now() - t0;
 t0 = performance.now(); const r = runTransient(net, { steady: s, frames: 200 }); const tt = performance.now() - t0;
 console.log(`${pipes.length} pipes: steady ${ts.toFixed(0)} ms (${s.iterations} it, ${s.converged}), transient ${tt.toFixed(0)} ms, dt ${r.dt.toExponential(2)}, reaches ${r.reaches}, maxAdjust ${(r.maxAdjust*100).toFixed(2)}%`);
+// the rigid-column engine on the same grid (sparse Newton solve in the node heads)
+if (process.argv.includes('--rigid')) {
+  t0 = performance.now();
+  const rr = runTransient({ ...net, settings: { ...net.settings, engine: 'rigid', duration: 20 } }, { steady: s, frames: 50 });
+  console.log(`rigid-column engine: ${(performance.now() - t0).toFixed(0)} ms for ${rr.steps} steps (${(rr.runtimeMs / rr.steps).toFixed(1)} ms per step)`);
+}
