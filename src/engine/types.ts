@@ -139,6 +139,8 @@ export interface OpenTank {
   oneWay?: boolean;
   /** Initial water surface elevation, m. Open tanks start at the steady head; one-way tanks need it (default: 90 % full). */
   initialLevel?: number;
+  /** Variable cross-section: [water surface elevation m, plan area m²] (shafts with chambers, expansion galleries). */
+  areaCurve?: [number, number][];
 }
 
 /** Surge anticipation valve: opens when the pressure falls below the low set point (or rises above the high one),

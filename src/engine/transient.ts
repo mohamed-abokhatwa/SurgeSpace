@@ -367,7 +367,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       if (z0 < t.bottomElev) warnings.push(`Standpipe at ${n.id}: the steady head is below the tank bottom; the tank is empty.`);
       z0 = Math.max(t.bottomElev, Math.min(t.topElev, z0));
     }
-    return { node: i, cfg: t, As, z: z0, Qt: 0, minZ: z0, maxZ: z0, spilled: 0, emptied: false, oneWay: !!t.oneWay, rin: t.kIn / (2 * G * Ac * Ac), rout: t.kOut / (2 * G * Ac * Ac) };
+    const curve = t.areaCurve && t.areaCurve.length >= 2 ? [...t.areaCurve].sort((p, q) => p[0] - q[0]) as [number, number][] : null;
+    const areaAt = (z: number) => (curve ? Math.max(interpTable(curve, z), 1e-6) : As);
+    return { node: i, cfg: t, As: areaAt(z0), areaAt, z: z0, Qt: 0, minZ: z0, maxZ: z0, spilled: 0, emptied: false, oneWay: !!t.oneWay, rin: t.kIn / (2 * G * Ac * Ac), rout: t.kOut / (2 * G * Ac * Ac) };
   });
   // surge anticipation valves
   const savs = nodes.map((n, i) => (n.sav && n.kind !== 'reservoir' ? { node: i, cfg: n.sav, A: area(n.sav.diameter), cd: n.sav.cd ?? 0.6, tTrig: -1, open: 0, openUsed: 0, opened: 0, maxQ: 0, Q: 0 } : null));
@@ -1170,6 +1172,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         if (z > tk.cfg.topElev) { tk.spilled += (z - tk.cfg.topElev) * tk.As; z = tk.cfg.topElev; }
         if (z <= tk.cfg.bottomElev + 1e-6 && q < 0) tk.emptied = true;
         tk.z = Math.max(z, tk.cfg.bottomElev);
+        tk.As = tk.areaAt(tk.z);
         tk.Qt = q;
         tk.minZ = Math.min(tk.minZ, tk.z);
         tk.maxZ = Math.max(tk.maxZ, tk.z);

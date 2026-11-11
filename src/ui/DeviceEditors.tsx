@@ -217,6 +217,11 @@ function TankEditor({ n, setNode }: { n: NetNode; setNode: SetNode }) {
         <Num label="K in" value={t.kIn} step={0.1} onChange={(x) => set({ kIn: Math.max(x ?? 0, 0) })} />
         <Num label="K out" value={t.kOut} step={0.1} onChange={(x) => set({ kOut: Math.max(x ?? 0, 0) })} />
       </div>
+      {!t.oneWay && (
+        <label className="field" style={{ marginTop: 6 }}><span>Variable plan area (optional): water level m, area m² — one pair per line</span>
+          <textarea rows={3} defaultValue={(t.areaCurve ?? []).map(([z, a]) => `${z}\t${a}`).join('\n')} placeholder={'e.g. shaft then a wide chamber:\n100\t3.1\n118\t3.1\n118.5\t50\n125\t50'} onBlur={(e) => { const rows = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 2 && r.every(Number.isFinite) && r[1] > 0).map(([z, a]) => [z, a] as [number, number]); set({ areaCurve: rows.length >= 2 ? rows : undefined }); }} />
+        </label>
+      )}
       <p className="muted dev-note">{t.oneWay ? 'A non-return valve lets water flow only from the tank into the pipe, when the pipe head falls below the tank level. Keep the water level below the steady head.' : 'Open to air; the water level starts at the steady head and moves with the surge. Water above the top spills.'}</p>
     </>
   );

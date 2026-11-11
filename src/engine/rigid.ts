@@ -63,6 +63,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   // storage devices at nodes
   type Dev = { node: number; kind: 'vessel' | 'tank'; Qs: number; Vg: number; C: number; n: number; bottom: number; area: number; total: number; kIn: number; kOut: number; z: number; oneWay: boolean; top: number; minGas: number; maxGas: number; spilled: number; emptied: boolean; minLevel: number; maxLevel: number };
   const devs: Dev[] = [];
+  const tankCurves = new Map<number, [number, number][]>();
   nodes.forEach((n, i) => {
     if (isRes[i]) return;
     const H0 = steady.heads.get(n.id) ?? n.elev;
@@ -78,7 +79,9 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     } else if (n.tank) {
       const tk = n.tank, A = area(tk.connDiameter);
       const z = tk.oneWay ? tk.initialLevel ?? tk.bottomElev + 0.9 * (tk.topElev - tk.bottomElev) : H0;
-      devs.push({ node: i, kind: 'tank', Qs: 0, Vg: 0, C: 0, n: 1, bottom: tk.bottomElev, area: area(tk.diameter), total: 0, kIn: tk.kIn / (2 * G * A * A), kOut: tk.kOut / (2 * G * A * A), z, oneWay: !!tk.oneWay, top: tk.topElev, minGas: 0, maxGas: 0, spilled: 0, emptied: false, minLevel: z, maxLevel: z });
+      const ac = tk.areaCurve && tk.areaCurve.length >= 2 ? [...tk.areaCurve].sort((p, q) => p[0] - q[0]) as [number, number][] : null;
+      if (ac) tankCurves.set(devs.length, ac);
+      devs.push({ node: i, kind: 'tank', Qs: 0, Vg: 0, C: 0, n: 1, bottom: tk.bottomElev, area: ac ? Math.max(interpTable(ac, z), 1e-6) : area(tk.diameter), total: 0, kIn: tk.kIn / (2 * G * A * A), kOut: tk.kOut / (2 * G * A * A), z, oneWay: !!tk.oneWay, top: tk.topElev, minGas: 0, maxGas: 0, spilled: 0, emptied: false, minLevel: z, maxLevel: z });
     }
   });
   const tripped = () => pumpS.map((s, k) => (s.tripped ? k : -1)).filter((k) => k >= 0);
@@ -247,6 +250,8 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
         d.z += (Qs * dt) / d.area;
         if (d.z > d.top) { d.spilled += (d.z - d.top) * d.area; d.z = d.top; }
         if (d.z < d.bottom) { d.emptied = true; d.z = d.bottom; }
+        const ac = tankCurves.get(k);
+        if (ac) d.area = Math.max(interpTable(ac, d.z), 1e-6);
       }
       d.minLevel = Math.min(d.minLevel, d.z); d.maxLevel = Math.max(d.maxLevel, d.z);
     });

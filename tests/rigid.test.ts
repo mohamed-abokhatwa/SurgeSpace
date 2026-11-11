@@ -63,5 +63,17 @@ const tunnel = (engine: 'wave' | 'rigid'): Network => ({
   t('rigid engine: vessel gives water', r.vessels['PS-D'].maxGas > r.vessels['PS-D'].initialGas);
   t('rigid engine: results are finite and say what the engine leaves out', r.envelopes.every((e) => Array.from(e.hMax).every(Number.isFinite)) && r.warnings[0].includes('Rigid-column'));
 }
+{
+  // variable-area surge tank: a wide chamber above the steady level cuts the upsurge (both engines)
+  for (const engine of ['rigid', 'wave'] as const) {
+    const a = tunnel(engine), b = tunnel(engine);
+    a.valves[0].k0 = b.valves[0].k0 = 20;
+    const z0 = solveSteady(a).heads.get('ST')!;
+    b.nodes[1] = { ...b.nodes[1], tank: { ...b.nodes[1].tank!, areaCurve: [[40, Math.PI / 4 * 64], [z0 + 0.5, Math.PI / 4 * 64], [z0 + 1, 4 * Math.PI / 4 * 64], [140, 4 * Math.PI / 4 * 64]] } };
+    const up = (n: Network) => { const r = runTransient(n, { steady: solveSteady(n), frames: 1500 }); return Math.max(...Array.from(r.tanks.ST.level)) - z0; };
+    const u1 = up(a), u2 = up(b);
+    t(`${engine}: chamber (4 × area above the steady level) reduces the upsurge`, u2 < 0.7 * u1, `${u2.toFixed(2)} m vs ${u1.toFixed(2)} m`);
+  }
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
