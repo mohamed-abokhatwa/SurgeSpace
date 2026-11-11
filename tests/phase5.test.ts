@@ -15,6 +15,7 @@ import { healthCheck } from '../src/app/health';
 import { addItem, allItems, applyItem } from '../src/app/library';
 import { applyFactors, calibrate } from '../src/app/calibrate';
 import { runQuery } from '../src/app/query';
+import { plotSVG } from '../src/app/plot';
 import { resultsBook } from '../src/app/resultsBook';
 import { connectLive, mqttParse, mqttPublish, readPayloadValue } from '../src/app/live';
 
@@ -187,6 +188,14 @@ const extremes = (n: Network) => { const r = runTransient(n, { steady: solveStea
   t('query: nodes by results or level', !b.error && b.refs.some((x) => x.id === 'PS-D') && b.refs.some((x) => x.id === 'HP2600'), b.error ?? b.refs.map((x) => x.id).join(','));
   t('query: unknown field explained', !!runQuery(net, 'pipes where size > 3').error?.includes('Fields'));
   t('query: sources only', runQuery(net, 'sources').refs.length === 2);
+}
+{
+  // drawing to scale
+  const net = risingMain(true);
+  const r = runTransient(net, { steady: solveSteady(net), frames: 20 });
+  const a3 = plotSVG(net, r, { sheet: 'A3' }), a1 = plotSVG(net, r, { sheet: 'A1' });
+  const xs = net.nodes.map((n) => n.x), span = Math.max(...xs) - Math.min(...xs);
+  t('drawing to scale: standard scale that fits the sheet', a3.svg.startsWith('<svg') && a3.svg.includes('width="420mm"') && span * 1000 / a3.scale <= 400 && a1.scale < a3.scale && a3.svg.includes(`1:${a3.scale}`), `A3 1:${a3.scale}, A1 1:${a1.scale}`);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

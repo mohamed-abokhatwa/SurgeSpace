@@ -576,6 +576,8 @@ export interface Network {
   /** Rule-based controls, checked every rule step of the extended-period run. */
   rules?: ControlRule[];
   eps?: EPSSettings;
+  /** Notes written on the drawing (map coordinates, m). */
+  annotations?: { id: string; x: number; y: number; text: string }[];
   /** Named selection sets (from queries or picks). */
   selectionSets?: { name: string; query?: string; refs: { type: 'node' | 'pipe' | 'pump' | 'valve'; id: string }[] }[];
   /** AI copilot conversation kept with the project (text only). */

@@ -305,6 +305,18 @@ export function Canvas({
         ctx.fillText(bg.attribution, size.w - tw - 6, size.h - bottomInset - 5);
       }
     }
+    // notes on the drawing
+    for (const a of net.annotations ?? []) {
+      ctx.font = '12px sans-serif';
+      const lines = a.text.split('\n');
+      const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 10, h = lines.length * 15 + 6;
+      const x = X(a.x), y = Y(-a.y);
+      ctx.fillStyle = theme.dark ? 'rgba(12,26,44,0.85)' : 'rgba(255,253,235,0.95)';
+      ctx.strokeStyle = theme.dark ? '#f59e0b' : '#d97706';
+      ctx.fillRect(x, y - h, w, h); ctx.strokeRect(x, y - h, w, h);
+      ctx.fillStyle = theme.dark ? '#fde68a' : '#78350f';
+      lines.forEach((l, k) => ctx.fillText(l, x + 5, y - h + 15 + k * 15));
+    }
     // contours (under the pipes)
     if (contours) {
       const q = contourBy === 'elevation' ? 'elevation' : contourBy === 'maxHead' ? 'head' : 'pressureHead';

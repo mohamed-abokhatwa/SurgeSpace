@@ -33,6 +33,7 @@ import { clock, networkAt, type EPSResult } from './engine/eps';
 import { skeletonise } from './engine/skeleton';
 import { fromGeoJSON, toDXF, toGeoJSON, type GeoJSON } from './app/exchange';
 import { xlsx } from './app/xlsx';
+import { plotSVG } from './app/plot';
 import { applyDir, setLang, tr, useLang } from './app/i18n';
 import { resultsBook } from './app/resultsBook';
 import { applyDesign, type Design, type OptVar } from './engine/optimise';
@@ -482,6 +483,7 @@ export default function App() {
       { label: 'Export GIS (GeoJSON, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.geojson`, JSON.stringify(toGeoJSON(net, result, epsRes?.r ?? null)), 'application/geo+json') },
       { label: 'Export CAD (DXF, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.dxf`, toDXF(net, result, Math.max(1, Math.round(Math.max(...net.nodes.map((n) => Math.abs(n.x)), 100) / 300))), 'application/dxf') },
       { label: 'Export envelopes .csv', action: exportEnv, disabled: !result },
+      { label: 'Export drawing to scale (SVG)', sub: (['A3', 'A1'] as const).map((sh) => ({ label: `${sh} sheet`, action: () => { const p = plotSVG(net, result, { sheet: sh }); download(`${safeName(net.name)}-${sh}-1to${p.scale}.svg`, p.svg, 'image/svg+xml'); setToast([`Drawing at 1:${p.scale} on ${sh}. Print at 100 % (actual size) to keep the scale.`]); } })) },
       { label: 'Export results workbook (Excel .xlsx)', action: () => { if (!allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.')) return; const bytes = xlsx(resultsBook(net, result, checks, epsRes?.r ?? null)); const blob = new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${safeName(net.name)}-results.xlsx`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); } },
       'sep',
       { label: 'Project details…', action: () => setDialog('project') },
@@ -596,6 +598,12 @@ export default function App() {
     });
     if (!r) return [
       { label: 'Add junction here', action: () => { let id = ''; edit((n) => { const o = addNode(n, ctx.world, 'junction', defaults); id = o.id; return o.net; }); setTimeout(() => setSelected([{ type: 'node', id }]), 0); } },
+      { label: 'Add a note here…', action: () => { const text = window.prompt('Note on the drawing'); if (text?.trim()) edit((n) => ({ ...n, annotations: [...(n.annotations ?? []), { id: Math.random().toString(36).slice(2, 8), x: ctx.world.x, y: ctx.world.y, text: text.trim() }] }), undefined, 'Note'); } },
+      ...((net.annotations ?? []).length ? [{ label: 'Notes on the drawing', sub: net.annotations!.map((a) => ({ label: a.text.slice(0, 40), sub: [
+        { label: 'Edit…', action: () => { const t2 = window.prompt('Note', a.text); if (t2 !== null) edit((n) => ({ ...n, annotations: n.annotations!.map((x) => (x.id === a.id ? { ...x, text: t2 } : x)).filter((x) => x.text.trim()) }), undefined, 'Note'); } },
+        { label: 'Move here', action: () => edit((n) => ({ ...n, annotations: n.annotations!.map((x) => (x.id === a.id ? { ...x, x: ctx.world.x, y: ctx.world.y } : x)) }), undefined, 'Note') },
+        { label: 'Delete', action: () => edit((n) => ({ ...n, annotations: n.annotations!.filter((x) => x.id !== a.id) }), undefined, 'Note') },
+      ] })) } as MenuItem] : []),
       { label: 'Add fixed-level source here', action: () => { let id = ''; edit((n) => { const o = addNode(n, ctx.world, 'reservoir', defaults); id = o.id; return o.net; }); setTimeout(() => setSelected([{ type: 'node', id }]), 0); } },
       'sep',
       { label: 'Zoom to fit', action: () => setFitKey((k) => k + 1) },
