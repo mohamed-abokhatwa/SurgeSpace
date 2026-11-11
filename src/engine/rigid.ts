@@ -61,7 +61,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     return (valveBase[k] ** 2 * dh) / (q * q);
   });
   // storage devices at nodes
-  type Dev = { node: number; kind: 'vessel' | 'tank'; Qs: number; Vg: number; C: number; n: number; bottom: number; area: number; total: number; kIn: number; kOut: number; z: number; oneWay: boolean; top: number; minGas: number; maxGas: number; spilled: number; emptied: boolean; minLevel: number; maxLevel: number };
+  type Dev = { node: number; kind: 'vessel' | 'tank' | 'chamber'; chamber?: number; Qs: number; Vg: number; C: number; n: number; bottom: number; area: number; total: number; kIn: number; kOut: number; z: number; oneWay: boolean; top: number; minGas: number; maxGas: number; spilled: number; emptied: boolean; minLevel: number; maxLevel: number };
   const devs: Dev[] = [];
   const tankCurves = new Map<number, [number, number][]>();
   nodes.forEach((n, i) => {
@@ -80,6 +80,16 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
       const tk = n.tank, A = area(tk.connDiameter);
       const z = tk.oneWay ? tk.initialLevel ?? tk.bottomElev + 0.9 * (tk.topElev - tk.bottomElev) : H0;
       const ac = tk.areaCurve && tk.areaCurve.length >= 2 ? [...tk.areaCurve].sort((p, q) => p[0] - q[0]) as [number, number][] : null;
+      const df = tk.differential && !tk.oneWay ? tk.differential : null;
+      if (df) {
+        // differential tank: the riser (direct) and the chamber behind the ports are two stores at the node
+        const Ar = area(df.riserDiameter), rp = 1 / (2 * G * (df.portCd ?? 0.6) ** 2 * Math.max(df.portArea, 1e-9) ** 2);
+        const Ach = Math.max((ac ? interpTable(ac, z) : area(tk.diameter)) - Ar, 1e-6);
+        devs.push({ node: i, kind: 'tank', chamber: devs.length + 1, Qs: 0, Vg: 0, C: 0, n: 1, bottom: tk.bottomElev, area: Ar, total: 0, kIn: tk.kIn / (2 * G * A * A), kOut: tk.kOut / (2 * G * A * A), z, oneWay: false, top: Math.min(df.riserTop ?? tk.topElev, tk.topElev), minGas: 0, maxGas: 0, spilled: 0, emptied: false, minLevel: z, maxLevel: z });
+        if (ac) tankCurves.set(devs.length, ac.map(([zz, a]) => [zz, a - Ar] as [number, number]));
+        devs.push({ node: i, kind: 'chamber', Qs: 0, Vg: 0, C: 0, n: 1, bottom: tk.bottomElev, area: Ach, total: 0, kIn: rp, kOut: rp, z, oneWay: false, top: tk.topElev, minGas: 0, maxGas: 0, spilled: 0, emptied: false, minLevel: z, maxLevel: z });
+        return;
+      }
       if (ac) tankCurves.set(devs.length, ac);
       devs.push({ node: i, kind: 'tank', Qs: 0, Vg: 0, C: 0, n: 1, bottom: tk.bottomElev, area: ac ? Math.max(interpTable(ac, z), 1e-6) : area(tk.diameter), total: 0, kIn: tk.kIn / (2 * G * A * A), kOut: tk.kOut / (2 * G * A * A), z, oneWay: !!tk.oneWay, top: tk.topElev, minGas: 0, maxGas: 0, spilled: 0, emptied: false, minLevel: z, maxLevel: z });
     }
@@ -104,7 +114,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   devs.forEach((d) => {
     const id = nodes[d.node].id;
     if (d.kind === 'vessel') vessels[id] = { gas: new Float32Array(fr), flow: new Float32Array(fr), level: new Float32Array(fr), minGas: d.Vg, maxGas: d.Vg, volume: d.total, initialGas: d.Vg, emptied: false, minWater: d.total - d.Vg, bottom: d.bottom, top: d.top };
-    else tanks[id] = { level: new Float32Array(fr), flow: new Float32Array(fr), minLevel: d.z, maxLevel: d.z, bottom: d.bottom, top: d.top, spilled: 0, emptied: false, oneWay: d.oneWay };
+    else if (d.kind === 'tank') tanks[id] = { level: new Float32Array(fr), flow: new Float32Array(fr), minLevel: d.z, maxLevel: d.z, bottom: d.bottom, top: nodes[d.node].tank!.topElev, spilled: 0, emptied: false, oneWay: d.oneWay, ...(d.chamber !== undefined ? { chamber: { level: new Float32Array(fr), minLevel: d.z, maxLevel: d.z } } : {}) };
   });
   // envelopes: the head line is straight along a rigid pipe (uniform friction), so interior points interpolate
   const env = net.pipes.filter((p) => !p.closed).map((p) => {
@@ -248,6 +258,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
         d.z = d.bottom + (d.total - d.Vg) / d.area;
       } else {
         d.z += (Qs * dt) / d.area;
+        if (d.z > d.top && d.chamber !== undefined) { const c = devs[d.chamber]; c.z += ((d.z - d.top) * d.area) / c.area; d.z = d.top; }
         if (d.z > d.top) { d.spilled += (d.z - d.top) * d.area; d.z = d.top; }
         if (d.z < d.bottom) { d.emptied = true; d.z = d.bottom; }
         const ac = tankCurves.get(k);
@@ -267,7 +278,8 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     devs.forEach((d) => {
       const id = nodes[d.node].id;
       if (d.kind === 'vessel') { vessels[id].gas[frame] = d.Vg; vessels[id].flow[frame] = d.Qs; vessels[id].level[frame] = d.z; }
-      else { tanks[id].level[frame] = d.z; tanks[id].flow[frame] = d.Qs; }
+      else if (d.kind === 'tank') { tanks[id].level[frame] = d.z; tanks[id].flow[frame] = d.Qs; }
+      else { const o = tanks[id]; o.flow[frame] += d.Qs; o.chamber!.level[frame] = d.z; }
     });
     frame++;
   };
@@ -292,8 +304,9 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   devs.forEach((d) => {
     const id = nodes[d.node].id;
     if (d.kind === 'vessel') Object.assign(vessels[id], { minGas: d.minGas, maxGas: d.maxGas, emptied: d.emptied, minWater: d.total - d.maxGas });
-    else Object.assign(tanks[id], { minLevel: d.minLevel, maxLevel: d.maxLevel, spilled: d.spilled, emptied: d.emptied });
-    if (d.emptied) warnings.push(`${d.kind === 'vessel' ? 'Air vessel' : 'Tank'} at ${id} emptied.`);
+    else if (d.kind === 'tank') Object.assign(tanks[id], { minLevel: d.minLevel, maxLevel: d.maxLevel, spilled: d.spilled, emptied: d.emptied });
+    else { const o = tanks[id]; Object.assign(o.chamber!, { minLevel: d.minLevel, maxLevel: d.maxLevel }); o.spilled += d.spilled; o.emptied ||= d.emptied; }
+    if (d.emptied) warnings.push(`${d.kind === 'vessel' ? 'Air vessel' : d.kind === 'chamber' ? 'Surge tank chamber' : 'Tank'} at ${id} emptied.`);
   });
   net.pumps.forEach((p) => { if (Array.from(pumps[p.id].flow).some((q) => q < -1e-6)) pumps[p.id].reverseFlow = true; });
 

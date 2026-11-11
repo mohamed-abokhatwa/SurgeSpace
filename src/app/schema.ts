@@ -96,6 +96,9 @@ export const DEVICE_FIELDS: Record<string, { key: string; unit?: string; help: s
     { key: 'bottom_m', unit: 'm', help: 'Bottom level.', get: (x) => x.tank?.bottomElev, set: (x, v) => ({ ...x, tank: { ...x.tank!, bottomElev: +v } }) },
     { key: 'top_m', unit: 'm', help: 'Overflow level.', get: (x) => x.tank?.topElev, set: (x, v) => ({ ...x, tank: { ...x.tank!, topElev: +v } }) },
     { key: 'connection_mm', unit: 'mm', help: 'Connection diameter.', get: (x) => (x.tank ? x.tank.connDiameter * 1000 : undefined), set: (x, v) => ({ ...x, tank: { ...x.tank!, connDiameter: +v / 1000 } }) },
+    { key: 'riser_diameter_m', unit: 'm', help: 'Differential surge tank: riser diameter (0 makes it a plain tank).', get: (x) => x.tank?.differential?.riserDiameter, set: (x, v) => ({ ...x, tank: { ...x.tank!, differential: +v > 0 ? { portArea: Math.PI / 4 * (+v) ** 2 * 0.1, ...x.tank!.differential, riserDiameter: +v } : undefined } }) },
+    { key: 'port_area_m2', unit: 'm²', help: 'Differential surge tank: total port area between pipe and chamber.', get: (x) => x.tank?.differential?.portArea, set: (x, v) => ({ ...x, tank: { ...x.tank!, differential: x.tank!.differential ? { ...x.tank!.differential, portArea: +v } : { riserDiameter: x.tank!.diameter / 3, portArea: +v } } }) },
+    { key: 'riser_top_m', unit: 'm', help: 'Differential surge tank: riser overflow level.', get: (x) => x.tank?.differential?.riserTop, set: (x, v) => ({ ...x, tank: { ...x.tank!, differential: x.tank!.differential ? { ...x.tank!.differential, riserTop: +v } : x.tank!.differential } }) },
   ],
   relief: [
     { key: 'set_head_m', unit: 'm', help: 'Opening pressure head.', get: (x) => x.relief?.setHead, set: (x, v) => ({ ...x, relief: { ...x.relief!, setHead: +v } }) },

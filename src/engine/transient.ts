@@ -51,7 +51,7 @@ export interface TransientResult {
   nodeMin: Record<string, number>;
   vessels: Record<string, { gas: Float32Array; flow: Float32Array; level: Float32Array; minGas: number; maxGas: number; volume: number; initialGas: number; emptied: boolean; minWater: number; bottom: number; top: number }>;
   /** Open surge tanks and one-way tanks: water surface elevation and flow into the tank (negative = out). */
-  tanks: Record<string, { level: Float32Array; flow: Float32Array; minLevel: number; maxLevel: number; bottom: number; top: number; spilled: number; emptied: boolean; oneWay: boolean }>;
+  tanks: Record<string, { level: Float32Array; flow: Float32Array; minLevel: number; maxLevel: number; bottom: number; top: number; spilled: number; emptied: boolean; oneWay: boolean; chamber?: { level: Float32Array; minLevel: number; maxLevel: number } }>;
   /** Surge anticipation valves: opening (0–1) and discharge. */
   savs: Record<string, { opening: Float32Array; flow: Float32Array; opened: number; maxFlow: number }>;
   /** Pressure relief valves: discharge. */
@@ -368,8 +368,12 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       z0 = Math.max(t.bottomElev, Math.min(t.topElev, z0));
     }
     const curve = t.areaCurve && t.areaCurve.length >= 2 ? [...t.areaCurve].sort((p, q) => p[0] - q[0]) as [number, number][] : null;
-    const areaAt = (z: number) => (curve ? Math.max(interpTable(curve, z), 1e-6) : As);
-    return { node: i, cfg: t, As: areaAt(z0), areaAt, z: z0, Qt: 0, minZ: z0, maxZ: z0, spilled: 0, emptied: false, oneWay: !!t.oneWay, rin: t.kIn / (2 * G * Ac * Ac), rout: t.kOut / (2 * G * Ac * Ac) };
+    const d = t.differential && !t.oneWay ? t.differential : null;
+    const Ar = d ? area(d.riserDiameter) : 0;
+    // differential tank: the riser takes the place of the plain tank; the chamber is a second store behind the ports
+    const areaAt = d ? () => Ar : (z: number) => (curve ? Math.max(interpTable(curve, z), 1e-6) : As);
+    const diff = d ? { Ac: Math.max((curve ? interpTable(curve, z0) : As) - Ar, 1e-6), curve, Ar, zc: z0, Qp: 0, top: Math.min(d.riserTop ?? t.topElev, t.topElev), rp: 1 / (2 * G * (d.portCd ?? 0.6) ** 2 * Math.max(d.portArea, 1e-9) ** 2), minZ: z0, maxZ: z0 } : null;
+    return { node: i, cfg: t, As: areaAt(z0), areaAt, z: z0, Qt: 0, minZ: z0, maxZ: z0, spilled: 0, emptied: false, oneWay: !!t.oneWay, rin: t.kIn / (2 * G * Ac * Ac), rout: t.kOut / (2 * G * Ac * Ac), diff };
   });
   // surge anticipation valves
   const savs = nodes.map((n, i) => (n.sav && n.kind !== 'reservoir' ? { node: i, cfg: n.sav, A: area(n.sav.diameter), cd: n.sav.cd ?? 0.6, tTrig: -1, open: 0, openUsed: 0, opened: 0, maxQ: 0, Q: 0 } : null));
@@ -509,7 +513,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const vesselOut: TransientResult['vessels'] = {};
   vessels.forEach((v) => v && (vesselOut[nodes[v.node].id] = { gas: new Float32Array(nFrames), flow: new Float32Array(nFrames), level: new Float32Array(nFrames), minGas: v.Vg, maxGas: v.Vg, volume: v.cfg.volume, initialGas: v.Vg0, emptied: false, minWater: v.cfg.volume - v.VgMax, bottom: v.bottom, top: v.bottom + v.geo.height }));
   const tankOut: TransientResult['tanks'] = {};
-  tanks.forEach((t) => t && (tankOut[nodes[t.node].id] = { level: new Float32Array(nFrames), flow: new Float32Array(nFrames), minLevel: t.z, maxLevel: t.z, bottom: t.cfg.bottomElev, top: t.cfg.topElev, spilled: 0, emptied: false, oneWay: t.oneWay }));
+  tanks.forEach((t) => t && (tankOut[nodes[t.node].id] = { level: new Float32Array(nFrames), flow: new Float32Array(nFrames), minLevel: t.z, maxLevel: t.z, bottom: t.cfg.bottomElev, top: t.cfg.topElev, spilled: 0, emptied: false, oneWay: t.oneWay, ...(t.diff ? { chamber: { level: new Float32Array(nFrames), minLevel: t.z, maxLevel: t.z } } : {}) }));
   const savOut: TransientResult['savs'] = {};
   savs.forEach((v) => v && (savOut[nodes[v.node].id] = { opening: new Float32Array(nFrames), flow: new Float32Array(nFrames), opened: 0, maxFlow: 0 }));
   const reliefOut: TransientResult['reliefs'] = {};
@@ -642,10 +646,24 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     if (lo >= hi) return lo;
     return solveDecreasing(f, lo, hi, vs.Qs);
   }
-  function tankFlow(tk: NonNullable<(typeof tanks)[number]>, H: number) {
+  function portFlow(tk: NonNullable<(typeof tanks)[number]>, H: number) {
+    // differential tank: flow through the ports into the chamber (orifice loss, chamber level over the step)
+    const d = tk.diff!;
+    const f = (Q: number) => H - Math.min(d.zc + (dt * (Q + d.Qp)) / (2 * d.Ac), tk.cfg.topElev) - d.rp * Q * Math.abs(Q);
+    let lo = -50;
+    const qMinEmpty = (-2 * (d.zc - tk.cfg.bottomElev) * d.Ac) / dt - d.Qp;
+    if (lo < qMinEmpty) lo = Math.min(qMinEmpty, 0);
+    return solveDecreasing(f, lo, 50, d.Qp);
+  }
+  function tankFlow(tk: NonNullable<(typeof tanks)[number]>, H: number): number {
+    if (tk.diff) return riserFlow(tk, H) + portFlow(tk, H);
+    return riserFlow(tk, H);
+  }
+  function riserFlow(tk: NonNullable<(typeof tanks)[number]>, H: number) {
     // flow into an open tank; its surface is at atmospheric pressure, so the head there is the water level
+    const top = tk.diff ? tk.diff.top : tk.cfg.topElev;
     const levelAfter = (Q: number) => tk.z + (dt * (Q + tk.Qt)) / (2 * tk.As);
-    const f = (Q: number) => H - Math.min(levelAfter(Q), tk.cfg.topElev) - (Q >= 0 ? tk.rin : tk.rout) * Q * Math.abs(Q);
+    const f = (Q: number) => H - Math.min(levelAfter(Q), top) - (Q >= 0 ? tk.rin : tk.rout) * Q * Math.abs(Q);
     let lo = -50, hi = tk.oneWay ? 0 : 50;
     const qMinEmpty = (-2 * (tk.z - tk.cfg.bottomElev) * tk.As) / dt - tk.Qt;
     if (lo < qMinEmpty) lo = Math.min(qMinEmpty, 0);
@@ -967,7 +985,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       if (!tk) return;
       const o = tankOut[nodes[tk.node].id];
       o.level[frame] = tk.z;
-      o.flow[frame] = tk.Qt;
+      o.flow[frame] = tk.Qt + (tk.diff ? tk.diff.Qp : 0);
+      if (o.chamber && tk.diff) o.chamber.level[frame] = tk.diff.zc;
     });
     savs.forEach((sv) => {
       if (!sv) return;
@@ -1167,8 +1186,21 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       }
       const tk = tanks[i];
       if (tk) {
-        const q = tankFlow(tk, H);
+        const q = riserFlow(tk, H);
         let z = tk.z + (dt * (q + tk.Qt)) / (2 * tk.As);
+        const d = tk.diff;
+        if (d) {
+          const qp = portFlow(tk, H);
+          let zc = d.zc + (dt * (qp + d.Qp)) / (2 * d.Ac);
+          // the riser overflows into the chamber
+          if (z > d.top) { zc += ((z - d.top) * tk.As) / d.Ac; z = d.top; }
+          if (zc > tk.cfg.topElev) { tk.spilled += (zc - tk.cfg.topElev) * d.Ac; zc = tk.cfg.topElev; }
+          if (zc <= tk.cfg.bottomElev + 1e-6 && qp < 0) tk.emptied = true;
+          d.zc = Math.max(zc, tk.cfg.bottomElev);
+          if (d.curve) d.Ac = Math.max(interpTable(d.curve, d.zc) - d.Ar, 1e-6);
+          d.Qp = qp;
+          d.minZ = Math.min(d.minZ, d.zc); d.maxZ = Math.max(d.maxZ, d.zc);
+        }
         if (z > tk.cfg.topElev) { tk.spilled += (z - tk.cfg.topElev) * tk.As; z = tk.cfg.topElev; }
         if (z <= tk.cfg.bottomElev + 1e-6 && q < 0) tk.emptied = true;
         tk.z = Math.max(z, tk.cfg.bottomElev);
@@ -1344,9 +1376,10 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     if (!tk) return;
     const o = tankOut[nodes[tk.node].id];
     Object.assign(o, { minLevel: tk.minZ, maxLevel: tk.maxZ, spilled: tk.spilled, emptied: tk.emptied });
-    const kind = tk.oneWay ? 'One-way tank' : 'Standpipe';
+    if (o.chamber && tk.diff) Object.assign(o.chamber, { minLevel: tk.diff.minZ, maxLevel: tk.diff.maxZ });
+    const kind = tk.oneWay ? 'One-way tank' : tk.diff ? 'Differential surge tank' : 'Standpipe';
     if (tk.emptied) warnings.push(`${kind} at ${nodes[tk.node].id} emptied: air could enter the pipe. Make it larger.`);
-    if (tk.spilled > 1e-6) warnings.push(`Standpipe at ${nodes[tk.node].id} overflowed (${tk.spilled.toFixed(2)} m³ spilled). Raise its top or enlarge it.`);
+    if (tk.spilled > 1e-6) warnings.push(`${kind} at ${nodes[tk.node].id} overflowed (${tk.spilled.toFixed(2)} m³ spilled). Raise its top or enlarge it.`);
   });
   savs.forEach((sv) => sv && Object.assign(savOut[nodes[sv.node].id], { opened: sv.opened, maxFlow: sv.maxQ }));
   reliefs.forEach((rv) => rv && Object.assign(reliefOut[nodes[rv.node].id], { maxFlow: rv.maxQ, volume: rv.vol }));

@@ -75,5 +75,28 @@ const tunnel = (engine: 'wave' | 'rigid'): Network => ({
     t(`${engine}: chamber (4 × area above the steady level) reduces the upsurge`, u2 < 0.7 * u1, `${u2.toFixed(2)} m vs ${u1.toFixed(2)} m`);
   }
 }
+{
+  // differential (Johnson) surge tank: riser DN3 inside an 8 m chamber
+  //   big ports → behaves as a plain tank of the full area; tiny ports → behaves as a plain tank of the riser area;
+  //   realistic ports → the port loss damps the oscillation: upsurge below the plain tank, riser ahead of the chamber
+  const mids: number[] = [];
+  for (const engine of ['rigid', 'wave'] as const) {
+    const plain = (dia: number) => { const n = tunnel(engine); n.valves[0].k0 = 20; n.nodes[1] = { ...n.nodes[1], tank: { ...n.nodes[1].tank!, diameter: dia } }; return n; };
+    const diff = (port: number) => { const n = plain(8); n.nodes[1] = { ...n.nodes[1], tank: { ...n.nodes[1].tank!, differential: { riserDiameter: 3, portArea: port } } }; return n; };
+    const run = (n: Network) => runTransient(n, { steady: solveSteady(n), frames: 1500 });
+    const z0 = solveSteady(plain(8)).heads.get('ST')!;
+    const up = (r: ReturnType<typeof run>) => Math.max(...Array.from(r.tanks.ST.level)) - z0;
+    const full = up(run(plain(8))), riser = up(run(plain(3)));
+    const rBig = run(diff(50)), rTiny = run(diff(1e-4)), rMid = run(diff(0.6));
+    t(`${engine}: differential tank with large ports = plain tank of the full area`, Math.abs(up(rBig) - full) / full < 0.05, `${up(rBig).toFixed(2)} m vs ${full.toFixed(2)} m`);
+    t(`${engine}: differential tank with closed ports = plain tank of the riser area`, Math.abs(up(rTiny) - riser) / riser < 0.05, `${up(rTiny).toFixed(2)} m vs ${riser.toFixed(2)} m`);
+    const m = up(rMid);
+    t(`${engine}: differential tank with ports: port loss cuts the upsurge`, m < full && m < riser, `${m.toFixed(2)} m (plain ${full.toFixed(2)}, riser alone ${riser.toFixed(2)})`);
+    mids.push(m);
+    const ch = rMid.tanks.ST.chamber!;
+    t(`${engine}: riser rises above the chamber`, Math.max(...Array.from(rMid.tanks.ST.level)) > ch.maxLevel + 0.1, `riser ${Math.max(...Array.from(rMid.tanks.ST.level)).toFixed(2)} m, chamber ${ch.maxLevel.toFixed(2)} m`);
+  }
+  t('differential tank: engines agree', Math.abs(mids[0] - mids[1]) / mids[0] < 0.02, `${mids[0].toFixed(2)} m vs ${mids[1].toFixed(2)} m`);
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

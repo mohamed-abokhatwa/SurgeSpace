@@ -204,12 +204,21 @@ function TankEditor({ n, setNode }: { n: NetNode; setNode: SetNode }) {
     <>
       <div className="grid2">
         <label className="field" style={{ gridColumn: '1 / -1' }}><span>Kind</span>
-          <select value={t.oneWay ? 'oneway' : 'open'} onChange={(e) => set({ oneWay: e.target.value === 'oneway' })}>
-            <option value="open">Open standpipe (standpipe)</option>
+          <select value={t.oneWay ? 'oneway' : t.differential ? 'diff' : 'open'} onChange={(e) => { const k = e.target.value; set({ oneWay: k === 'oneway', differential: k === 'diff' ? (t.differential ?? { riserDiameter: Math.max(t.diameter / 3, 0.3), portArea: Math.PI / 4 * (t.diameter / 3) ** 2 * 0.1, portCd: 0.6 }) : undefined }); }}>
+            <option value="open">Open surge tank (standpipe)</option>
+            <option value="diff">Differential surge tank (riser and chamber)</option>
             <option value="oneway">One-way (feed) tank</option>
           </select>
         </label>
-        <Num label="Tank Ø (m)" value={t.diameter} onChange={(x) => set({ diameter: Math.max(x ?? 1, 0.05) })} />
+        <Num label={t.differential ? 'Outer chamber Ø (m)' : 'Tank Ø (m)'} value={t.diameter} onChange={(x) => set({ diameter: Math.max(x ?? 1, 0.05) })} />
+        {t.differential && !t.oneWay && (
+          <>
+            <Num label="Riser Ø (m)" value={t.differential.riserDiameter} onChange={(x) => set({ differential: { ...t.differential!, riserDiameter: Math.min(Math.max(x ?? 0.5, 0.05), t.diameter * 0.95) } })} />
+            <Num label="Riser top (m)" value={t.differential.riserTop ?? t.topElev} onChange={(x) => set({ differential: { ...t.differential!, riserTop: x } })} />
+            <Num label="Port area (m²)" value={t.differential.portArea} step={0.01} onChange={(x) => set({ differential: { ...t.differential!, portArea: Math.max(x ?? 0.01, 1e-4) } })} />
+            <Num label="Port Cd" value={t.differential.portCd ?? 0.6} step={0.05} onChange={(x) => set({ differential: { ...t.differential!, portCd: Math.min(Math.max(x ?? 0.6, 0.1), 1) } })} />
+          </>
+        )}
         <Num label="Bottom level (m)" value={t.bottomElev} onChange={(x) => set({ bottomElev: x ?? n.elev })} />
         <Num label="Top / overflow (m)" value={t.topElev} onChange={(x) => set({ topElev: x ?? n.elev + 10 })} />
         {t.oneWay && <Num label="Water level (m)" value={t.initialLevel} onChange={(x) => set({ initialLevel: x })} />}
@@ -222,7 +231,7 @@ function TankEditor({ n, setNode }: { n: NetNode; setNode: SetNode }) {
           <textarea rows={3} defaultValue={(t.areaCurve ?? []).map(([z, a]) => `${z}\t${a}`).join('\n')} placeholder={'e.g. shaft then a wide chamber:\n100\t3.1\n118\t3.1\n118.5\t50\n125\t50'} onBlur={(e) => { const rows = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 2 && r.every(Number.isFinite) && r[1] > 0).map(([z, a]) => [z, a] as [number, number]); set({ areaCurve: rows.length >= 2 ? rows : undefined }); }} />
         </label>
       )}
-      <p className="muted dev-note">{t.oneWay ? 'A non-return valve lets water flow only from the tank into the pipe, when the pipe head falls below the tank level. Keep the water level below the steady head.' : 'Open to air; the water level starts at the steady head and moves with the surge. Water above the top spills.'}</p>
+      <p className="muted dev-note">{t.oneWay ? 'A non-return valve lets water flow only from the tank into the pipe, when the pipe head falls below the tank level. Keep the water level below the steady head.' : t.differential ? 'The riser follows the pipe head directly; the chamber fills and empties through the ports, whose loss damps the oscillation. The riser overflows into the chamber. Graphs show both levels.' : 'Open to air; the water level starts at the steady head and moves with the surge. Water above the top spills.'}</p>
     </>
   );
 }

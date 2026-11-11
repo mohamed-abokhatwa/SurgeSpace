@@ -141,6 +141,21 @@ export interface OpenTank {
   initialLevel?: number;
   /** Variable cross-section: [water surface elevation m, plan area m²] (shafts with chambers, expansion galleries). */
   areaCurve?: [number, number][];
+  /** Differential (Johnson) surge tank: a central riser, fed directly from the pipe, inside an outer chamber that
+   *  connects to the pipe through ports. The riser top overflows into the chamber. `diameter` is then the outer
+   *  diameter; the chamber area is the outer area less the riser area. */
+  differential?: DifferentialTank;
+}
+
+export interface DifferentialTank {
+  /** Riser internal diameter, m. */
+  riserDiameter: number;
+  /** Riser top (overflow into the chamber) elevation, m (default: tank top). */
+  riserTop?: number;
+  /** Total port area between the pipe and the chamber, m². */
+  portArea: number;
+  /** Port discharge coefficient (default 0.6). */
+  portCd?: number;
 }
 
 /** Surge anticipation valve: opens when the pressure falls below the low set point (or rises above the high one),

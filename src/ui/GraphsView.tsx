@@ -20,6 +20,7 @@ const VARS: Record<ElRef['type'], VarDef[]> = {
     { v: 'h', label: 'Head (HGL)', q: 'head', get: (_n, r, id) => r.nodeHead[id] ?? null },
     { v: 'gas', label: 'Vessel gas volume', q: 'volume', get: (_n, r, id) => r.vessels[id]?.gas ?? null },
     { v: 'lvl', label: 'Vessel / tank level', q: 'elevation', get: (_n, r, id) => r.vessels[id]?.level ?? r.tanks[id]?.level ?? null },
+    { v: 'chl', label: 'Surge tank chamber level', q: 'elevation', get: (_n, r, id) => r.tanks[id]?.chamber?.level ?? null },
     { v: 'air', label: 'Air volume at air valve', q: 'volume', get: (_n, r, id) => r.airValves[id]?.air ?? null },
     { v: 'dq', label: 'Device discharge', q: 'flow', get: (_n, r, id) => r.savs[id]?.flow ?? r.reliefs[id]?.flow ?? r.outlets[id]?.flow ?? null },
   ],
