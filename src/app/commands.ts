@@ -18,6 +18,7 @@ import { FLUIDS } from './catalogues';
 import { addLink, addPipe, deleteElements, insertOnPipe, renameElement, uniqueId, DEFAULTS, type ElRef } from './edit';
 import { deviceDefaults, nodeDevices, removeDevice, type ElementKind } from './elements';
 import { healthCheck } from './health';
+import { applyAirValvePlan, planAirValves, testAirValvePlan, type AirValvePlanItem, type AirValvePlanOptions } from './airValvePlan';
 import { DEVICE_FIELDS, applyFields, elementsOf, parseCurve, readFields, type ElType } from './schema';
 
 export interface RunOutput { result: TransientResult; checks: Check[] }
@@ -29,6 +30,8 @@ export interface CommandContext {
   getRun(): RunOutput | null;
   sizeVessel?(node: string): Promise<VesselSizing>;
   suggestAirValves?(): Promise<AirValveSuggestion[]>;
+  /** Air valve plan (and its surge test) in the background. */
+  planAirValves?(o: { options?: AirValvePlanOptions; test: boolean }): Promise<{ plan: AirValvePlanItem[]; test?: { before: { minPressure: number; cavity: number; slams: number }; after: { minPressure: number; cavity: number; slams: number }; antiSlam: string[] }; net?: Network }>;
   select?(refs: ElRef[]): void;
   /** Extended-period run (the app runs it in the background and shows it). */
   runEPS?(): Promise<EPSResult>;
@@ -605,6 +608,23 @@ export const COMMANDS: Command[] = [
     run: async (ctx) => {
       const s = ctx.suggestAirValves ? await ctx.suggestAirValves() : suggestAirValves(ctx.getNet(), runTransient(ctx.getNet(), { envelopeOnly: true }));
       return s.map((x) => ({ node: x.node, inflow_mm: r2(x.inDiameter * 1000, 0), min_pressure_with_valve_m: r2(x.minPressure, 1) }));
+    },
+  },
+  {
+    name: 'plan_air_valves', mutates: true,
+    description: 'Air valve plan for the mains (AWWA M51 practice): high points, decreases in upward slope and increases in downward slope, long ascending or descending runs (spacing), pump discharge, points where the steady grade line is below the pipe. Each valve sized so the inflow at 35 kPa vacuum passes the gravity draining flow and the outflow at 14 kPa passes the filling flow. With test=true the plan is tested in surge runs (before and after; valves that slam become anti-slam). With apply=true the valves are added to the model (pipes split at in-pipe locations).',
+    params: obj({ spacing_m: num('Largest distance between air valves on a long run (default 600)'), test: { type: 'boolean', description: 'Test the plan in surge runs (default false)' }, apply: { type: 'boolean', description: 'Add the valves to the model (default false)' } }),
+    run: async (ctx, a) => {
+      const options: AirValvePlanOptions = a.spacing_m ? { spacing: a.spacing_m } : {};
+      let out: { plan: AirValvePlanItem[]; test?: { before: { minPressure: number; cavity: number; slams: number }; after: { minPressure: number; cavity: number; slams: number }; antiSlam: string[] }; net?: Network };
+      if (ctx.planAirValves) out = await ctx.planAirValves({ options, test: !!a.test });
+      else { const plan = planAirValves(ctx.getNet(), options); if (a.test) { const t = testAirValvePlan(ctx.getNet(), plan); out = { plan: t.plan, test: t, net: t.net }; } else out = { plan }; }
+      if (a.apply) ctx.apply(out.net ?? applyAirValvePlan(ctx.getNet(), out.plan).net, 'AI: air valve plan');
+      return {
+        applied: !!a.apply,
+        valves: out.plan.map((it) => ({ at: 'node' in it.at ? it.at.node : `${it.at.pipe} at ${r2(it.at.s, 0)} m`, level_m: r2(it.z, 2), why: it.reasons, type: it.existing ? 'existing' : it.type, inflow_mm: r2(it.inDiameter * 1000, 0), outflow_mm: r2(it.outDiameter * 1000, 0), drain_flow_lps: r2(it.qDrain * 1000, 0), fill_flow_lps: r2(it.qFill * 1000, 0) })),
+        ...(out.test ? { surge_test: { before: { min_pressure_m: r2(out.test.before.minPressure, 1), largest_cavity_l: r2(out.test.before.cavity * 1000, 0), slams: out.test.before.slams }, after: { min_pressure_m: r2(out.test.after.minPressure, 1), largest_cavity_l: r2(out.test.after.cavity * 1000, 0), slams: out.test.after.slams }, made_anti_slam: out.test.antiSlam } } : {}),
+      };
     },
   },
   {

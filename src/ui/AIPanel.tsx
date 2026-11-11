@@ -127,7 +127,7 @@ const TOOL_LABEL: Record<string, string> = {
   build_line: 'Built the line', add_pump_station: 'Added a pump station', add_link: 'Added a link', insert_on_pipe: 'Inserted on a pipe', set_properties: 'Changed properties',
   add_device: 'Added a protection device', set_device: 'Changed a device', remove_device: 'Removed a device', delete_elements: 'Deleted elements', rename_element: 'Renamed an element',
   set_operations: 'Set the operations', set_run_settings: 'Changed run settings', health_check: 'Checked the model', run_analysis: 'Ran the analysis', get_results: 'Read the results',
-  size_air_vessel: 'Sized an air vessel', suggest_air_valves: 'Sized air valves', select_elements: 'Highlighted elements',
+  size_air_vessel: 'Sized an air vessel', suggest_air_valves: 'Sized air valves', plan_air_valves: 'Planned the air valves', select_elements: 'Highlighted elements',
 };
 const argHint = (a: unknown) => {
   if (!a || typeof a !== 'object') return '';

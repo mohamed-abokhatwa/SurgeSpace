@@ -328,6 +328,7 @@ ${pumpRows.length ? `<h3>3.3 Pumps</h3>${table(['Pump', 'Suction', 'Discharge', 
 ${valveRows.length ? `<h3>3.4 Valves</h3>${table(['Valve', 'From', 'To', 'D (mm)', 'K open', 'Stroke', 'Characteristic', 'Check valve', 'Control', 'Steady Q (L/s)'], valveRows)}` : ''}
 ${devRows.length ? `<h3>3.5 Protection devices</h3>${table(['Where', 'Device', 'Data'], devRows)}` : ''}
 <p class="muted">* no class given; ${Px(DEFAULT_CLASS, 0)} ${uP} assumed for the checks. Device data below are given in SI units.</p>
+${net.sources?.length ? `<h3>3.6 Basis of the model (sources)</h3><p class="muted">The model was built from documents. Each value with where it came from; values marked assumed are typical values to be confirmed.</p>${table(['Item', 'Value', 'Source'], net.sources.map((x) => [x.what, x.value, /^assumed/.test(x.from) ? { html: `<b>${esc(x.from)}</b>` } : x.from]))}` : ''}
 
 <h2 class="page">4. Results by node</h2>
 ${table(['Node', `Level (${uH})`, `Demand (${uQ})`, `Steady head (${uH})`, `Steady p (${uP})`, `Max head (${uH})`, `Max p (${uP})`, 't max (s)', `Min head (${uH})`, `Min p (${uP})`, 't min (s)'], nodeRows)}

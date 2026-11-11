@@ -33,6 +33,7 @@ import { AI_TASKS } from './ai/tasks';
 import { initAITransport } from './ai/transport';
 import { useAI } from './ai/accounts';
 import { StartPage } from './ui/StartPage';
+import type { IntakeSession } from './ui/IntakeWorkspace';
 import { RunScreen, type RunProg } from './ui/RunScreen';
 import { Tour, TourInvite } from './ui/Tour';
 import { Palette } from './ui/Palette';
@@ -57,6 +58,7 @@ const MapDialog = lazyNamed(() => import('./ui/MapDialog'), 'MapDialog');
 const LibraryPanel = lazyNamed(() => import('./ui/LibraryPanel'), 'LibraryPanel');
 const ScriptDialog = lazyNamed(() => import('./ui/ScriptDialog'), 'ScriptDialog');
 const WizardDialog = lazyNamed(() => import('./ui/WizardDialog'), 'WizardDialog');
+const IntakeWorkspace = lazyNamed(() => import('./ui/IntakeWorkspace'), 'IntakeWorkspace');
 const EPSPanel = lazyNamed(() => import('./ui/EPSPanel'), 'EPSPanel');
 const BackgroundDialog = lazyNamed(() => import('./ui/Dialogs'), 'BackgroundDialog');
 const CataloguesDialog = lazyNamed(() => import('./ui/Dialogs'), 'CataloguesDialog');
@@ -70,7 +72,7 @@ const CopilotPanel = lazyNamed(() => import('./ui/AIPanel'), 'CopilotPanel');
 
 // after start-up, fetch the panel and dialog code in the background so they open at once
 if (typeof window !== 'undefined') {
-  const warm = () => { for (const f of [() => import('./ui/Dialogs'), () => import('./ui/AIPanel'), () => import('./ui/DataSheets'), () => import('./ui/EPSPanel'), () => import('./ui/ReportDialog'), () => import('./ui/ImportDialog'), () => import('./ui/LivePanel'), () => import('./ui/MapDialog'), () => import('./ui/WizardDialog'), () => import('./ui/ScriptDialog'), () => import('./ui/LibraryPanel')]) void f().catch(() => {}); };
+  const warm = () => { for (const f of [() => import('./ui/Dialogs'), () => import('./ui/AIPanel'), () => import('./ui/DataSheets'), () => import('./ui/EPSPanel'), () => import('./ui/ReportDialog'), () => import('./ui/ImportDialog'), () => import('./ui/LivePanel'), () => import('./ui/MapDialog'), () => import('./ui/WizardDialog'), () => import('./ui/IntakeWorkspace'), () => import('./ui/ScriptDialog'), () => import('./ui/LibraryPanel')]) void f().catch(() => {}); };
   const ric = (window as Window & { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
   window.addEventListener('load', () => (ric ? ric(warm, { timeout: 4000 }) : setTimeout(warm, 1500)));
 }
@@ -479,7 +481,25 @@ export default function App() {
     const r = epsRes.r, k = Math.min(epsK, r.times.length - 1);
     return (id: string) => { const n = net.nodes.find((x) => x.id === id); const lv = r.level[id]; return n?.storage && lv ? (lv[k] - n.storage.minLevel) / Math.max(n.storage.maxLevel - n.storage.minLevel, 1e-6) : null; };
   }, [epsRes, epsK, epsColour, net]);
-  const startFromDocuments = () => { openCopilot(); setToast(['Attach the drawings, long sections, data sheets or spreadsheets in the Copilot (paper clip), then ask it to build the model.']); };
+  const openBuilt = (n: Network, notes: string[], go: boolean, vessel: boolean, label: string) => void (async () => {
+        setProject(n, label);
+        setHome(false); void addRecent(n, 'built');
+        setRoute(defaultRoute(n)); setFitKey((k) => k + 1); setMode('plain'); setTool('select');
+        setToast([`${label === 'New model wizard' ? 'Model built by the wizard' : 'Model built from the documents'} (Undo removes it):`, ...notes]);
+        if (!go) return;
+        await run(n);
+        if (n.pumps.length && n.nodes.some((x) => x.id === 'PS-D') && lic.features.protectionSizing && vessel) {
+          setBottom('protection'); if (dock === 'min') setDock('normal');
+          setBusy('Sizing air vessel…');
+          try { const o = await call<{ sizing: VesselSizing }>({ type: 'sizeVessel', net: n, node: 'PS-D' }, (m) => setBusy(`Sizing air vessel · ${m}`)); setSizing(o.sizing); } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
+        }
+      })();
+  // model from documents: the session (documents, evidence, answers) stays while the app is open
+  const [intake, setIntake] = useState<IntakeSession | null>(null);
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const newIntake = (): IntakeSession => ({ docs: [], evidence: [], gaps: [], summaries: {}, read: {}, name: 'Model from documents' });
+  const startFromDocuments = () => { setIntake((s) => s ?? newIntake()); setIntakeOpen(true); };
+  const setIntakeF = useCallback((f: (s: IntakeSession) => IntakeSession) => setIntake((s) => f(s ?? { docs: [], evidence: [], gaps: [], summaries: {}, read: {}, name: 'Model from documents' })), []);
   const [tourOn, setTourOn] = useState(false);
   const [palette, setPalette] = useState(false);
   const [tourInvite, setTourInvite] = useState(() => !readLS('surgespace.tour'));
@@ -521,6 +541,11 @@ export default function App() {
       if (!licRef.current.features.protectionSizing) throw new Error('Automatic air valve sizing is part of SurgeSpace Pro; the user can start a free trial. Place air valves at the high points by hand instead.');
       setBusy('Sizing air valves…');
       try { const o = await call<{ airValves: AirValveSuggestion[] }>({ type: 'airValves', net: netRef.current }, (m) => setBusy(m)); setAirSugg(o.airValves); return o.airValves; } finally { setBusy(null); }
+    },
+    planAirValves: async ({ options, test }) => {
+      if (test && !licRef.current.features.protectionSizing) throw new Error('Testing the air valve plan in surge runs is part of SurgeSpace Pro; the user can start a free trial. The plan itself (without the test) is available.');
+      setBusy(test ? 'Testing the air valve plan…' : 'Planning air valves…');
+      try { return await call({ type: 'avPlan', net: netRef.current, options, test }, (m) => setBusy(m)); } finally { setBusy(null); }
     },
     select: (refs) => setSelected(refs),
     optimise: async (vars) => {
@@ -583,6 +608,7 @@ export default function App() {
       { label: 'New model', shortcut: 'Ctrl+N', action: newProject },
       { label: 'Open project…', shortcut: 'Ctrl+O', action: openProject },
       { label: 'New model wizard…', action: () => setDialog('wizard') },
+      { label: 'Model from documents (AI)…', action: startFromDocuments },
       { label: 'Open example', sub: exItems },
       { label: 'Recover autosaved model', action: recover },
       'sep',
@@ -689,6 +715,7 @@ export default function App() {
     ] },
     { label: 'AI', items: [
       { label: 'Copilot', action: openCopilot },
+      { label: 'Model from documents…', action: startFromDocuments },
       'sep',
       ...AI_TASKS.map((t): MenuItem => ({ label: `${t.label}${t.needsResults && !result ? ' (run first)' : ''}`, disabled: t.needsResults && !result, action: () => aiTask(t) })),
       'sep',
@@ -1054,7 +1081,7 @@ export default function App() {
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} items={ctxItems()} onClose={() => setCtx(null)} />}
       {palette && <Palette menus={menus} net={net} onGo={(r) => { setHome(false); goTo(r); }} onClose={() => setPalette(false)} />}
       {tourOn && <Tour onClose={endTour} />}
-      {!home && !tourOn && tourInvite && <TourInvite onStart={() => { setTourInvite(false); setTourOn(true); }} onDismiss={endTour} />}
+      {!home && !tourOn && !intakeOpen && tourInvite && <TourInvite onStart={() => { setTourInvite(false); setTourOn(true); }} onDismiss={endTour} />}
       {dialog === 'tellus' && <TellUsDialog where={`${left} · ${bottom} · ${net.name}`} onClose={() => setDialog(null)} />}
       {licReason !== undefined && <LicenceDialog reason={licReason ?? undefined} onClose={() => setLicReason(undefined)} />}
       <Suspense fallback={null}>
@@ -1062,19 +1089,9 @@ export default function App() {
         onSaveInfo={(info) => setNetRaw((n) => ({ ...n, report: info }))} onClose={() => setDialog(null)} onDraftAI={() => { setDialog(null); aiTask(AI_TASKS.find((t) => t.id === 'report')!); }} />}
       {dialog === 'ai' && <AIAccountsDialog onClose={() => setDialog(null)} />}
       {dialog === 'script' && <ScriptDialog ctx={aiCtx} onClose={() => setDialog(null)} />}
-      {dialog === 'wizard' && <WizardDialog onClose={() => setDialog(null)} onBuilt={(n, notes, go) => void (async () => {
-        setProject(n, 'New model wizard');
-        setHome(false); void addRecent(n, 'built');
-        setRoute(defaultRoute(n)); setFitKey((k) => k + 1); setMode('plain'); setTool('select');
-        setToast(['Model built by the wizard (Undo removes it):', ...notes]);
-        if (!go) return;
-        await run(n);
-        if (n.pumps.length && n.nodes.some((x) => x.id === 'PS-D') && lic.features.protectionSizing) {
-          setBottom('protection'); if (dock === 'min') setDock('normal');
-          setBusy('Sizing air vessel…');
-          try { const o = await call<{ sizing: VesselSizing }>({ type: 'sizeVessel', net: n, node: 'PS-D' }, (m) => setBusy(`Sizing air vessel · ${m}`)); setSizing(o.sizing); } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
-        }
-      })()} />}
+      {intakeOpen && intake && <IntakeWorkspace session={intake} setSession={setIntakeF} onClose={() => setIntakeOpen(false)} onOpenAccounts={() => setDialog('ai')}
+        onOpen={(n, notes, vessel) => { setIntakeOpen(false); openBuilt(n, notes, true, vessel, 'Model from documents'); }} />}
+      {dialog === 'wizard' && <WizardDialog onClose={() => setDialog(null)} onBuilt={(n, notes, go) => openBuilt(n, notes, go, go, 'New model wizard')} />}
       {dialog === 'map' && <MapDialog net={net} setNet={setNet} onClose={() => setDialog(null)} onToast={setToast} />}
       {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} onImport={(n, notes) => { setDialog(null); load(n, notes, false, 'imported'); }} />}
       {dialog === 'setup' && <RunSetupDialog net={net} setNet={setNet} onClose={() => setDialog(null)} defaults={defaults} setDefaults={setDefaults} />}

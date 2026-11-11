@@ -37,7 +37,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build && node tests/ui-smoke.mjs
-      - run: npm run build:demo && node tests/ui-large.mjs
+      - run: npm run build:demo && node tests/ui-large.mjs && node tests/ui-intake.mjs
 
   qgis-plugin:
     # the QGIS plug-in, run inside a real (headless) QGIS

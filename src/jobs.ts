@@ -7,12 +7,14 @@ import { runEPS } from './engine/eps';
 import { candidates, optimiseProtection, pipeCandidates, type OptVar } from './engine/optimise';
 import { calibrate, type CalParam } from './app/calibrate';
 import type { Series, TagMap } from './app/scada';
+import { planAirValves, testAirValvePlan, type AirValvePlanItem, type AirValvePlanOptions } from './app/airValvePlan';
 
 export type JobRequest =
   | { id: number; type: 'run'; net: Network }
   | { id: number; type: 'uncertainty'; net: Network }
   | { id: number; type: 'sizeVessel'; net: Network; node: string }
   | { id: number; type: 'airValves'; net: Network }
+  | { id: number; type: 'avPlan'; net: Network; options?: AirValvePlanOptions; plan?: AirValvePlanItem[]; test?: boolean }
   | { id: number; type: 'eps'; net: Network }
   | { id: number; type: 'calibrate'; net: Network; data: Series; maps: TagMap[]; params: CalParam[] }
   | { id: number; type: 'optimise'; net: Network; vars?: OptVar[]; generations?: number; population?: number; pipes?: 'class' | 'diameter' };
@@ -47,6 +49,12 @@ export function handleJob(req: JobRequest, post: (msg: Record<string, unknown>) 
     } else if (req.type === 'airValves') {
       const base = runTransient(req.net, { envelopeOnly: true });
       post({ id: req.id, type: 'done', airValves: suggestAirValves(req.net, base, (m) => post({ id: req.id, type: 'progress', message: m })) });
+    } else if (req.type === 'avPlan') {
+      post({ id: req.id, type: 'progress', message: 'Air valve plan: high points, grade changes, long runs, pump discharge…' });
+      const plan = req.plan ?? planAirValves(req.net, req.options);
+      if (!req.test) { post({ id: req.id, type: 'done', plan }); return; }
+      const test = testAirValvePlan(req.net, plan, (m) => post({ id: req.id, type: 'progress', message: m }));
+      post({ id: req.id, type: 'done', plan: test.plan, test: { before: test.before, after: test.after, antiSlam: test.antiSlam }, net: test.net });
     }
   } catch (e) {
     post({ id: req.id, type: 'error', message: (e as Error).message });

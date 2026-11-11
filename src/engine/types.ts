@@ -634,6 +634,9 @@ export interface Network {
   eps?: EPSSettings;
   /** Notes written on the drawing (map coordinates, m). */
   annotations?: { id: string; x: number; y: number; text: string }[];
+  /** Basis of the model when it was built from documents: each value and where it came from (document, page or
+   *  cell, the engineer, or an assumed typical value). Shown in the report. */
+  sources?: { what: string; value: string; from: string }[];
   /** Named selection sets (from queries or picks). */
   selectionSets?: { name: string; query?: string; refs: { type: 'node' | 'pipe' | 'pump' | 'valve'; id: string }[] }[];
   /** AI copilot conversation kept with the project (text only). */
