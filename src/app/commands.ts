@@ -13,6 +13,7 @@ import { applyDesign, candidates, optimiseProtection, type Design, type OptVar }
 import { skeletonise } from '../engine/skeleton';
 import { rulesFromText } from '../engine/inp';
 import { addCase } from './cases';
+import { runQuery } from './query';
 import { FLUIDS } from './catalogues';
 import { addLink, addPipe, deleteElements, insertOnPipe, renameElement, uniqueId, DEFAULTS, type ElRef } from './edit';
 import { deviceDefaults, nodeDevices, removeDevice, type ElementKind } from './elements';
@@ -522,6 +523,17 @@ export const COMMANDS: Command[] = [
     description: 'Check the model for errors and implausible inputs before running.',
     params: obj({}),
     run: async (ctx) => healthCheck(ctx.getNet()).map((i) => ({ level: i.level, title: i.title, detail: i.detail, ...(i.fix ? { suggested_fix: i.fix.label } : {}) })),
+  },
+  {
+    name: 'query_elements', mutates: false,
+    description: 'Find elements by data and results, e.g. "pipes where diameter_mm < 200 and material = PVC", "nodes where max_pressure_m > 120 or min_pressure_m < 0". Highlights them on the drawing and returns the ids.',
+    params: obj({ query: str('Query text') }, ['query']),
+    run: async (ctx, a) => {
+      const q = runQuery(ctx.getNet(), String(a.query), ctx.getRun()?.result);
+      if (q.error) fail(q.error);
+      ctx.select?.(q.refs);
+      return { count: q.refs.length, ids: q.refs.slice(0, 200).map((r) => r.id) };
+    },
   },
   {
     name: 'create_case', mutates: true,

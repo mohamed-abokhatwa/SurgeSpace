@@ -916,7 +916,7 @@ export default function App() {
       {dialog === 'project' && <ProjectDialog net={net} setNet={setNet} onClose={() => setDialog(null)} />}
       {(dialog === 'help' || dialog === 'keys' || dialog === 'about') && <HelpDialog onClose={() => setDialog(null)} initial={dialog === 'keys' ? 'keys' : dialog === 'about' ? 'about' : 'guide'} version={__APP_VERSION__} />}
       {dialog === 'background' && <BackgroundDialog net={net} setNet={setNet} onClose={() => setDialog(null)} />}
-      {dialog === 'find' && <FindDialog net={net} onClose={() => setDialog(null)} onGo={goTo} />}
+      {dialog === 'find' && <FindDialog net={net} onClose={() => setDialog(null)} onGo={goTo} onSelect={(r) => setSelected(r)} setNet={setNet} result={result} />}
       {toast && (
         <div className="toast card small">
           <div className="row" style={{ justifyContent: 'space-between' }}><b>Notes</b><button className="btn ghost small" onClick={() => setToast(null)}>×</button></div>

@@ -14,6 +14,7 @@ import { xlsx } from '../src/app/xlsx';
 import { healthCheck } from '../src/app/health';
 import { addItem, allItems, applyItem } from '../src/app/library';
 import { applyFactors, calibrate } from '../src/app/calibrate';
+import { runQuery } from '../src/app/query';
 import { resultsBook } from '../src/app/resultsBook';
 import { connectLive, mqttParse, mqttPublish, readPayloadValue } from '../src/app/live';
 
@@ -175,6 +176,17 @@ const extremes = (n: Network) => { const r = runTransient(n, { steady: solveStea
   const data = { times: r.times, values: { T2: r.pressure.T2, T4: r.pressure.T4, LVL: r.level.TANK, Q: r.flow.RM1 } };
   const c = calibrate(base, data, maps, [{ kind: 'roughness' }, { kind: 'demand' }]);
   t('calibration recovers roughness and demand factors', Math.abs(c.factors[0] - 3) < 0.3 && Math.abs(c.factors[1] - 1.2) < 0.03 && c.after < 0.05 * c.before, `roughness ×${c.factors[0].toFixed(2)}, demand ×${c.factors[1].toFixed(3)}, misfit ${c.before.toFixed(2)} → ${c.after.toFixed(3)} in ${c.runs} runs`);
+}
+{
+  // queries
+  const net = risingMain(true);
+  const r = runTransient(net, { steady: solveSteady(net), frames: 30 });
+  const a = runQuery(net, 'pipes where diameter_mm < 650 and length_m > 1000');
+  t('query: pipes by diameter and length', a.refs.map((x) => x.id).join(',') === 'M1,M2,M3,M4', a.error ?? a.refs.map((x) => x.id).join(','));
+  const b = runQuery(net, 'nodes where max_pressure_m > 50 or elevation > 145', r);
+  t('query: nodes by results or level', !b.error && b.refs.some((x) => x.id === 'PS-D') && b.refs.some((x) => x.id === 'HP2600'), b.error ?? b.refs.map((x) => x.id).join(','));
+  t('query: unknown field explained', !!runQuery(net, 'pipes where size > 3').error?.includes('Fields'));
+  t('query: sources only', runQuery(net, 'sources').refs.length === 2);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

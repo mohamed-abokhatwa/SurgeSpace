@@ -10,6 +10,8 @@ import type { ElRef, ElementDefaults } from '../app/edit';
 import { ELEMENTS } from '../app/elements';
 import { ElIcon, Ic } from './Icons';
 import { QNum } from './Properties';
+import { runQuery } from '../app/query';
+import type { TransientResult } from '../engine/transient';
 
 type SetNet = (f: (n: Network) => Network, label?: string) => void;
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s));
@@ -299,8 +301,10 @@ export function HelpDialog({ onClose, initial = 'guide', version }: { onClose: (
 }
 
 /** Find an element by id or label. */
-export function FindDialog({ net, onClose, onGo }: { net: Network; onClose: () => void; onGo: (r: ElRef) => void }) {
+export function FindDialog({ net, onClose, onGo, onSelect, setNet, result }: { net: Network; onClose: () => void; onGo: (r: ElRef) => void; onSelect?: (r: ElRef[]) => void; setNet?: SetNet; result?: TransientResult | null }) {
   const [q, setQ] = useState('');
+  const [query, setQuery] = useState('pipes where diameter_mm < 200');
+  const qr = runQuery(net, query, result);
   const all: (ElRef & { label?: string; kind: string })[] = [
     ...net.nodes.map((n) => ({ type: 'node' as const, id: n.id, label: n.label, kind: n.kind === 'reservoir' ? 'Source' : 'Junction' })),
     ...net.pipes.map((p) => ({ type: 'pipe' as const, id: p.id, label: p.label, kind: 'Pipe' })),
@@ -316,6 +320,25 @@ export function FindDialog({ net, onClose, onGo }: { net: Network; onClose: () =
         {hits.map((h) => <button key={`${h.type}:${h.id}`} className="find-item" onClick={() => { onGo(h); onClose(); }}><b>{h.id}</b><span className="muted small">{h.kind}{h.label ? ` · ${h.label}` : ''}</span></button>)}
         {!hits.length && <div className="muted small" style={{ padding: 10 }}>Nothing matches.</div>}
       </div>
+      {onSelect && <>
+        <div className="label">Query</div>
+        <input className="search mono" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Query" />
+        <div className="small muted" style={{ margin: '4px 0' }}>{qr.error ?? `${qr.refs.length} match. Fields: id, ${qr.fields.join(', ')}${result ? '' : ' (run for result fields)'}.`}</div>
+        <div className="row" style={{ gap: 6 }}>
+          <button className="btn small primary" disabled={!!qr.error || !qr.refs.length} onClick={() => { onSelect(qr.refs); onClose(); }}>Select {qr.refs.length}</button>
+          {setNet && <button className="btn small" disabled={!!qr.error || !qr.refs.length} onClick={() => { const name = window.prompt('Name of the selection set', query); if (name) setNet((n) => ({ ...n, selectionSets: [...(n.selectionSets ?? []).filter((x) => x.name !== name), { name, query, refs: qr.refs }] }), 'Selection set'); }}>Save as a set</button>}
+        </div>
+        {!!net.selectionSets?.length && <>
+          <div className="label">Selection sets</div>
+          {net.selectionSets.map((s) => (
+            <div key={s.name} className="row small" style={{ gap: 6, padding: '2px 0' }}>
+              <span style={{ flex: 1 }}><b>{s.name}</b> <span className="muted">· {s.refs.length}</span></span>
+              <button className="btn ghost small" onClick={() => { onSelect(s.query ? runQuery(net, s.query, result).refs : s.refs); onClose(); }} title={s.query ? 'Runs the query again' : undefined}>Select</button>
+              {setNet && <button className="btn ghost small" onClick={() => setNet((n) => ({ ...n, selectionSets: n.selectionSets!.filter((x) => x.name !== s.name) }), 'Selection set')} aria-label={`Delete ${s.name}`}>×</button>}
+            </div>
+          ))}
+        </>}
+      </>}
     </Modal>
   );
 }
