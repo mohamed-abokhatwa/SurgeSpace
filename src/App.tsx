@@ -24,8 +24,12 @@ import { OperationsPanel } from './ui/Operations';
 import { BackgroundDialog, CataloguesDialog, FindDialog, HealthDialog, HelpDialog, ProjectDialog, RunSetupDialog } from './ui/Dialogs';
 import { DataSheets } from './ui/DataSheets';
 import { CasesPanel, addCase, syncActive } from './ui/Cases';
+import { LivePanel } from './ui/LivePanel';
 import { EPSPanel, epsPipeColours, type EPSColour } from './ui/EPSPanel';
 import { clock, networkAt, type EPSResult } from './engine/eps';
+import { skeletonise } from './engine/skeleton';
+import { fromGeoJSON, toDXF, toGeoJSON, type GeoJSON } from './app/exchange';
+import { applyDesign, type Design, type OptVar } from './engine/optimise';
 import { Explorer } from './ui/Explorer';
 import { GraphsView, type GraphItem } from './ui/GraphsView';
 import { healthCheck } from './app/health';
@@ -37,7 +41,7 @@ import { useAI } from './ai/accounts';
 import { AIAccountsDialog, CopilotPanel } from './ui/AIPanel';
 
 type LeftTab = 'explorer' | 'operations';
-type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log' | 'eps';
+type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log' | 'eps' | 'live';
 interface UncertaintyOut { runs: { label: string; maxHead: number; minPressure: number }[]; envelopes: PipeEnvelope[]; spread: { maxHead: [number, number]; minPressure: [number, number] } }
 type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai';
 
@@ -295,6 +299,27 @@ export default function App() {
       return out.eps;
     } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
   };
+  const doSkeleton = () => {
+    const cur = netRef.current;
+    const sk = skeletonise(cur, { keep: selected.filter((r) => r.type === 'node').map((r) => r.id) });
+    if (!sk.changes.length) { setToast(['Nothing to simplify: every junction carries a demand, a device, a branch or a change of pipe.']); return; }
+    const withCase = addCase(cur, 'Skeleton');
+    setProject({ ...sk.net, cases: withCase.cases, activeCase: withCase.activeCase }, 'Skeletonise');
+    setToast([`New case “Skeleton”: ${cur.pipes.length} → ${sk.net.pipes.length} pipes, ${cur.nodes.length} → ${sk.net.nodes.length} nodes. Removed junctions are kept as profile points, so levels and high points are unchanged. Selected nodes were kept.`, ...sk.changes.slice(0, 5)]);
+  };
+  const doOptimise = async () => {
+    if (!allowed(lic.features.protectionSizing, 'Protection optimisation is part of SurgeSpace Pro.')) return;
+    setBusy('Optimising protection…');
+    try {
+      const out = await call<{ optimise: { best: Design; evaluations: number; vars: OptVar[] } }>({ type: 'optimise', net: netRef.current }, (m) => setBusy(m));
+      const { best, vars, evaluations } = out.optimise;
+      const cur = netRef.current;
+      const withCase = addCase(cur, 'Optimised protection');
+      setProject({ ...applyDesign(cur, vars, best.genes), cases: withCase.cases, activeCase: withCase.activeCase }, 'Optimise protection');
+      const lines = vars.map((v, k) => `${v.kind === 'vessel' ? 'Air vessel' : 'Air valve'} at ${v.node}: ${v.options[best.genes[k]] ? (v.kind === 'vessel' ? `${v.options[best.genes[k]]} m³` : `DN${Math.round(v.options[best.genes[k]] * 1000)}`) : 'none'}`);
+      setToast([best.feasible ? `Least-cost design meeting the limits (${evaluations} surge runs), applied as case “Optimised protection”:` : `No design met all limits; the best found (${evaluations} surge runs) is applied as case “Optimised protection”:`, ...lines, `Lowest pressure ${best.minP.toFixed(1)} m; highest ${(best.maxRatio * 100).toFixed(0)} % of the pipe class. Press Run to see it.`]);
+    } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
+  };
   const epsRef = useRef(doEPS);
   epsRef.current = doEPS;
   const surgeAt = (t: number) => {
@@ -375,6 +400,10 @@ export default function App() {
       try { const o = await call<{ airValves: AirValveSuggestion[] }>({ type: 'airValves', net: netRef.current }, (m) => setBusy(m)); setAirSugg(o.airValves); return o.airValves; } finally { setBusy(null); }
     },
     select: (refs) => setSelected(refs),
+    optimise: async (vars) => {
+      setBusy('Optimising protection…');
+      try { const o = await call<{ optimise: { best: Design; evaluations: number } }>({ type: 'optimise', net: netRef.current, vars }, (m) => setBusy(m)); return o.optimise; } finally { setBusy(null); }
+    },
     runEPS: async () => { const r = await epsRef.current(); if (!r) throw new Error('The extended-period run did not finish (does the model have a fixed-level source or tank?).'); return r; },
   }), [setNet, run]);
   const openCopilot = () => { setShowRight(true); setRight('ai'); };
@@ -434,7 +463,10 @@ export default function App() {
       { label: 'Save project', shortcut: 'Ctrl+S', action: saveProject },
       'sep',
       { label: 'Import (EPANET, spreadsheet, long section, DXF)…', action: () => setDialog('import') },
+      { label: 'Import GIS layer (GeoJSON)…', action: () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.geojson,.json'; i.onchange = () => i.files?.[0]?.text().then((t) => { try { const g = JSON.parse(t) as GeoJSON; if (g.type !== 'FeatureCollection') throw new Error('Not a GeoJSON FeatureCollection.'); const r = fromGeoJSON(g); load(r.network, [`${r.network.pipes.length} pipes and ${r.network.nodes.length} nodes from ${i.files![0].name}. Fields were matched by name (id, elevation, diameter, material…).`, ...r.notes]); } catch (e) { setToast([(e as Error).message]); } }); i.click(); } },
       { label: 'Export EPANET .inp', action: exportInp },
+      { label: 'Export GIS (GeoJSON, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.geojson`, JSON.stringify(toGeoJSON(net, result, epsRes?.r ?? null)), 'application/geo+json') },
+      { label: 'Export CAD (DXF, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.dxf`, toDXF(net, result, Math.max(1, Math.round(Math.max(...net.nodes.map((n) => Math.abs(n.x)), 100) / 300))), 'application/dxf') },
       { label: 'Export envelopes .csv', action: exportEnv, disabled: !result },
       'sep',
       { label: 'Project details…', action: () => setDialog('project') },
@@ -495,6 +527,9 @@ export default function App() {
         { label: 'Wave (method of characteristics) — fast events', checked: (net.settings.engine ?? 'wave') === 'wave', action: () => setNet((n) => ({ ...n, settings: { ...n.settings, engine: 'wave' } }), 'Engine') },
         { label: 'Rigid column — slow events, mass oscillation', checked: net.settings.engine === 'rigid', action: () => setNet((n) => ({ ...n, settings: { ...n.settings, engine: 'rigid' } }), 'Engine') },
       ] },
+      { label: 'Optimise protection (genetic algorithm)', action: () => void doOptimise(), disabled: !!busy },
+      { label: 'Skeletonise model (new case)', action: doSkeleton },
+      { label: 'Live data and field data…', action: () => { setBottom('live'); if (dock === 'min') setDock('normal'); } },
       { label: 'Size protection (vessel, air valves)…', action: () => { setBottom('protection'); if (dock === 'min') setDock('normal'); } },
       { label: 'Run all cases and compare', action: () => { setBottom('cases'); if (dock === 'min') setDock('normal'); } },
     ] },
@@ -739,7 +774,7 @@ export default function App() {
 
           <div className="dock">
             <div className="dock-tabs">
-              {([['profile', 'Profile'], ['graphs', 'Graphs'], ['checks', `Design checks${fails ? ` · ${fails}` : ''}`], ['tables', 'Data sheets'], ['cases', `Cases${net.cases?.length ? ` · ${net.cases.length}` : ''}`], ['protection', 'Protection sizing'], ['uncertainty', 'Uncertainty'], ['eps', 'Daily operation'], ['log', 'Run log']] as [BottomTab, string][]).map(([k, l]) => (
+              {([['profile', 'Profile'], ['graphs', 'Graphs'], ['checks', `Design checks${fails ? ` · ${fails}` : ''}`], ['tables', 'Data sheets'], ['cases', `Cases${net.cases?.length ? ` · ${net.cases.length}` : ''}`], ['protection', 'Protection sizing'], ['uncertainty', 'Uncertainty'], ['eps', 'Daily operation'], ['live', 'Live data'], ['log', 'Run log']] as [BottomTab, string][]).map(([k, l]) => (
                 <button key={k} className={`dtab ${bottom === k ? 'on' : ''} ${k === 'checks' && fails ? 'bad' : ''}`} onClick={() => { setBottom(k); if (dock === 'min') setDock('normal'); }}>{l}</button>
               ))}
               <div style={{ flex: 1 }} />
@@ -771,7 +806,8 @@ export default function App() {
                 {bottom === 'cases' && <CasesPanel net={net} setProject={setProject} busy={!!busy} setBusy={setBusy} />}
                 {bottom === 'protection' && <div style={{ maxWidth: 620 }}><ProtectionPanel net={net} setNet={(f) => setNet(f, 'Apply sizing')} busy={!!busy} onSizeVessel={doSize} onAirValves={doAir} sizing={sizing} airSugg={airSugg} /></div>}
                 {bottom === 'eps' && <EPSPanel net={net} setNet={setNet} result={epsRes?.r ?? null} busy={!!busy} onRun={() => void doEPS()} k={Math.min(epsK, (epsRes?.r.times.length ?? 1) - 1)} setK={setEpsK} colour={epsColour} setColour={(c) => { setEpsColour(c); if (c !== 'none') setMode('plain'); }} onSurgeAt={surgeAt} selected={selected} />}
-                {!result && !['tables', 'cases', 'protection', 'eps'].includes(bottom) ? <div className="empty">Results appear here after a run. Press <b>Run</b> (F5).</div> : result && (
+                {bottom === 'live' && <LivePanel net={net} setNet={setNet} eps={epsRes?.r ?? null} onToast={setToast} />}
+                {!result && !['tables', 'cases', 'protection', 'eps', 'live'].includes(bottom) ? <div className="empty">Results appear here after a run. Press <b>Run</b> (F5).</div> : result && (
                   <>
                     {bottom === 'profile' && <ProfileView net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} uEnv={unc?.envelopes} showNow={live} height={dock === 'max' ? 420 : 250} />}
                     {bottom === 'graphs' && <GraphsView net={net} result={result} items={graphs} setItems={setGraphs} selected={selected} tNow={tNow} />}

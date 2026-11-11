@@ -525,6 +525,8 @@ export interface Network {
   patterns?: TimePattern[];
   controls?: SimpleControl[];
   eps?: EPSSettings;
+  /** Live and historian data: the source (no password is stored) and the tag-to-element mapping. */
+  scada?: { source?: { kind: 'mqtt' | 'bridge'; url: string; topics?: string[]; username?: string }; tags: { tag: string; element: string; quantity: 'pressure' | 'head' | 'flow' | 'level' | 'status' | 'speed'; scale?: number; offset?: number }[] };
 }
 
 export interface BackgroundImage {

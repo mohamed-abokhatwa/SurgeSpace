@@ -1,0 +1,10 @@
+[general]
+name=SurgeSpace
+qgisMinimumVersion=3.22
+description=Send pipe networks to SurgeSpace and bring surge results back as styled layers.
+about=Exports the selected point (nodes) and line (pipes) layers as one GeoJSON file that SurgeSpace opens (File → Import GIS layer), and loads a SurgeSpace GeoJSON export with pipes coloured by maximum pressure and nodes by minimum pressure.
+version=1.0.0
+author=SurgeSpace
+email=support@engspace.app
+category=Plugins
+experimental=False

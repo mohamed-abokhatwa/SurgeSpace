@@ -1,0 +1,23 @@
+{
+  "port": 8765,
+  "pollMs": 1000,
+  "modbus": [
+    {
+      "host": "192.168.10.20", "port": 502, "unitId": 1,
+      "tags": [
+        { "tag": "PS1.DischargePressure", "register": 100, "type": "holding", "dataType": "float32", "scale": 10.197 },
+        { "tag": "PS1.Pump1.Running", "register": 10, "type": "coil" },
+        { "tag": "TANK.Level", "register": 30001, "type": "input", "dataType": "uint16", "scale": 0.01 }
+      ]
+    }
+  ],
+  "opcua": [
+    {
+      "endpoint": "opc.tcp://scada-server:4840", "securityMode": "None",
+      "tags": [
+        { "tag": "Reservoir.Level", "nodeId": "ns=2;s=Reservoir.Level" },
+        { "tag": "PS1.Flow", "nodeId": "ns=2;s=PS1.Flow", "scale": 0.001 }
+      ]
+    }
+  ]
+}

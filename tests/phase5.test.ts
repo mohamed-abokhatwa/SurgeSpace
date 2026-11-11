@@ -1,0 +1,134 @@
+// Skeletonisation and protection optimisation.
+import { skeletonise } from '../src/engine/skeleton';
+import { candidates, optimiseProtection } from '../src/engine/optimise';
+import { solveSteady } from '../src/engine/steady';
+import { runTransient } from '../src/engine/transient';
+import { risingMain, EXAMPLES } from '../src/engine/cases';
+import type { Network } from '../src/engine/types';
+import { townSupply } from '../src/engine/cases';
+import { runEPS } from '../src/engine/eps';
+import { applySnapshot, boundaryFromSeries, compareWithData, parseHistorianCsv, type TagMap } from '../src/app/scada';
+import { fromGeoJSON, guessFields, toDXF, toGeoJSON } from '../src/app/exchange';
+import { importDxf } from '../src/engine/importers';
+import { connectLive, mqttParse, mqttPublish, readPayloadValue } from '../src/app/live';
+
+let pass = 0, fail = 0;
+const t = (name: string, ok: boolean, info = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? ` (${info})` : ''}`); ok ? pass++ : fail++; };
+const extremes = (n: Network) => { const r = runTransient(n, { steady: solveSteady(n), frames: 200 }); return { max: Math.max(...r.envelopes.flatMap((e) => Array.from(e.hMax))), min: Math.min(...r.envelopes.flatMap((e) => Array.from(e.hMin).map((h, i) => h - e.z[i]))) }; };
+
+{
+  // rising main with extra junctions along the line: merging them keeps the steady state and the surge
+  const base = risingMain(true);
+  const split: Network = structuredClone(base);
+  // split M2 and M3 into halves with plain junctions
+  for (const id of ['M2', 'M3']) {
+    const p = split.pipes.find((x) => x.id === id)!;
+    const a = split.nodes.find((n) => n.id === p.from)!, b = split.nodes.find((n) => n.id === p.to)!;
+    const prof = [{ s: 0, z: a.elev }, ...(p.profile ?? []), { s: p.length, z: b.elev }];
+    const zMid = prof.reduce((z, q, i) => (i && q.s >= p.length / 2 && prof[i - 1].s < p.length / 2 ? prof[i - 1].z + ((q.z - prof[i - 1].z) * (p.length / 2 - prof[i - 1].s)) / (q.s - prof[i - 1].s) : z), a.elev);
+    const mid = { id: `${id}-MID`, kind: 'junction' as const, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, elev: zMid };
+    split.nodes.push(mid);
+    const h = p.length / 2;
+    const p1 = { ...p, id: `${id}a`, to: mid.id, length: h, profile: p.profile?.filter((q) => q.s < h) };
+    const p2 = { ...p, id: `${id}b`, from: mid.id, length: h, profile: p.profile?.filter((q) => q.s > h).map((q) => ({ s: q.s - h, z: q.z })) };
+    split.pipes = split.pipes.filter((x) => x !== p).concat([p1, p2]);
+  }
+  const sk = skeletonise(split);
+  t('series junctions removed (plain junctions along the main)', sk.removedNodes.length === 4 && sk.net.pipes.length === 3, sk.changes.join(' | '));
+  t('air valve, vessel and pump nodes kept', ['HP2600', 'PS-D', 'PS-S'].every((id) => sk.net.nodes.some((n) => n.id === id)));
+  const s1 = solveSteady(split), s2 = solveSteady(sk.net);
+  t('steady heads unchanged at the kept nodes', ['PS-D', 'HP2600', 'PS-S'].every((id) => Math.abs(s1.heads.get(id)! - s2.heads.get(id)!) < 1e-6));
+  const e1 = extremes(split), e2 = extremes(sk.net);
+  t('surge extremes unchanged', Math.abs(e1.max - e2.max) < 0.5 && Math.abs(e1.min - e2.min) < 0.5, `max ${e1.max.toFixed(2)}/${e2.max.toFixed(2)} m, min p ${e1.min.toFixed(2)}/${e2.min.toFixed(2)} m`);
+  // a real network: fewer elements, same steady heads at the kept nodes
+  const bw = EXAMPLES.find((x) => x.id === 'bwsn1')!.make();
+  const sb = skeletonise(bw);
+  const h1 = solveSteady(bw), h2 = solveSteady(sb.net);
+  const worst = Math.max(...sb.net.nodes.map((n) => Math.abs(h1.heads.get(n.id)! - h2.heads.get(n.id)!)));
+  t('real network: fewer pipes, steady heads unchanged', sb.net.pipes.length < bw.pipes.length && worst < 1e-3, `${bw.pipes.length} → ${sb.net.pipes.length} pipes, worst head change ${worst.toExponential(1)} m`);
+  const tr = skeletonise({ ...split, nodes: split.nodes.map((n) => (n.id === 'CH1200' ? { ...n, demand: 0.001 } : n)) }, { trimBelow: 0.2 });
+  t('branch trimming leaves a main without dead ends untouched', tr.changes.every((c) => !c.startsWith('Trimmed')));
+}
+{
+  // optimisation on the unprotected rising main: a feasible, cheaper design than "everything largest"
+  const net = risingMain(false);
+  const vars = candidates(net);
+  t('candidates: vessel at the pump discharge, air valve at the high point', vars.some((v) => v.kind === 'vessel' && v.node === 'PS-D') && vars.some((v) => v.kind === 'airValve' && v.node === 'HP2600'), vars.map((v) => `${v.kind}@${v.node}`).join(', '));
+  const t0 = performance.now();
+  const r = optimiseProtection(net, { vars, minPressure: -5, population: 10, generations: 6, seed: 7 });
+  const top = vars.reduce((s, v) => s + (v.kind === 'vessel' ? 15 + 8 * Math.max(...v.options) ** 0.8 : 1.5 + 20 * Math.max(...v.options)), 0);
+  t('optimisation finds a design that meets the limits', r.best.feasible, `min pressure ${r.best.minP.toFixed(1)} m, ${r.evaluations} surge runs, ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  t('cheaper than the largest of everything', r.best.cost < top, `${r.best.cost.toFixed(1)} vs ${top.toFixed(1)}; ${vars.map((v, k) => `${v.node} ${v.options[r.best.genes[k]]}`).join(', ')}`);
+  const applied = r.apply(net);
+  const chk = extremes(applied);
+  t('applied design re-checks', chk.min >= -5 - 0.05, `${chk.min.toFixed(2)} m`);
+}
+{
+  // historian data, comparison, live snapshot, boundary from data
+  const net = townSupply();
+  net.eps = { ...net.eps!, duration: 12 * 3600, quality: 'none' };
+  const r = runEPS(net);
+  const csv = ['time,TANK_LVL_cm,T2_P_bar,PU1_RUN', ...r.times.map((t, k) => `${String(Math.floor(t / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')},${(r.level.TANK[k] * 100).toFixed(1)},${(r.pressure.T2[k] / 10.197).toFixed(4)},${r.status.PU1[k]}`)].join('\n');
+  const h = parseHistorianCsv(csv);
+  t('historian CSV read (times from hh:mm, tags as columns)', h.times.length === r.times.length && Object.keys(h.values).length === 3 && h.times[1] === 900);
+  const maps: TagMap[] = [{ tag: 'TANK_LVL_cm', element: 'TANK', quantity: 'level', scale: 0.01 }, { tag: 'T2_P_bar', element: 'T2', quantity: 'pressure', scale: 10.197 }, { tag: 'PU1_RUN', element: 'PU1', quantity: 'status' }];
+  const c = compareWithData(net, r, h, maps);
+  t('model vs data: the model compared with its own output fits', c.length === 3 && c[0].rms < 0.001 && c[1].rms < 0.01 && c[0].r > 0.999, c.map((x) => `${x.tag} rms ${x.rms.toExponential(1)}`).join(', '));
+  const snap = applySnapshot(net, { TANK_LVL_cm: 250, PU1_RUN: 0 }, maps);
+  t('live snapshot sets tank level and pump state', snap.net.nodes.find((n) => n.id === 'TANK')!.storage!.initLevel === 2.5 && snap.net.pumps.find((p) => p.id === 'PU1')!.on === false, snap.changes.join('; '));
+  const b = boundaryFromSeries(net, { times: [0, 10, 20], values: { W: [2, 2.5, 1.5] } }, { tag: 'W', element: 'WORKS', quantity: 'level' });
+  const sch = b.nodes.find((n) => n.id === 'WORKS')!.headSchedule!;
+  t('measured level becomes the source head schedule', sch.mode === 'table' && sch.table![1][1] === 0.5 && sch.table![2][1] === -0.5);
+}
+{
+  // MQTT packets: a fake broker on a fake WebSocket
+  const sent: Uint8Array[] = [];
+  let sock: { onopen: ((e: unknown) => void) | null; onmessage: ((e: { data: unknown }) => void) | null; onclose: ((e: unknown) => void) | null; onerror: ((e: unknown) => void) | null; binaryType: string; send: (d: Uint8Array) => void; close: () => void } | null = null;
+  const got: string[] = [];
+  const stopIt = connectLive({ kind: 'mqtt', url: 'wss://x', topics: ['a/#'] }, (v) => got.push(`${v.tag}=${v.value}`), (s) => got.push(`[${s}]`), () => {
+    sock = { onopen: null, onmessage: null, onclose: null, onerror: null, binaryType: '', send: (d) => sent.push(d), close: () => sock?.onclose?.({}) };
+    return sock as never;
+  });
+  sock!.onopen!({});
+  const connect = mqttParse(sent[0]).packets[0];
+  t('MQTT CONNECT packet', connect.type === 1 && new TextDecoder().decode(connect.body.slice(2, 6)) === 'MQTT');
+  const deliver = (b: Uint8Array) => sock!.onmessage!({ data: b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) });
+  deliver(new Uint8Array([0x20, 2, 0, 0]));
+  const sub = mqttParse(sent[1]).packets[0];
+  t('MQTT SUBSCRIBE after CONNACK', sub.type === 8 && new TextDecoder().decode(sub.body.slice(4, 7)) === 'a/#');
+  // two publishes in one frame, the second split across frames
+  const p1 = mqttPublish('a/p', '12.5'), p2 = mqttPublish('a/q', '{"value": 3}');
+  const both = new Uint8Array([...p1, ...p2]);
+  deliver(both.slice(0, p1.length + 3));
+  deliver(both.slice(p1.length + 3));
+  t('MQTT PUBLISH parsed across frames, numbers and JSON', got.includes('a/p=12.5') && got.includes('a/q=3'), got.join(' '));
+  t('payload forms', readPayloadValue('true') === 1 && readPayloadValue('{"v": 2}') === 2 && readPayloadValue('7') === 7);
+  stopIt();
+}
+{
+  // GIS / CAD exchange
+  const net = risingMain(true);
+  const s0 = solveSteady(net);
+  const r = runTransient(net, { steady: s0, frames: 100 });
+  const g = toGeoJSON(net, r, null, 32637);
+  t('GeoJSON: points, lines, results', g.features.filter((f) => f.geometry.type === 'LineString').length === net.pipes.length && g.features.some((f) => f.properties.max_pressure_m !== undefined) && JSON.stringify(g.crs).includes('32637'));
+  const back = fromGeoJSON(JSON.parse(JSON.stringify(g)));
+  // pumps are not lines: put them back to compare the hydraulics
+  back.network.pumps = net.pumps;
+  const s1 = solveSteady(back.network);
+  t('GeoJSON round trip: same pipes, same steady heads', back.network.pipes.length === net.pipes.length && ['PS-D', 'HP2600'].every((id) => Math.abs(s0.heads.get(id)! - s1.heads.get(id)!) < 1e-6), back.notes.join(' '));
+  const fm = guessFields(g);
+  t('field mapping guessed', fm.diameter === 'diameter_mm' && fm.elevation === 'elevation_m' && fm.id === 'id');
+  // a GIS layer with other names, 3-D lines and no node layer
+  const gis = { type: 'FeatureCollection' as const, features: [
+    { type: 'Feature' as const, geometry: { type: 'LineString', coordinates: [[0, 0, 10], [100, 0, 12], [200, 0, 9]] }, properties: { FACILITYID: 'A1', DIAMETER: 200, MATERIAL: 'PVC' } },
+    { type: 'Feature' as const, geometry: { type: 'LineString', coordinates: [[200.2, 0.1, 9], [300, 50, 8]] }, properties: { FACILITYID: 'A2', DIAMETER: 150, MATERIAL: 'PVC' } },
+  ] };
+  const gi = fromGeoJSON(gis, undefined, 0.5);
+  t('GIS lines: ends snapped, 3-D profile kept, junctions created', gi.network.pipes.length === 2 && gi.network.nodes.length === 3 && gi.network.pipes[0].profile?.[0].z === 12 && gi.network.pipes[0].material === 'PVC' && Math.abs(gi.network.pipes[1].diameter - 0.15) < 1e-12, gi.notes.join(' '));
+  const dxf = toDXF(net, r);
+  const di = importDxf(dxf, { tol: 0.5, scale: 1, diameter: 0.3, wavespeed: 1000, layerFilter: 'SS_PIPES' });
+  t('DXF export reads back as the same pipe network', di.pipes.length === net.pipes.length, `${di.pipes.length} pipes`);
+}
+console.log(`\n${pass} passed, ${fail} failed`);
+if (fail) process.exit(1);

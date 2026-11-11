@@ -28,6 +28,7 @@ jobs:
       - run: npx tsx tests/eps.test.ts
       - run: npx tsx tests/fourq.test.ts
       - run: npx tsx tests/rigid.test.ts
+      - run: npx tsx tests/phase5.test.ts
       - run: npx tsx validation/control-valves-vs-epanet.ts
 
   windows-store:

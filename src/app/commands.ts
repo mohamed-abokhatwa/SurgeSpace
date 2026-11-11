@@ -9,6 +9,8 @@ import { solveSteady } from '../engine/steady';
 import { runTransient, type TransientResult } from '../engine/transient';
 import { allEvents, area, defaultSettings, type Network, type NetNode, type SimpleControl, type TransientEvent } from '../engine/types';
 import { defaultEPS, runEPS, type EPSResult } from '../engine/eps';
+import { applyDesign, candidates, optimiseProtection, type Design, type OptVar } from '../engine/optimise';
+import { skeletonise } from '../engine/skeleton';
 import { FLUIDS } from './catalogues';
 import { addLink, addPipe, deleteElements, insertOnPipe, renameElement, uniqueId, DEFAULTS, type ElRef } from './edit';
 import { deviceDefaults, nodeDevices, removeDevice, type ElementKind } from './elements';
@@ -27,6 +29,8 @@ export interface CommandContext {
   select?(refs: ElRef[]): void;
   /** Extended-period run (the app runs it in the background and shows it). */
   runEPS?(): Promise<EPSResult>;
+  /** Protection optimisation in the background. */
+  optimise?(vars: OptVar[]): Promise<{ best: Design; evaluations: number }>;
 }
 type JSONSchema = Record<string, unknown>;
 export interface Command {
@@ -468,6 +472,34 @@ export const COMMANDS: Command[] = [
       const net = ctx.getNet();
       const r = ctx.runEPS ? await ctx.runEPS() : runEPS(net);
       return epsSummary(net, r);
+    },
+  },
+  {
+    name: 'optimise_protection', mutates: true,
+    description: 'Least-cost surge protection by a genetic algorithm: chooses sizes (or none) for candidate air vessels and air valves so the pressure limits are met, judging every design with a full surge run. Without candidates it uses vessels at pump discharges and air valves at high points. Applies the best design. Takes from seconds to a few minutes.',
+    params: obj({ candidates: { type: 'array', items: obj({ node: str('Junction id'), kind: str('Device', ['vessel', 'airValve']), options: { type: 'array', items: { type: 'number' }, description: 'Sizes: vessel m³, air valve inflow diameter m; include 0 for none' } }, ['node', 'kind']) } }),
+    run: async (ctx, a) => {
+      const net = ctx.getNet();
+      const def = candidates(net);
+      const vars: OptVar[] = a.candidates?.length ? a.candidates.map((c: OptVar) => {
+        if (!net.nodes.some((n) => n.id === c.node && n.kind === 'junction')) fail(`No junction "${c.node}".`);
+        return { node: c.node, kind: c.kind, options: c.options?.length ? [...new Set([0, ...c.options])].sort((x, y) => x - y) : def.find((d) => d.kind === c.kind)?.options ?? (c.kind === 'vessel' ? [0, 5, 10, 20, 40] : [0, 0.05, 0.1, 0.15]) };
+      }) : def;
+      if (!vars.length) fail('No candidate locations: give candidates.');
+      const r = ctx.optimise ? await ctx.optimise(vars) : optimiseProtection(net, { vars, population: 10, generations: 6 });
+      ctx.apply(applyDesign(net, vars, r.best.genes), 'AI: optimised protection');
+      return { feasible: r.best.feasible, relative_cost: r2(r.best.cost, 1), lowest_pressure_m: r2(r.best.minP, 1), highest_vs_class_pct: r2(r.best.maxRatio * 100, 0), surge_runs: r.evaluations, design: vars.map((v, k) => ({ node: v.node, device: v.kind, size: v.options[r.best.genes[k]], unit: v.kind === 'vessel' ? 'm³' : 'm (inflow diameter)' })) };
+    },
+  },
+  {
+    name: 'skeletonise', mutates: true,
+    description: 'Simplify the model: merge pipes in series through plain junctions (same diameter and material; the junction stays as a profile point) and optionally trim small dead ends. keep = node ids that must stay.',
+    params: obj({ keep: { type: 'array', items: { type: 'string' } }, trim_below_mm: num('Trim dead ends below this diameter (0 = off)') }),
+    run: async (ctx, a) => {
+      const net = ctx.getNet();
+      const sk = skeletonise(net, { keep: a.keep, trimBelow: (a.trim_below_mm ?? 0) / 1000 });
+      if (sk.changes.length) ctx.apply(sk.net, 'AI: skeletonise');
+      return { pipes_before: net.pipes.length, pipes_after: sk.net.pipes.length, changes: sk.changes.slice(0, 20) };
     },
   },
   {
