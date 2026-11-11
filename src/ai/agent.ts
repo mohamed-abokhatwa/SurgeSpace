@@ -1,7 +1,7 @@
 // The copilot: a tool-using loop. The model plans; every action is a SurgeSpace command; every number it reports
 // comes from the engine through those commands.
 import { COMMANDS, execute, type CommandContext } from '../app/commands';
-import { chat, type AIConfig, type ChatResponse, type Message, type Part, type ToolDef } from './providers';
+import { chat, chatStream, type AIConfig, type ChatResponse, type Message, type Part, type ToolDef } from './providers';
 
 export const SYSTEM_PROMPT = `You are the SurgeSpace copilot, a senior hydraulic transient (water hammer) engineer working inside the SurgeSpace app with the user.
 
@@ -34,6 +34,8 @@ export interface AgentOptions {
   onUpdate?: (m: Message[]) => void;
   /** Replace the network transport (tests). */
   chatFn?: typeof chat;
+  /** Stream the reply: called with each new piece of text as the model writes it (cleared at each new turn). */
+  onDelta?: (textSoFar: string) => void;
 }
 
 /** Run turns until the model stops calling tools. Returns the full conversation including tool calls and results. */
@@ -41,7 +43,7 @@ export async function runAgent(o: AgentOptions): Promise<{ messages: Message[]; 
   const messages = [...o.history];
   const tools = toolDefs();
   const usage = { input: 0, output: 0 };
-  const call = o.chatFn ?? chat;
+  const call = o.chatFn ?? (o.onDelta ? (cfg: AIConfig, req: Parameters<typeof chat>[1]) => { let acc = ''; o.onDelta!(''); return chatStream(cfg, req, (d) => { acc += d; o.onDelta!(acc); }); } : chat);
   for (let step = 0; step < (o.maxSteps ?? 30); step++) {
     if (o.signal?.aborted) break;
     const r: ChatResponse = await call(o.cfg, { system: o.system ?? SYSTEM_PROMPT, messages: compact(messages), tools, maxTokens: 4096, signal: o.signal });

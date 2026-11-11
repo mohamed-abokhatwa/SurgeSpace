@@ -185,6 +185,145 @@ function fromGemini(j: any): ChatResponse { // eslint-disable-line @typescript-e
   return { parts, stop: parts.some((p) => p.type === 'tool_call') ? 'tool_use' : c.finishReason === 'MAX_TOKENS' ? 'length' : 'end', usage: j.usageMetadata ? { input: j.usageMetadata.promptTokenCount, output: j.usageMetadata.candidatesTokenCount } : undefined };
 }
 
+// ── streaming (server-sent events) ──
+async function postStream(url: string, headers: Record<string, string>, body: unknown, signal: AbortSignal | undefined, onEvent: (data: string) => void): Promise<unknown | null> {
+  let res: Response;
+  try {
+    res = await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...headers }, body: JSON.stringify(body), signal });
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw e;
+    throw new AIError(`Could not reach the AI service (${(e as Error).message}). Check the internet connection and the address.`);
+  }
+  const ctype = res.headers.get('content-type') ?? '';
+  if (!res.ok || !ctype.includes('event-stream') || !res.body) {
+    // an error, or a server that ignored the stream request: read it as a normal answer
+    const text = await res.text();
+    if (res.ok && ctype.includes('event-stream')) {
+      // a client without streaming bodies: the whole stream arrives at once
+      for (const block of text.replace(/\r\n/g, '\n').split('\n\n')) {
+        const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).replace(/^ /, '')).join('\n');
+        if (data && data !== '[DONE]') onEvent(data);
+      }
+      return null;
+    }
+    let json: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+    if (!res.ok) {
+      const msg = json?.error?.message ?? json?.error ?? json?.message ?? text.slice(0, 300);
+      const hint = res.status === 401 || res.status === 403 ? ' The key was refused: check it in AI accounts.' : res.status === 429 ? ' The provider is limiting requests or the account has no credit.' : '';
+      throw new AIError(`${typeof msg === 'string' ? msg : JSON.stringify(msg)}${hint}`, res.status);
+    }
+    return json;
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+    let k: number;
+    while ((k = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, k);
+      buf = buf.slice(k + 2);
+      const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).replace(/^ /, '')).join('\n');
+      if (data && data !== '[DONE]') onEvent(data);
+    }
+  }
+  const rest = buf.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).replace(/^ /, '')).join('\n');
+  if (rest && rest !== '[DONE]') onEvent(rest);
+  return null;
+}
+
+/** One model turn with any provider, the text arriving piece by piece through onText as it is written. */
+export async function chatStream(cfg: AIConfig, req: ChatRequest, onText: (delta: string) => void): Promise<ChatResponse> {
+  const p = providerById(cfg.provider);
+  if (!p) throw new AIError(`Unknown AI provider ${cfg.provider}.`);
+  if (p.needsKey && !cfg.apiKey) throw new AIError(`Add your ${p.name} key in AI accounts first.`);
+  const base = trimSlash(cfg.baseUrl || p.baseUrl);
+  const parse = (d: string) => { try { return JSON.parse(d); } catch { return null; } };
+  if (p.wire === 'anthropic') {
+    const blocks: { type: string; text?: string; id?: string; name?: string; json?: string }[] = [];
+    let stop = 'end_turn';
+    const usage = { input: 0, output: 0 };
+    const full = await postStream(`${base}/v1/messages`, { 'x-api-key': cfg.apiKey!, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, { model: cfg.model, ...toAnthropic(req), stream: true }, req.signal, (d) => {
+      const e = parse(d);
+      if (!e) return;
+      if (e.type === 'error') throw new AIError(e.error?.message ?? 'The AI service reported an error.');
+      if (e.type === 'message_start') usage.input = e.message?.usage?.input_tokens ?? 0;
+      if (e.type === 'content_block_start') blocks[e.index] = e.content_block.type === 'tool_use' ? { type: 'tool_use', id: e.content_block.id, name: e.content_block.name, json: '' } : { type: e.content_block.type, text: e.content_block.text ?? '' };
+      if (e.type === 'content_block_delta') {
+        const b = blocks[e.index];
+        if (!b) return;
+        if (e.delta.type === 'text_delta') { b.text = (b.text ?? '') + e.delta.text; onText(e.delta.text); }
+        if (e.delta.type === 'input_json_delta') b.json = (b.json ?? '') + e.delta.partial_json;
+      }
+      if (e.type === 'message_delta') { stop = e.delta?.stop_reason ?? stop; usage.output = e.usage?.output_tokens ?? usage.output; }
+    });
+    if (full) { const r = fromAnthropic(full); r.parts.forEach((x) => x.type === 'text' && onText(x.text)); return r; }
+    const parts: Part[] = blocks.filter(Boolean).flatMap((b): Part[] => {
+      if (b.type === 'text') return b.text ? [{ type: 'text', text: b.text }] : [];
+      if (b.type === 'tool_use') { let args: unknown = {}; try { args = b.json ? JSON.parse(b.json) : {}; } catch { args = { _unparsed: b.json }; } return [{ type: 'tool_call', id: b.id!, name: b.name!, args }]; }
+      return [];
+    });
+    return { parts, stop: stop === 'tool_use' ? 'tool_use' : stop === 'max_tokens' ? 'length' : 'end', usage };
+  }
+  if (p.wire === 'gemini') {
+    const parts: Part[] = [];
+    let finish = '', usage: ChatResponse['usage'];
+    let k = 0;
+    const full = await postStream(`${base}/models/${encodeURIComponent(cfg.model)}:streamGenerateContent?alt=sse`, { 'x-goog-api-key': cfg.apiKey! }, toGemini(req), req.signal, (d) => {
+      const j = parse(d);
+      const c = j?.candidates?.[0];
+      if (j?.usageMetadata) usage = { input: j.usageMetadata.promptTokenCount ?? 0, output: j.usageMetadata.candidatesTokenCount ?? 0 };
+      if (!c) return;
+      for (const x of c.content?.parts ?? []) {
+        if (x.text) { const last = parts[parts.length - 1]; if (last?.type === 'text') last.text += x.text; else parts.push({ type: 'text', text: x.text }); onText(x.text); }
+        if (x.functionCall) parts.push({ type: 'tool_call', id: `gem_${Date.now().toString(36)}_${k++}`, name: x.functionCall.name, args: x.functionCall.args ?? {} });
+      }
+      if (c.finishReason) finish = c.finishReason;
+    });
+    if (full) { const r = fromGemini(Array.isArray(full) ? full[0] : full); r.parts.forEach((x) => x.type === 'text' && onText(x.text)); return r; }
+    return { parts, stop: parts.some((x) => x.type === 'tool_call') ? 'tool_use' : finish === 'MAX_TOKENS' ? 'length' : 'end', usage };
+  }
+  const headers: Record<string, string> = {};
+  if (cfg.apiKey) headers[p.id === 'azure' ? 'api-key' : 'authorization'] = p.id === 'azure' ? cfg.apiKey : `Bearer ${cfg.apiKey}`;
+  if (p.id === 'openrouter') { headers['HTTP-Referer'] = 'https://engspace.app/surgespace'; headers['X-Title'] = 'SurgeSpace'; }
+  const body = toOpenAI(req, cfg.model) as Record<string, unknown>;
+  if (p.id !== 'openai' && p.id !== 'azure') { body.max_tokens = body.max_completion_tokens; delete body.max_completion_tokens; }
+  body.stream = true;
+  if (p.id === 'openai') body.stream_options = { include_usage: true };
+  let text = '', finish = '';
+  const calls: { id?: string; name?: string; args: string }[] = [];
+  let usage: ChatResponse['usage'];
+  const full = await postStream(`${base}/chat/completions`, headers, body, req.signal, (d) => {
+    const j = parse(d);
+    if (!j) return;
+    if (j.error) throw new AIError(j.error.message ?? 'The AI service reported an error.');
+    if (j.usage) usage = { input: j.usage.prompt_tokens ?? 0, output: j.usage.completion_tokens ?? 0 };
+    const ch = j.choices?.[0];
+    if (!ch) return;
+    const dc = ch.delta?.content;
+    if (typeof dc === 'string' && dc) { text += dc; onText(dc); }
+    for (const tc of ch.delta?.tool_calls ?? []) {
+      const i = tc.index ?? calls.length;
+      calls[i] ??= { args: '' };
+      if (tc.id) calls[i].id = tc.id;
+      if (tc.function?.name) calls[i].name = tc.function.name;
+      if (tc.function?.arguments) calls[i].args += tc.function.arguments;
+    }
+    if (ch.finish_reason) finish = ch.finish_reason;
+  });
+  if (full) { const r = fromOpenAI(full); r.parts.forEach((x) => x.type === 'text' && onText(x.text)); return r; }
+  const parts: Part[] = text ? [{ type: 'text', text }] : [];
+  calls.filter(Boolean).forEach((c, i) => {
+    let args: unknown = {};
+    try { args = c.args ? JSON.parse(c.args) : {}; } catch { args = { _unparsed: c.args }; }
+    parts.push({ type: 'tool_call', id: c.id ?? `call_${i}`, name: c.name ?? '', args });
+  });
+  return { parts, stop: calls.length || finish === 'tool_calls' ? 'tool_use' : finish === 'length' ? 'length' : 'end', usage };
+}
+
 /** One model turn with any provider. */
 export async function chat(cfg: AIConfig, req: ChatRequest): Promise<ChatResponse> {
   const p = providerById(cfg.provider);

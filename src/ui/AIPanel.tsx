@@ -179,6 +179,7 @@ export function CopilotPanel({ ctx, hasResult, onAccounts, onUseNarrative, queue
   const [input, setInput] = useState('');
   const [files, setFiles] = useState<{ name: string; part: Part }[]>([]);
   const [running, setRunning] = useState(false);
+  const [live, setLive] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState({ input: 0, output: 0 });
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -208,13 +209,13 @@ export function CopilotPanel({ ctx, hasResult, onAccounts, onUseNarrative, queue
     const ac = new AbortController();
     abort.current = ac;
     try {
-      const out = await runAgent({ cfg, ctx, history, signal: ac.signal, onUpdate: setMessages });
+      const out = await runAgent({ cfg, ctx, history, signal: ac.signal, onUpdate: (m) => { setLive(''); setMessages(m); }, onDelta: setLive });
       setMessages(out.messages);
       setUsage((u) => ({ input: u.input + out.usage.input, output: u.output + out.usage.output }));
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setError((e as Error).message);
     } finally {
-      setRunning(false); abort.current = null;
+      setRunning(false); setLive(''); abort.current = null;
     }
   };
 
@@ -336,7 +337,8 @@ export function CopilotPanel({ ctx, hasResult, onAccounts, onUseNarrative, queue
             </div>
           );
         })}
-        {running && <div className="msg assistant thinking"><span className="spinner small" /> Working…</div>}
+        {running && live.trim() && <div className="msg assistant streaming"><div className="md" dangerouslySetInnerHTML={{ __html: mdToHtml(live, 4) }} /></div>}
+        {running && !live.trim() && <div className="msg assistant thinking"><span className="spinner small" /> Working…</div>}
         {error && <div className="msg error small" role="alert">{error}<div><button className="btn small" onClick={onAccounts}>AI accounts</button></div></div>}
         {needConsent && (
           <div className="card small" style={{ boxShadow: 'none' }}>

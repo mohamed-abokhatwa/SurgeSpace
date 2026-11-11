@@ -9,7 +9,7 @@ import { COMMANDS, execute, localContext, modelSummary } from '../src/app/comman
 import { FILE_VERSION, projectJson, upgradeProject } from '../src/app/project';
 import { risingMain } from '../src/engine/cases';
 import { defaultSettings, type Network } from '../src/engine/types';
-import { _wire, chat, setFetch, listModels, type ChatRequest } from '../src/ai/providers';
+import { _wire, chat, chatStream, setFetch, listModels, type ChatRequest } from '../src/ai/providers';
 import { runAgent, toolDefs } from '../src/ai/agent';
 import { mdToHtml } from '../src/ai/markdown';
 import { buildReport } from '../src/report/report';
@@ -201,6 +201,63 @@ const empty = (): Network => ({ name: 'x', nodes: [], pipes: [], pumps: [], valv
     const r = runTransient(net, { steady, frames: 100 });
     const html = buildReport(net, r, designChecks(net, r), { version: 'test', route: ['SUMP', 'TANK'], nodes: [] });
     t('report: narrative included and marked as AI-drafted', html.includes('Report narrative') && html.includes('The main lifts water.') && html.includes('AI copilot'));
+  }
+
+  {
+    // streaming: text arrives piece by piece; tool calls are assembled from fragments, for all three wire formats
+    const sse = (events: unknown[], split = 7) => {
+      const raw = events.map((e) => `data: ${typeof e === 'string' ? e : JSON.stringify(e)}\n\n`).join('');
+      const chunks: string[] = [];
+      for (let k = 0; k < raw.length; k += split) chunks.push(raw.slice(k, k + split)); // cut anywhere, as a network would
+      return new Response(new ReadableStream({ start(c) { for (const ch of chunks) c.enqueue(new TextEncoder().encode(ch)); c.close(); } }), { headers: { 'content-type': 'text/event-stream' } });
+    };
+    const req: ChatRequest = { system: 's', messages: [{ role: 'user', parts: [{ type: 'text', text: 'hi' }] }], tools: [{ name: 'run_analysis', description: 'd', params: { type: 'object', properties: {} } }] };
+    let sent: Record<string, unknown> = {};
+    setFetch((async (_u: string, init: RequestInit) => { sent = JSON.parse(String(init.body)); return sse([
+      { type: 'message_start', message: { usage: { input_tokens: 12 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Running ' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'it now.' } },
+      { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 't1', name: 'run_analysis' } },
+      { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"dura' } },
+      { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: 'tion_s": 60}' } },
+      { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 9 } },
+    ]); }) as never);
+    const got: string[] = [];
+    const a = await chatStream({ provider: 'anthropic', model: 'm', apiKey: 'k' }, req, (d) => got.push(d));
+    t('streaming (Anthropic): text in pieces, tool call assembled, usage', sent.stream === true && got.join('') === 'Running it now.' && got.length === 2 && a.stop === 'tool_use' && JSON.stringify(a.parts[1]) === JSON.stringify({ type: 'tool_call', id: 't1', name: 'run_analysis', args: { duration_s: 60 } }) && a.usage?.input === 12 && a.usage?.output === 9);
+    setFetch((async (_u: string, init: RequestInit) => { sent = JSON.parse(String(init.body)); return sse([
+      { choices: [{ delta: { content: 'Hel' } }] }, { choices: [{ delta: { content: 'lo' } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'run_analysis', arguments: '{"a":' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '1}' } }] }, finish_reason: 'tool_calls' }] },
+      { choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } }, '[DONE]',
+    ]); }) as never);
+    const got2: string[] = [];
+    const o = await chatStream({ provider: 'openai', model: 'm', apiKey: 'k' }, req, (d) => got2.push(d));
+    t('streaming (OpenAI and compatible): text, tool call from fragments, usage', sent.stream === true && got2.join('') === 'Hello' && o.stop === 'tool_use' && (o.parts[1] as { args: unknown }).args && JSON.stringify((o.parts[1] as { args: unknown }).args) === '{"a":1}' && o.usage?.output === 3);
+    let url = '';
+    setFetch((async (u: string) => { url = u; return sse([
+      { candidates: [{ content: { parts: [{ text: 'Gem' }] } }] },
+      { candidates: [{ content: { parts: [{ text: 'ini' }, { functionCall: { name: 'run_analysis', args: { x: 2 } } }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2 } },
+    ]); }) as never);
+    const got3: string[] = [];
+    const g = await chatStream({ provider: 'gemini', model: 'gemini-x', apiKey: 'k' }, req, (d) => got3.push(d));
+    t('streaming (Gemini): SSE endpoint, text joined, function call', url.includes(':streamGenerateContent?alt=sse') && got3.join('') === 'Gemini' && g.parts[0].type === 'text' && (g.parts[0] as { text: string }).text === 'Gemini' && g.stop === 'tool_use');
+    // a server that ignores the stream request: the plain answer is used and still shown
+    setFetch((async () => new Response(JSON.stringify({ choices: [{ message: { content: 'whole answer' }, finish_reason: 'stop' }] }), { headers: { 'content-type': 'application/json' } })) as never);
+    const got4: string[] = [];
+    const w = await chatStream({ provider: 'ollama', model: 'm' }, req, (d) => got4.push(d));
+    t('streaming falls back to a plain answer', got4.join('') === 'whole answer' && w.stop === 'end');
+    setFetch((async () => new Response(JSON.stringify({ error: { message: 'bad key' } }), { status: 401, headers: { 'content-type': 'application/json' } })) as never);
+    let err = '';
+    try { await chatStream({ provider: 'openai', model: 'm', apiKey: 'k' }, req, () => {}); } catch (e) { err = (e as Error).message; }
+    t('streaming reports errors with the usual hint', err.includes('bad key') && err.includes('AI accounts'));
+    // the agent streams when asked
+    setFetch((async () => sse([{ choices: [{ delta: { content: 'Done.' }, finish_reason: 'stop' }] }])) as never);
+    const deltas: string[] = [];
+    const ctxS = localContext(risingMain(true));
+    await runAgent({ cfg: { provider: 'openai', model: 'm', apiKey: 'k' }, ctx: ctxS, history: [{ role: 'user', parts: [{ type: 'text', text: 'x' }] }], onDelta: (x) => deltas.push(x) });
+    t('agent streams the reply as it is written', deltas[deltas.length - 1] === 'Done.');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);
