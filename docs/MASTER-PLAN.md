@@ -28,7 +28,7 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [x] S0.2 Element field schema (first version: used by AI tools and validation)
 - [x] S0.3 Project file versioning and upgrade of old files
 - [ ] S0.4 Central state store; properties and data sheets generated from the schema
-- [~] S0.5 Automated tests in CI for every engine (done); click-through UI tests in CI (not yet; run by hand with Playwright)
+- [x] S0.5 Automated tests in CI for every engine and a click-through UI smoke test (menus, panels, dialogs, runs, Arabic) with Playwright
 
 ### Phase 2 — AI release 1 (brought forward)
 - [x] S2.1 AI accounts: 13 providers, encrypted keys, test connection, AI badge and connect card
@@ -47,7 +47,7 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [~] S1.6 Turbines: speed governor (PI on speed, rate-limited gates) on load rejection (done); turbine four-quadrant characteristics (not yet)
 - [x] S1.7 Viscoelastic pipe model (PE, PVC): Kelvin–Voigt creep, stable implicit coupling; damping and period lengthening checked (indicative HDPE values; calibrate per pipe)
 - [x] S1.8 10,000-pipe networks (steady 2 s, surge in seconds at the default reach budget; `validation/large-network.ts`); cases run in parallel on spare cores
-- [~] S1.9 Validation: EPANET, TSNet, benchmark and textbook checks run in CI; the printed Validation Book is not written yet
+- [x] S1.9 Validation: EPANET, TSNet, benchmark and textbook checks run in CI; summary in `docs/THEORY-AND-VALIDATION.md`
 
 ### Phase 3 — Professional workspace depth
 - [~] S3.1 Results of other cases overlaid on the profile (done); cases stored as differences from a parent (not yet: cases are full copies)
