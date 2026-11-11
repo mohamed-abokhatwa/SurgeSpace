@@ -1,6 +1,7 @@
-// Interface language (English / Arabic). Menus, ribbon, panel and tab names are translated; the layout turns
+// Interface language (English / Arabic). Menus, ribbon, tabs and the contents of the panels and dialogs are translated; the layout turns
 // right-to-left in Arabic. Engineering terms that have no settled Arabic form keep their English name.
 import { useSyncExternalStore } from 'react';
+import { AR_PANELS } from './i18n-panels';
 
 export type Lang = 'en' | 'ar';
 let lang: Lang = (() => { try { return (localStorage.getItem('surgespace.lang') as Lang) || 'en'; } catch { return 'en'; } })();
@@ -59,4 +60,61 @@ export function tr(s: string): string {
   const k = /^(.*?)( \(run first\))$/.exec(s);
   if (k && AR[k[1]]) return `${AR[k[1]]} (شغّل أولًا)`;
   return s;
+}
+
+// ── panel contents: translate the interface text as it is drawn ──
+const ALL_AR: Record<string, string> = { ...AR_PANELS, ...AR };
+const SKIP = 'TEXTAREA, INPUT, CODE, PRE, SCRIPT, STYLE, .md, .no-tr, [contenteditable]';
+const original = new WeakMap<Node, string>();
+const originalTitle = new WeakMap<Element, string>();
+/** The Arabic for a whole interface string, keeping a trailing colon or ellipsis and surrounding spaces. */
+export function trText(s: string): string | null {
+  const m = /^(\s*)(.*?)(\s*)$/s.exec(s);
+  if (!m || !m[2]) return null;
+  const core = m[2];
+  const hit = ALL_AR[core] ?? (core.endsWith(':') && ALL_AR[core.slice(0, -1)] ? `${ALL_AR[core.slice(0, -1)]}:` : undefined);
+  return hit ? m[1] + hit + m[3] : null;
+}
+function translateNode(n: Node) {
+  if (n.nodeType === 3) {
+    const p = n.parentElement;
+    if (!p || p.closest(SKIP)) return;
+    const cur = n.nodeValue ?? '';
+    // a word inside an English sentence stays English, so the sentence reads as one language
+    const blk = p.closest('p, .hint, li');
+    if (blk && (blk.textContent ?? '').trim() !== cur.trim() && lang === 'ar') return;
+    if (lang === 'ar') {
+      const t = trText(cur);
+      if (t && t !== cur) { original.set(n, cur); n.nodeValue = t; }
+    } else {
+      const o = original.get(n);
+      if (o !== undefined && trText(o) === cur) n.nodeValue = o;
+    }
+    return;
+  }
+  if (n.nodeType !== 1) return;
+  const el = n as Element;
+  if (el.matches(SKIP)) return;
+  const title = el.getAttribute('title');
+  if (title) {
+    if (lang === 'ar') { const t = trText(title); if (t) { originalTitle.set(el, title); el.setAttribute('title', t); } }
+    else { const o = originalTitle.get(el); if (o && trText(o) === title) el.setAttribute('title', o); }
+  }
+  el.childNodes.forEach(translateNode);
+}
+let observer: MutationObserver | null = null;
+/** Keep the panels of `root` in the interface language (call once at start). */
+export function startPanelTranslation(root: HTMLElement) {
+  if (typeof MutationObserver === 'undefined' || observer) return;
+  observer = new MutationObserver((muts) => {
+    if (lang === 'en') return;
+    for (const m of muts) {
+      if (m.type === 'characterData') translateNode(m.target);
+      else if (m.type === 'attributes') translateNode(m.target);
+      else m.addedNodes.forEach(translateNode);
+    }
+  });
+  observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['title'] });
+  translateNode(root);
+  subs.add(() => translateNode(root));
 }

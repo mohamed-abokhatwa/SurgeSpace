@@ -59,6 +59,13 @@ try {
   await p.evaluate(() => localStorage.setItem('surgespace.lang', 'ar'));
   await p.reload(); await p.waitForTimeout(2500);
   t('Arabic interface is right to left', (await p.evaluate(() => document.documentElement.dir)) === 'rtl');
+  await p.locator('.dtab').nth(4).click(); await p.waitForTimeout(300);
+  const arPanel = await p.evaluate(() => document.body.innerText.includes('حالة جديدة من الحالية') || document.body.innerText.includes('تشغيل كل الحالات'));
+  t('panel contents are in Arabic', arPanel);
+  await p.locator('.menu-btn').nth(2).click();
+  await p.locator('.menu-item').filter({ hasText: /اللغة|Language/ }).first().hover();
+  await p.locator('.menu-item', { hasText: 'English' }).first().click(); await p.waitForTimeout(300);
+  t('switching back to English restores the panels', (await p.evaluate(() => document.documentElement.dir)) === 'ltr' && (await p.evaluate(() => document.body.innerText.includes('Run all cases and compare'))));
   t('no script errors', !errs.length, errs.join(' | '));
   await b.close();
 } catch (e) { t('smoke test ran', false, e.message); } finally { srv.kill(); }

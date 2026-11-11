@@ -10,9 +10,13 @@ import '@fontsource/ibm-plex-mono/latin-500.css'
 import '@fontsource/ibm-plex-mono/latin-600.css'
 import './index.css'
 import App from './App.tsx'
+import { startPanelTranslation } from './app/i18n'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
   </StrictMode>,
 )
+
+// panels and dialogs follow the interface language (dialogs may render outside #root)
+startPanelTranslation(document.body)
