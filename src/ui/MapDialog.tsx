@@ -17,7 +17,9 @@ export function MapDialog({ net, setNet, onClose, onToast }: { net: Network; set
   const pad = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 200) * 0.08;
   const ext = { x0: Math.min(...xs) - pad, y0: Math.min(...ys) - pad, x1: Math.max(...xs) + pad, y1: Math.max(...ys) + pad };
   const centre = net.nodes.length ? toLatLon(crs, (ext.x0 + ext.x1) / 2, (ext.y0 + ext.y1) / 2) : null;
-  const plausible = centre && Math.abs(centre[0]) < 85 && Math.abs(centre[1]) <= 180;
+  // UTM eastings lie between about 160 and 840 km; small numbers mean local (schematic) coordinates
+  const localLike = crs.kind === 'utm' && (Math.min(...xs) < 100000 || Math.max(...xs) > 900000);
+  const plausible = !!centre && !localLike && Math.abs(centre[0]) < 85 && Math.abs(centre[1]) <= 180;
   const saveCrs = () => setNet((n) => ({ ...n, crs }), 'Coordinate system');
   const basemap = async () => {
     saveCrs();
@@ -79,7 +81,7 @@ export function MapDialog({ net, setNet, onClose, onToast }: { net: Network; set
           <label className="field"><span>Hemisphere</span><select value={crs.south ? 'S' : 'N'} onChange={(e) => setCrs({ ...crs, south: e.target.value === 'S' })}><option value="N">North</option><option value="S">South</option></select></label>
         </>}
       </div>
-      <p className="small muted">{centre ? <>Model centre: {centre[0].toFixed(5)}°, {centre[1].toFixed(5)}° {plausible ? '' : <b className="bad">— not a real place: check the zone, or the model is in local coordinates</b>}</> : 'Draw or import the model first.'} Saudi Arabia: zones 36–40 North (Makkah, Jeddah, Madinah 37; Riyadh 38; Dammam 39).</p>
+      <p className="small muted">{centre ? <>Model centre: {centre[0].toFixed(5)}°, {centre[1].toFixed(5)}° {plausible ? '' : <b className="bad">— {localLike ? 'the coordinates look local (schematic), not UTM: import or draw the model in UTM metres first' : 'not a real place: check the zone'}</b>}</> : 'Draw or import the model first.'} Saudi Arabia: zones 36–40 North (Makkah, Jeddah, Madinah 37; Riyadh 38; Dammam 39).</p>
       <div className="label">Basemap</div>
       <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
         <select className="cell boxed" style={{ width: 260 }} value={src} onChange={(e) => setSrc(e.target.value)}>{BASEMAPS.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>

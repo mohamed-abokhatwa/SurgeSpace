@@ -12,6 +12,7 @@ import { fromGeoJSON, guessFields, toDXF, toGeoJSON } from '../src/app/exchange'
 import { importDxf } from '../src/engine/importers';
 import { xlsx } from '../src/app/xlsx';
 import { healthCheck } from '../src/app/health';
+import { addItem, allItems, applyItem } from '../src/app/library';
 import { resultsBook } from '../src/app/resultsBook';
 import { connectLive, mqttParse, mqttPublish, readPayloadValue } from '../src/app/live';
 
@@ -151,6 +152,17 @@ const extremes = (n: Network) => { const r = runTransient(n, { steady: solveStea
   const after = healthCheck(fixed);
   t('health fixes clear the errors and warnings they cover', before.filter((i) => i.fix).length >= 6 && !after.some((i) => i.level === 'error') && !after.some((i) => i.fix), `${before.filter((i) => i.fix).length} fixes; left: ${after.filter((i) => i.level !== 'info').map((i) => i.title).join('; ') || 'none'}`);
   t('fixed model runs', runTransient(fixed, { steady: solveSteady(fixed), frames: 20 }).envelopes.length > 0);
+}
+{
+  // library: save a pump and an air valve, apply them elsewhere
+  const net = risingMain(true);
+  addItem('pump', 'Duty pump', net.pumps[0]);
+  addItem('airValve', 'AV', net.nodes.find((n) => n.id === 'HP2600')!.airValve!);
+  const its = allItems();
+  const pumpIt = its.find((i) => i.name === 'Duty pump')!, av = its.find((i) => i.name === 'AV')!;
+  const n2 = applyItem(applyItem({ ...net, pumps: net.pumps.map((p) => ({ ...p, curve: [[0.1, 10]] as [number, number][], inertia: 1 })) }, pumpIt, ['PU2']), av, ['CH1200']);
+  t('library: pump data and air valve applied', JSON.stringify(n2.pumps[1].curve) === JSON.stringify(net.pumps[0].curve) && n2.pumps[1].inertia === net.pumps[0].inertia && n2.pumps[0].inertia === 1 && !!n2.nodes.find((n) => n.id === 'CH1200')!.airValve);
+  t('library: generic air valves and pipe types', its.some((i) => i.id === 'g-av100') && its.some((i) => i.kind === 'pipe'));
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

@@ -26,6 +26,7 @@ import { DataSheets } from './ui/DataSheets';
 import { CasesPanel, addCase, syncActive } from './ui/Cases';
 import { LivePanel } from './ui/LivePanel';
 import { MapDialog } from './ui/MapDialog';
+import { LibraryPanel } from './ui/LibraryPanel';
 import { EPSPanel, epsPipeColours, type EPSColour } from './ui/EPSPanel';
 import { clock, networkAt, type EPSResult } from './engine/eps';
 import { skeletonise } from './engine/skeleton';
@@ -43,7 +44,7 @@ import { initAITransport } from './ai/transport';
 import { useAI } from './ai/accounts';
 import { AIAccountsDialog, CopilotPanel } from './ui/AIPanel';
 
-type LeftTab = 'explorer' | 'operations';
+type LeftTab = 'explorer' | 'operations' | 'library';
 type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log' | 'eps' | 'live';
 interface UncertaintyOut { runs: { label: string; maxHead: number; minPressure: number }[]; envelopes: PipeEnvelope[]; spread: { maxHead: [number, number]; minPressure: [number, number] } }
 type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai' | 'map';
@@ -717,12 +718,14 @@ export default function App() {
         <aside className="pane left" aria-hidden={!showLeft}>
           {showLeft && <>
             <div className="pane-tabs">
-              <button className={`ptab ${left === 'explorer' ? 'on' : ''}`} onClick={() => setLeft('explorer')}>Model Explorer</button>
+              <button className={`ptab ${left === 'explorer' ? 'on' : ''}`} onClick={() => setLeft('explorer')}>Explorer</button>
               <button className={`ptab ${left === 'operations' ? 'on' : ''}`} onClick={() => setLeft('operations')}>Operations{net.event.kind !== 'none' ? <span className="badge">{1 + (net.extraEvents?.length ?? 0)}</span> : null}</button>
+              <button className={`ptab ${left === 'library' ? 'on' : ''}`} onClick={() => setLeft('library')}>Library</button>
             </div>
             <div className="pane-body">
               {left === 'explorer' && <Explorer net={net} selected={selected} onSelect={select} />}
               {left === 'operations' && <OperationsPanel net={net} setNet={setNet} />}
+              {left === 'library' && <LibraryPanel net={net} setNet={setNet} selected={selected} onToast={setToast} />}
             </div>
           </>}
         </aside>
