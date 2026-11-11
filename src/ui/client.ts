@@ -67,3 +67,32 @@ export function cancelAll() {
   pending.forEach((p) => p.reject(new Error('Cancelled')));
   pending.clear();
 }
+
+/** Run several jobs at once on a pool of background engines (one per spare processor core, at most 6).
+ *  Falls back to one-by-one when the page cannot start extra workers. Results keep the input order. */
+export async function callParallel<T = any>(reqs: Req[], onDone?: (done: number, total: number) => void): Promise<(T | Error)[]> {
+  const cores = typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 2;
+  const n = Math.max(1, Math.min(reqs.length, cores - 1, 6));
+  const out: (T | Error)[] = new Array(reqs.length);
+  let next = 0, done = 0;
+  const runOne = (w: Worker | null, k: number) => new Promise<void>((res) => {
+    const finish = (v: T | Error) => { out[k] = v; done++; onDone?.(done, reqs.length); res(); };
+    if (!w) { call<T>(reqs[k]).then(finish, (e) => finish(e as Error)); return; }
+    const id = ++seq;
+    w.onmessage = (ev) => {
+      const m = ev.data;
+      if (m.id !== id || m.type === 'progress') return;
+      finish(m.type === 'error' ? new Error(m.message) : (m as T));
+    };
+    w.onerror = () => finish(new Error('Engine error'));
+    w.postMessage({ ...reqs[k], id });
+  });
+  const lane = async () => {
+    let w: Worker | null = null;
+    if (!useMainThread && n > 1) { try { w = new Worker(new URL('../worker.ts', import.meta.url), { type: 'module' }); } catch { w = null; } }
+    while (next < reqs.length) { const k = next++; await runOne(w, k); }
+    w?.terminate();
+  };
+  await Promise.all(Array.from({ length: n }, lane));
+  return out;
+}

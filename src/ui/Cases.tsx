@@ -4,7 +4,7 @@ import { useState } from 'react';
 import type { Network, ModelCase } from '../engine/types';
 import type { TransientResult } from '../engine/transient';
 import type { Check } from '../engine/analysis';
-import { call } from './client';
+import { callParallel } from './client';
 import { fmtQ, useUnits } from '../app/units';
 
 export interface CaseSummary { id: string; name: string; maxHead: number; maxP: number; minP: number; cavity: number; slams: number; fails: number; warns: number; runtime: number; error?: string }
@@ -74,18 +74,16 @@ export function CasesPanel({ net, setProject, busy, setBusy }: { net: Network; s
   const base = synced[0];
   const runAll = async () => {
     const list = syncActive(ensureCases(net));
-    const out: CaseSummary[] = [];
-    for (let k = 0; k < list.length; k++) {
-      const c = list[k];
-      setBusy(`Running case ${k + 1} of ${list.length}: ${c.name}…`);
-      try {
-        const o = await call<{ result: TransientResult; checks: Check[] }>({ type: 'run', net: c.model as Network });
-        out.push({ id: c.id, name: c.name, ...summarize(c.model, o.result, o.checks) });
-      } catch (e) {
-        out.push({ id: c.id, name: c.name, maxHead: NaN, maxP: NaN, minP: NaN, cavity: NaN, slams: 0, fails: 0, warns: 0, runtime: 0, error: (e as Error).message });
-      }
-      setRows([...out]);
-    }
+    // cases run side by side on the spare processor cores
+    setBusy(`Running ${list.length} cases…`);
+    const res = await callParallel<{ result: TransientResult; checks: Check[] }>(list.map((c) => ({ type: 'run' as const, net: c.model as Network })), (d, n) => setBusy(`Running cases: ${d} of ${n} done…`));
+    const out: CaseSummary[] = list.map((c, k) => {
+      const o = res[k];
+      return o instanceof Error
+        ? { id: c.id, name: c.name, maxHead: NaN, maxP: NaN, minP: NaN, cavity: NaN, slams: 0, fails: 0, warns: 0, runtime: 0, error: o.message }
+        : { id: c.id, name: c.name, ...summarize(c.model, o.result, o.checks) };
+    });
+    setRows(out);
     setBusy(null);
   };
   const best = (f: (r: CaseSummary) => number, lo = true) => { if (!rows) return null; const ok = rows.filter((r) => Number.isFinite(f(r))); if (!ok.length) return null; return ok.reduce((a, b) => ((lo ? f(b) < f(a) : f(b) > f(a)) ? b : a)).id; };
