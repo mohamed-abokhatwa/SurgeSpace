@@ -306,6 +306,22 @@ function PumpProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
         <QNum label="Pump + motor inertia" q="inertia" value={p.inertia} digits={3} onChange={(v) => v !== undefined && set({ inertia: v })} />
         <p className="hint">Thorley estimate for this duty: <b>{fmtQ(est, 'inertia', 2, units)}</b> · <button className="linkbtn" onClick={() => set({ inertia: +est.toFixed(2) })}>use it</button></p>
       </Group>
+      <Group title="Four-quadrant behaviour" open={!!p.fourQuadrant} right={p.fourQuadrant ? <span className="pill good">{p.fourQuadrant}</span> : undefined}>
+        <label className="field"><span>Reverse flow and reverse rotation</span>
+          <select value={p.fourQuadrant ?? ''} onChange={(e) => set({ fourQuadrant: (e.target.value || undefined) as typeof p.fourQuadrant })}>
+            <option value="">Off — normal pump zone (with a non-return valve)</option>
+            <option value="generic">Generic — derived from this pump curve</option>
+            <option value="suter">Manufacturer data (Suter curves)</option>
+          </select>
+        </label>
+        {p.fourQuadrant === 'suter' && (
+          <label className="field" style={{ marginTop: 6 }}><span>Suter data: one row per angle — θ (°), WH, WB</span>
+            <textarea rows={6} defaultValue={p.suter ? p.suter.theta.map((t, i) => `${t}\t${p.suter!.wh[i]}\t${p.suter!.wb[i]}`).join('\n') : ''} placeholder={'0\t-0.55\t-0.43\n5\t-0.48\t-0.26\n…'}
+              onBlur={(e) => { const rows = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 3 && r.every(Number.isFinite)).sort((a, b) => a[0] - b[0]); set({ suter: rows.length ? { theta: rows.map((r) => r[0]), wh: rows.map((r) => r[1]), wb: rows.map((r) => r[2]) } : undefined }); }} />
+          </label>
+        )}
+        <p className="hint">Use it for pumps without a non-return valve (or with a slow one): after a trip the flow reverses and the pump can turn backwards like a turbine. The generic characteristic is an approximation; paste the manufacturer's Suter data for final design.</p>
+      </Group>
       <Group title="Discharge non-return valve" open={p.checkValve} right={p.checkValve ? <span className="pill good">fitted</span> : undefined}>
         <DeviceDatalists />
         <label className="row small"><input type="checkbox" checked={p.checkValve} onChange={(e) => set({ checkValve: e.target.checked })} /> Non-return valve on the discharge</label>

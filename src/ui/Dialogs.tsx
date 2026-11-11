@@ -50,6 +50,12 @@ export function RunSetupDialog({ net, setNet, onClose, defaults, setDefaults }: 
             <div className="grid2">
               <label className="field"><span>Simulation time <em className="unit">s</em></span><input type="number" value={s.duration} onChange={(e) => set({ duration: Math.max(num(e.target.value) || 1, 0.1) })} /></label>
               <label className="field"><span>Animation frames kept</span><input type="number" step={100} value={s.frames ?? 600} onChange={(e) => set({ frames: Math.max(50, Math.min(5000, num(e.target.value) || 600)) })} /></label>
+              <label className="field"><span>Surge engine</span>
+                <select value={s.engine ?? 'wave'} onChange={(e) => set({ engine: e.target.value as 'wave' | 'rigid' })}>
+                  <option value="wave">Wave (method of characteristics, column separation)</option>
+                  <option value="rigid">Rigid column (slow events, mass oscillation)</option>
+                </select>
+              </label>
               <label className="field"><span>Friction formula</span>
                 <select value={s.friction} onChange={(e) => set({ friction: e.target.value as 'DW' | 'HW' })}>
                   <option value="DW">Darcy–Weisbach (ε in mm)</option>
@@ -59,7 +65,7 @@ export function RunSetupDialog({ net, setNet, onClose, defaults, setDefaults }: 
             </div>
             <label className="row small" style={{ marginTop: 12 }}><input type="checkbox" checked={s.unsteadyFriction} onChange={(e) => set({ unsteadyFriction: e.target.checked })} /> Unsteady friction (Brunone–Vítkovský with Vardy’s coefficient) — realistic wave damping</label>
             <label className="row small" style={{ marginTop: 6 }}><input type="checkbox" checked={s.pressureDependentDemand} onChange={(e) => set({ pressureDependentDemand: e.target.checked })} /> Pressure-dependent demands during the run (orifice law)</label>
-            <p className="hint">Animation frames set how smooth playback and graphs are; the solver always uses its own (much finer) time step.</p>
+            <p className="hint">Animation frames set how smooth playback and graphs are; the solver always uses its own (much finer) time step. The wave engine handles every event; the rigid-column engine ignores pressure waves and is for slow operations, surge tank oscillation and long runs. Daily operation (tank levels, patterns, controls, water quality) runs from Analysis → Extended period.</p>
           </>
         )}
         {tab === 'liquid' && (

@@ -163,6 +163,52 @@ export function hydroPlant(): Network {
 
 const yUp = (n: Network): Network => ({ ...n, nodes: n.nodes.map((x) => ({ ...x, y: -x.y })) });
 
+/** Town supply: pump station, rising main to an elevated tank, distribution with a daily demand pattern; the
+ *  pumps are switched by the tank level; chlorine from the works. Extended period (48 h) and surge (pump trip). */
+export function townSupply(): Network {
+  const pumps = ['PU1', 'PU2'].map((id) => ({
+    id, from: 'PS-S', to: 'PS-D', curve: [[0, 82], [0.06, 64], [0.09, 46]] as [number, number][], efficiency: 0.78, speed: 1480,
+    inertia: Math.round(inertiaFor(0.06, 64, 0.78, 1480) * 100) / 100, checkValve: true, on: true,
+  }));
+  return {
+    name: 'Town supply · daily operation',
+    description: 'Works sump, two pumps, 3 km DN300 rising main to a 1,500 m³ elevated tank feeding a small town. Pumps start when the tank falls to 2 m and stop at 5.5 m; chlorine 1.0 mg/L leaves the works. Run the extended period, then a surge run from any hour.',
+    nodes: [
+      { id: 'WORKS', kind: 'reservoir', x: 0, y: 300, elev: 100, head: 102, quality: 1.0 },
+      { id: 'PS-S', kind: 'junction', x: 60, y: 300, elev: 100 },
+      { id: 'PS-D', kind: 'junction', x: 120, y: 300, elev: 100, vessel: { volume: 6, gasVolume: 3, n: 1.2, connDiameter: 0.2, kIn: 2.5, kOut: 0.5 } },
+      { id: 'HP', kind: 'junction', x: 500, y: 220, elev: 128, airValve: { inDiameter: 0.08, outDiameter: 0.02 } },
+      { id: 'TANK', kind: 'reservoir', x: 900, y: 160, elev: 150, head: 154, storage: { initLevel: 4, minLevel: 0.5, maxLevel: 6, diameter: 18 }, quality: 0.8 },
+      { id: 'T1', kind: 'junction', x: 1050, y: 260, elev: 112, demand: 0.012, pattern: 'Day' },
+      { id: 'T2', kind: 'junction', x: 1200, y: 300, elev: 108, demand: 0.015, pattern: 'Day' },
+      { id: 'T3', kind: 'junction', x: 1120, y: 420, elev: 104, demand: 0.010, pattern: 'Day' },
+      { id: 'T4', kind: 'junction', x: 980, y: 400, elev: 110, demand: 0.008, pattern: 'Day' },
+    ],
+    pipes: [
+      { id: 'SUC', from: 'WORKS', to: 'PS-S', length: 20, diameter: 0.4, roughness: 0.1, wavespeed: 1100, pressureClass: 100 },
+      { id: 'RM1', from: 'PS-D', to: 'HP', length: 1600, diameter: 0.3, roughness: 0.1, wavespeed: 1080, pressureClass: 100, material: 'Ductile iron' },
+      { id: 'RM2', from: 'HP', to: 'TANK', length: 1400, diameter: 0.3, roughness: 0.1, wavespeed: 1080, pressureClass: 100, material: 'Ductile iron' },
+      { id: 'D1', from: 'TANK', to: 'T1', length: 800, diameter: 0.25, roughness: 0.05, wavespeed: 420, pressureClass: 100, material: 'PVC' },
+      { id: 'D2', from: 'T1', to: 'T2', length: 600, diameter: 0.2, roughness: 0.05, wavespeed: 420, pressureClass: 100, material: 'PVC' },
+      { id: 'D3', from: 'T2', to: 'T3', length: 500, diameter: 0.15, roughness: 0.05, wavespeed: 420, pressureClass: 100, material: 'PVC' },
+      { id: 'D4', from: 'T3', to: 'T4', length: 450, diameter: 0.15, roughness: 0.05, wavespeed: 420, pressureClass: 100, material: 'PVC' },
+      { id: 'D5', from: 'T4', to: 'T1', length: 400, diameter: 0.15, roughness: 0.05, wavespeed: 420, pressureClass: 100, material: 'PVC' },
+    ],
+    pumps,
+    valves: [],
+    event: { kind: 'pumpTrip', targets: ['PU1', 'PU2'], start: 1 },
+    settings: { ...defaultSettings(), duration: 40 },
+    patterns: [{ id: 'Day', factors: [0.5, 0.4, 0.35, 0.35, 0.4, 0.6, 1.1, 1.5, 1.4, 1.2, 1.1, 1.05, 1.1, 1.0, 0.95, 0.95, 1.0, 1.2, 1.45, 1.5, 1.3, 1.0, 0.8, 0.6] }],
+    controls: [
+      { link: 'PU1', status: 'open', node: 'TANK', op: 'below', value: 2 },
+      { link: 'PU1', status: 'closed', node: 'TANK', op: 'above', value: 5.5 },
+      { link: 'PU2', status: 'open', node: 'TANK', op: 'below', value: 1.2 },
+      { link: 'PU2', status: 'closed', node: 'TANK', op: 'above', value: 4.5 },
+    ],
+    eps: { duration: 48 * 3600, hydStep: 900, patternStep: 3600, reportStep: 900, quality: 'chemical', chemical: 'Chlorine', bulk: -0.5, wall: -0.1, qualStep: 120 },
+  };
+}
+
 export const EXAMPLES: { id: string; make: () => Network }[] = [
   { id: 'rising', make: () => yUp(risingMain(true)) },
   { id: 'rising-bare', make: () => yUp({ ...risingMain(false), name: 'Rising main · no protection' }) },
@@ -170,6 +216,7 @@ export const EXAMPLES: { id: string; make: () => Network }[] = [
   { id: 'loop', make: () => yUp(loopedNetwork()) },
   { id: 'elhazek', make: () => yUp(elHazek()) },
   { id: 'hydro', make: () => yUp(hydroPlant()) },
+  { id: 'town', make: () => yUp(townSupply()) },
   // real network with a published benchmark result (see validation/README.md)
   { id: 'bwsn1', make: () => structuredClone(bwsn1 as unknown as Network) },
 ];

@@ -3,12 +3,14 @@ import { designChecks, sizeVessel, suggestAirValves, uncertainty } from './engin
 import { solveSteady } from './engine/steady';
 import { runTransient } from './engine/transient';
 import type { Network } from './engine/types';
+import { runEPS } from './engine/eps';
 
 export type JobRequest =
   | { id: number; type: 'run'; net: Network }
   | { id: number; type: 'uncertainty'; net: Network }
   | { id: number; type: 'sizeVessel'; net: Network; node: string }
-  | { id: number; type: 'airValves'; net: Network };
+  | { id: number; type: 'airValves'; net: Network }
+  | { id: number; type: 'eps'; net: Network };
 
 export function handleJob(req: JobRequest, post: (msg: Record<string, unknown>) => void) {
   try {
@@ -24,6 +26,10 @@ export function handleJob(req: JobRequest, post: (msg: Record<string, unknown>) 
       post({ id: req.id, type: 'done', uncertainty: { ...u, runs: u.runs.map((r) => ({ label: r.label, maxHead: r.maxHead, minPressure: r.minPressure })) }, checks: designChecks(req.net, base, u.envelopes) });
     } else if (req.type === 'sizeVessel') {
       post({ id: req.id, type: 'done', sizing: sizeVessel(req.net, req.node, (m) => post({ id: req.id, type: 'progress', message: m })) });
+    } else if (req.type === 'eps') {
+      let last = -1;
+      const eps = runEPS(req.net, (f) => { const p = Math.floor(f * 20); if (p !== last) { last = p; post({ id: req.id, type: 'progress', message: `Extended period… ${p * 5} %` }); } });
+      post({ id: req.id, type: 'done', eps });
     } else if (req.type === 'airValves') {
       const base = runTransient(req.net, { envelopeOnly: true });
       post({ id: req.id, type: 'done', airValves: suggestAirValves(req.net, base, (m) => post({ id: req.id, type: 'progress', message: m })) });

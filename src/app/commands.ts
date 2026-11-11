@@ -7,7 +7,8 @@ import { EXAMPLES } from '../engine/cases';
 import { estimateInertia } from '../engine/hydraulics';
 import { solveSteady } from '../engine/steady';
 import { runTransient, type TransientResult } from '../engine/transient';
-import { allEvents, area, defaultSettings, type Network, type NetNode, type TransientEvent } from '../engine/types';
+import { allEvents, area, defaultSettings, type Network, type NetNode, type SimpleControl, type TransientEvent } from '../engine/types';
+import { defaultEPS, runEPS, type EPSResult } from '../engine/eps';
 import { FLUIDS } from './catalogues';
 import { addLink, addPipe, deleteElements, insertOnPipe, renameElement, uniqueId, DEFAULTS, type ElRef } from './edit';
 import { deviceDefaults, nodeDevices, removeDevice, type ElementKind } from './elements';
@@ -24,6 +25,8 @@ export interface CommandContext {
   sizeVessel?(node: string): Promise<VesselSizing>;
   suggestAirValves?(): Promise<AirValveSuggestion[]>;
   select?(refs: ElRef[]): void;
+  /** Extended-period run (the app runs it in the background and shows it). */
+  runEPS?(): Promise<EPSResult>;
 }
 type JSONSchema = Record<string, unknown>;
 export interface Command {
@@ -363,10 +366,11 @@ export const COMMANDS: Command[] = [
   {
     name: 'set_run_settings', mutates: true,
     description: `Change run settings: duration_s, friction (DW or HW), min_pressure_m, max_pressure_m, unsteady_friction, liquid (${FLUIDS.map((f) => f.name).slice(0, 5).join(', ')}…), site_elevation_m.`,
-    params: obj({ duration_s: num('Simulation time, s'), friction: str('Friction method', ['DW', 'HW']), min_pressure_m: num('Lowest allowed pressure, m'), max_pressure_m: num('Highest allowed pressure, m'), unsteady_friction: bool('Unsteady friction'), liquid: str('Liquid name'), site_elevation_m: num('Site elevation above sea level, m') }),
+    params: obj({ duration_s: num('Simulation time, s'), friction: str('Friction method', ['DW', 'HW']), min_pressure_m: num('Lowest allowed pressure, m'), max_pressure_m: num('Highest allowed pressure, m'), unsteady_friction: bool('Unsteady friction'), liquid: str('Liquid name'), site_elevation_m: num('Site elevation above sea level, m'), engine: str('Surge engine: wave (all events, default) or rigid (rigid columns: slow events, surge tank mass oscillation)', ['wave', 'rigid']) }),
     run: async (ctx, a) => {
       const net = ctx.getNet();
       const s = { ...net.settings };
+      if (a.engine) s.engine = a.engine;
       if (a.duration_s !== undefined) s.duration = Math.max(0.1, a.duration_s);
       if (a.friction) s.friction = a.friction;
       if (a.min_pressure_m !== undefined) s.minPressure = a.min_pressure_m;
@@ -376,6 +380,94 @@ export const COMMANDS: Command[] = [
       if (a.liquid) s.fluid = FLUIDS.find((f) => f.name.toLowerCase() === String(a.liquid).toLowerCase()) ?? fail(`Unknown liquid. Choose from: ${FLUIDS.map((f) => f.name).join('; ')}.`);
       ctx.apply({ ...net, settings: s }, 'AI: run settings');
       return { ok: true };
+    },
+  },
+  {
+    name: 'set_eps', mutates: true,
+    description: 'Extended-period (daily operation) settings: duration_h, step_min (hydraulic step), pattern_step_min, default_pattern (for junctions without one), quality (none, age, trace, chemical), trace_node, chemical, bulk_per_day (negative = decay, chlorine typically -0.5), wall_m_per_day (negative).',
+    params: obj({ duration_h: num('Duration, h'), step_min: num('Hydraulic step, min'), pattern_step_min: num('Pattern step, min'), default_pattern: str('Default junction pattern id'), quality: str('Water quality', ['none', 'age', 'trace', 'chemical']), trace_node: str('Trace source node'), chemical: str('Chemical name'), bulk_per_day: num('Bulk coefficient 1/day'), wall_m_per_day: num('Wall coefficient m/day') }),
+    run: async (ctx, a) => {
+      const net = ctx.getNet();
+      const e = { ...defaultEPS(), ...(net.eps ?? {}) };
+      if (a.duration_h !== undefined) e.duration = Math.max(1, a.duration_h) * 3600;
+      if (a.step_min !== undefined) e.hydStep = Math.max(1, a.step_min) * 60;
+      if (a.pattern_step_min !== undefined) e.patternStep = Math.max(1, a.pattern_step_min) * 60;
+      if (a.default_pattern !== undefined) e.defaultPattern = a.default_pattern || undefined;
+      if (a.quality) e.quality = a.quality;
+      if (a.trace_node) { if (!net.nodes.some((n) => n.id === a.trace_node)) fail(`No node "${a.trace_node}".`); e.traceNode = a.trace_node; }
+      if (a.chemical) e.chemical = a.chemical;
+      if (a.bulk_per_day !== undefined) e.bulk = a.bulk_per_day;
+      if (a.wall_m_per_day !== undefined) e.wall = a.wall_m_per_day;
+      if (e.quality === 'trace' && !e.traceNode) fail('Give trace_node for a source trace.');
+      ctx.apply({ ...net, eps: e }, 'AI: extended period settings');
+      return { ok: true, eps: e };
+    },
+  },
+  {
+    name: 'set_patterns', mutates: true,
+    description: 'Create or replace time patterns (multipliers per pattern step, repeating), e.g. a 24-value daily demand pattern. Optionally assign a pattern to junctions (or a fixed-level source head).',
+    params: obj({ patterns: { type: 'array', items: obj({ id: str('Pattern id'), factors: { type: 'array', items: { type: 'number' } } }, ['id', 'factors']) }, assign: { type: 'array', description: 'Assignments', items: obj({ node: str('Node id'), pattern: str('Pattern id ("" to clear)') }, ['node', 'pattern']) } }),
+    run: async (ctx, a) => {
+      const net = ctx.getNet();
+      const pats = [...(net.patterns ?? [])];
+      for (const p of a.patterns ?? []) { if (!p.factors?.length) fail(`Pattern ${p.id} has no factors.`); const i = pats.findIndex((x) => x.id === p.id); if (i >= 0) pats[i] = { id: p.id, factors: p.factors }; else pats.push({ id: p.id, factors: p.factors }); }
+      const asg = new Map<string, string>((a.assign ?? []).map((x: { node: string; pattern: string }) => [x.node, x.pattern]));
+      for (const [id, pid] of asg) { if (!net.nodes.some((n) => n.id === id)) fail(`No node "${id}".`); if (pid && !pats.some((p) => p.id === pid)) fail(`No pattern "${pid}".`); }
+      ctx.apply({ ...net, patterns: pats, nodes: net.nodes.map((n) => (asg.has(n.id) ? { ...n, pattern: asg.get(n.id) || undefined } : n)) }, 'AI: patterns');
+      return { patterns: pats.map((p) => p.id), assigned: asg.size };
+    },
+  },
+  {
+    name: 'set_storage', mutates: true,
+    description: 'Make a fixed-level source a storage tank whose level changes in the extended-period run (levels in m above the tank bottom = node elevation), or remove the storage (remove: true).',
+    params: obj({ node: str('Fixed-level source id'), init_level_m: num('Initial level'), min_level_m: num('Minimum level'), max_level_m: num('Maximum level (overflow)'), diameter_m: num('Tank diameter'), initial_quality: num('Initial quality'), remove: bool('Remove the storage') }, ['node']),
+    run: async (ctx, a) => {
+      const net = ctx.getNet();
+      const n = net.nodes.find((x) => x.id === a.node) ?? fail(`No node "${a.node}".`);
+      if (n.kind !== 'reservoir') fail(`${a.node} is a junction; storage tanks are fixed-level sources (kind reservoir).`);
+      let storage = a.remove ? undefined : { initLevel: Math.max((n.head ?? n.elev) - n.elev, 0.5), minLevel: 0.5, maxLevel: Math.max((n.head ?? n.elev) - n.elev + 3, 5), diameter: 20, ...(n.storage ?? {}) };
+      if (storage) {
+        if (a.init_level_m !== undefined) storage.initLevel = a.init_level_m;
+        if (a.min_level_m !== undefined) storage.minLevel = a.min_level_m;
+        if (a.max_level_m !== undefined) storage.maxLevel = a.max_level_m;
+        if (a.diameter_m !== undefined) storage.diameter = a.diameter_m;
+        if (!(storage.minLevel <= storage.initLevel && storage.initLevel <= storage.maxLevel)) fail('Levels must satisfy min ≤ initial ≤ max.');
+        if (!(storage.diameter > 0)) fail('Diameter must be positive.');
+        storage = { ...storage };
+      }
+      ctx.apply({ ...net, nodes: net.nodes.map((x) => (x.id === a.node ? { ...x, storage, head: storage ? x.elev + storage.initLevel : x.head, ...(a.initial_quality !== undefined ? { quality: a.initial_quality } : {}) } : x)) }, `AI: storage ${a.node}`);
+      return { ok: true, storage };
+    },
+  },
+  {
+    name: 'set_controls', mutates: true,
+    description: 'Replace the simple controls of the extended-period run. Each: link (pump, pipe or valve id), status open|closed (or setting), and one trigger: at_h (hours after start), clock_h (time of day, daily), or node + op (above|below) + value (tank level m above its bottom, or junction pressure m).',
+    params: obj({ controls: { type: 'array', items: obj({ link: str('Link id'), status: str('New status', ['open', 'closed']), setting: num('New setting'), at_h: num('Hours after start'), clock_h: num('Time of day, h'), node: str('Node'), op: str('Comparison', ['above', 'below']), value: num('Level or pressure, m') }, ['link']) } }, ['controls']),
+    run: async (ctx, a) => {
+      const net = ctx.getNet();
+      const ids = new Set([...net.pipes.map((p) => p.id), ...net.pumps.map((p) => p.id), ...net.valves.map((v) => v.id)]);
+      const out: SimpleControl[] = (a.controls ?? []).map((c: Record<string, unknown>) => {
+        if (!ids.has(String(c.link))) fail(`No pump, pipe or valve "${c.link}".`);
+        if (c.status === undefined && c.setting === undefined) fail(`Control on ${c.link}: give status or setting.`);
+        const k: SimpleControl = { link: String(c.link), ...(c.status ? { status: c.status as 'open' | 'closed' } : {}), ...(c.setting !== undefined ? { setting: Number(c.setting) } : {}) };
+        if (c.at_h !== undefined) k.at = Number(c.at_h) * 3600;
+        else if (c.clock_h !== undefined) k.clock = Number(c.clock_h) * 3600;
+        else if (c.node && c.op && c.value !== undefined) { if (!net.nodes.some((n) => n.id === c.node)) fail(`No node "${c.node}".`); Object.assign(k, { node: String(c.node), op: c.op, value: Number(c.value) }); }
+        else fail(`Control on ${c.link}: give at_h, clock_h, or node + op + value.`);
+        return k;
+      });
+      ctx.apply({ ...net, controls: out }, 'AI: controls');
+      return { controls: out.length };
+    },
+  },
+  {
+    name: 'run_eps', mutates: false,
+    description: 'Run the extended-period simulation (daily operation: tank levels, pump cycling, pressures through the day, water quality). Returns a summary: tank level ranges, pump hours and energy, lowest and highest pressures with times, quality ranges, events.',
+    params: obj({}),
+    run: async (ctx) => {
+      const net = ctx.getNet();
+      const r = ctx.runEPS ? await ctx.runEPS() : runEPS(net);
+      return epsSummary(net, r);
     },
   },
   {
@@ -455,6 +547,25 @@ export async function execute(ctx: CommandContext, name: string, args: unknown):
 }
 
 /** A context that runs the engine directly (tests, scripts, the worker). */
+/** Short summary of an extended-period run for the copilot and reports. */
+export function epsSummary(net: Network, r: EPSResult) {
+  const hrs = (t: number) => r2(t / 3600, 2);
+  const junc = net.nodes.filter((n) => n.kind === 'junction' && r.pressure[n.id]);
+  let lo = { v: Infinity, node: '', t: 0 }, hi = { v: -Infinity, node: '', t: 0 };
+  for (const n of junc) r.pressure[n.id].forEach((p, k) => { if (p < lo.v) lo = { v: p, node: n.id, t: r.times[k] }; if (p > hi.v) hi = { v: p, node: n.id, t: r.times[k] }; });
+  const step = r.times.length > 1 ? r.times[1] - r.times[0] : 0;
+  return {
+    duration_h: hrs(r.times[r.times.length - 1] ?? 0),
+    tanks: Object.keys(r.level).map((id) => ({ id, min_level_m: r2(Math.min(...r.level[id]), 2), max_level_m: r2(Math.max(...r.level[id]), 2), start_m: r2(r.level[id][0], 2), end_m: r2(r.level[id][r.level[id].length - 1], 2) })),
+    pumps: net.pumps.map((p) => ({ id: p.id, hours_running: r2((r.status[p.id]?.filter((s) => s > 0).length ?? 0) * step / 3600, 1), energy_kwh: r2(r.energy[p.id] ?? 0, 0) })),
+    lowest_pressure_m: { value: r2(lo.v, 1), node: lo.node, time_h: hrs(lo.t) },
+    highest_pressure_m: { value: r2(hi.v, 1), node: hi.node, time_h: hrs(hi.t) },
+    ...(r.quality ? { quality: { unit: r.qualityUnit, by_node: junc.slice(0, 40).map((n) => ({ id: n.id, min: r2(Math.min(...r.quality![n.id]), 3), max: r2(Math.max(...r.quality![n.id]), 3) })) } } : {}),
+    events: r.log.slice(0, 30).map((l) => `${hrs(l.t)} h: ${l.text}`),
+    warnings: r.warnings.slice(0, 10),
+  };
+}
+
 export function localContext(start: Network): CommandContext & { net: Network; log: string[] } {
   const c = {
     net: start, log: [] as string[], last: null as RunOutput | null,
@@ -462,6 +573,7 @@ export function localContext(start: Network): CommandContext & { net: Network; l
     apply: (n: Network, label: string) => { c.net = n; c.last = null; c.log.push(label); },
     run: async () => { const steady = solveSteady(c.net); const result = runTransient(c.net, { steady, frames: 300 }); c.last = { result, checks: designChecks(c.net, result) }; return c.last; },
     getRun: () => c.last,
+    runEPS: async () => runEPS(c.net),
   };
   return c;
 }

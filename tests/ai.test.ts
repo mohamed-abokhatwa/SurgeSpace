@@ -66,6 +66,29 @@ const empty = (): Network => ({ name: 'x', nodes: [], pipes: [], pumps: [], valv
     t('every command has a JSON schema and description', COMMANDS.every((c) => c.description.length > 10 && (c.params as { type: string }).type === 'object'));
   }
 
+  // ── extended period through commands ──
+  {
+    const ctx = localContext(empty());
+    await execute(ctx, 'build_line', { points: [{ id: 'SRC', chainage_m: 0, elevation_m: 100 }, { id: 'J1', chainage_m: 1000, elevation_m: 60 }, { id: 'TK', chainage_m: 2000, elevation_m: 70 }], diameter_mm: 300, start_water_level_m: 120, end_water_level_m: 75 });
+    const st = await execute(ctx, 'set_storage', { node: 'TK', init_level_m: 5, min_level_m: 1, max_level_m: 9, diameter_m: 12 });
+    t('set_storage makes a tank', st.ok && !!ctx.net.nodes.find((n) => n.id === 'TK')?.storage);
+    const badSt = await execute(ctx, 'set_storage', { node: 'J1' });
+    t('set_storage refuses a junction', !badSt.ok);
+    await execute(ctx, 'set_properties', { type: 'node', ids: ['J1'], values: { demand_lps: 20 } });
+    const pt = await execute(ctx, 'set_patterns', { patterns: [{ id: 'D', factors: [0.5, 1, 1.5, 1] }], assign: [{ node: 'J1', pattern: 'D' }] });
+    t('set_patterns assigns a pattern', pt.ok && ctx.net.nodes.find((n) => n.id === 'J1')?.pattern === 'D');
+    const cs = await execute(ctx, 'set_controls', { controls: [{ link: ctx.net.pipes[1].id, status: 'closed', node: 'TK', op: 'above', value: 8 }] });
+    t('set_controls', cs.ok && ctx.net.controls?.length === 1);
+    const ebad = await execute(ctx, 'set_eps', { quality: 'trace' });
+    t('set_eps: trace needs a node', !ebad.ok);
+    await execute(ctx, 'set_eps', { duration_h: 12, step_min: 30, quality: 'age' });
+    const rr = await execute(ctx, 'run_eps', {});
+    const sum = rr.output as { tanks: { id: string; max_level_m: number }[]; quality?: unknown; lowest_pressure_m: { value: number } };
+    t('run_eps summary from the engine', rr.ok && sum.tanks[0].id === 'TK' && !!sum.quality && Number.isFinite(sum.lowest_pressure_m.value), JSON.stringify(sum.tanks));
+    const eng = await execute(ctx, 'set_run_settings', { engine: 'rigid' });
+    t('set_run_settings: engine', eng.ok && ctx.net.settings.engine === 'rigid');
+  }
+
   // ── project files ──
   {
     const v1 = { name: 'old', nodes: [{ id: 'A', kind: 'reservoir', x: 0, y: 0, elev: 0, head: 10 }], pipes: [] };

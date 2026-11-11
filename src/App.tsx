@@ -23,7 +23,9 @@ import { Properties } from './ui/Properties';
 import { OperationsPanel } from './ui/Operations';
 import { BackgroundDialog, CataloguesDialog, FindDialog, HealthDialog, HelpDialog, ProjectDialog, RunSetupDialog } from './ui/Dialogs';
 import { DataSheets } from './ui/DataSheets';
-import { CasesPanel, syncActive } from './ui/Cases';
+import { CasesPanel, addCase, syncActive } from './ui/Cases';
+import { EPSPanel, epsPipeColours, type EPSColour } from './ui/EPSPanel';
+import { clock, networkAt, type EPSResult } from './engine/eps';
 import { Explorer } from './ui/Explorer';
 import { GraphsView, type GraphItem } from './ui/GraphsView';
 import { healthCheck } from './app/health';
@@ -35,7 +37,7 @@ import { useAI } from './ai/accounts';
 import { AIAccountsDialog, CopilotPanel } from './ui/AIPanel';
 
 type LeftTab = 'explorer' | 'operations';
-type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log';
+type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log' | 'eps';
 interface UncertaintyOut { runs: { label: string; maxHead: number; minPressure: number }[]; envelopes: PipeEnvelope[]; spread: { maxHead: [number, number]; minPressure: [number, number] } }
 type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai';
 
@@ -135,6 +137,9 @@ export default function App() {
   const [showLeft, setShowLeft] = useState(true);
   const [showRight, setShowRight] = useState(true);
   const [right, setRight] = useState<'props' | 'ai'>('props');
+  const [epsRes, setEpsRes] = useState<{ r: EPSResult; net: Network } | null>(null);
+  const [epsK, setEpsK] = useState(0);
+  const [epsColour, setEpsColour] = useState<EPSColour>('none');
   const [aiQueued, setAiQueued] = useState<{ prompt: string; label: string } | null>(null);
   const ai = useAI();
   useEffect(() => { void initAITransport(); }, []);
@@ -218,6 +223,7 @@ export default function App() {
     setNetRaw(n);
     setStale(true); setResult(null); setChecks([]); setUnc(null); setSizing(null); setAirSugg(null); setSelected([]); setGraphs([]);
     lastRun.current = null;
+    setEpsRes(null); setEpsK(0); setEpsColour('none');
     setRoute(defaultRoute(n));
     setFitKey((k) => k + 1);
     setMode('plain');
@@ -280,6 +286,28 @@ export default function App() {
     catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
   };
 
+  const doEPS = async (n: Network = netRef.current): Promise<EPSResult | undefined> => {
+    if (!n.nodes.some((x) => x.kind === 'reservoir')) { setToast(['The model needs a fixed-level source or a tank.']); return; }
+    setBusy('Extended period…');
+    try {
+      const out = await call<{ eps: EPSResult }>({ type: 'eps', net: n }, (m) => setBusy(m));
+      setEpsRes({ r: out.eps, net: n }); setEpsK(0); setBottom('eps'); if (dock === 'min') setDock('normal');
+      return out.eps;
+    } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
+  };
+  const epsRef = useRef(doEPS);
+  epsRef.current = doEPS;
+  const surgeAt = (t: number) => {
+    const cur = netRef.current;
+    const at = networkAt(cur, t);
+    // a case frozen at that moment: demands, levels and pump states of that hour (no patterns, so they apply once)
+    const frozen = { ...at, nodes: at.nodes.map((x) => { const y = { ...x }; delete y.pattern; return y; }), patterns: undefined, controls: undefined, eps: undefined, name: `${cur.name} · surge from ${clock(t)}` };
+    const withCase = addCase(cur, `Surge from ${clock(t)}`);
+    setProject({ ...frozen, cases: withCase.cases, activeCase: withCase.activeCase }, 'Surge from time');
+    setBottom('profile');
+    setToast([`New case “Surge from ${clock(t)}”: tank levels, demands and pump states of ${clock(t)}. Set the operation and press Run. The base case keeps the daily data.`]);
+  };
+
   const tNow = result ? (() => { const T = result.times, f0 = Math.min(Math.floor(framePos), T.length - 1), f1 = Math.min(f0 + 1, T.length - 1); return T[f0] + (T[f1] - T[f0]) * (framePos - f0); })() : 0;
   const sScale = useMemo(() => (result ? surgeScale(result) : 1), [result]);
   useEffect(() => { if (result && !(framePos <= result.times.length - 1)) setFramePos(0); }, [result, framePos]);
@@ -291,7 +319,9 @@ export default function App() {
     setPlaying((p) => !p);
   }, [result, framePos, mode]);
   const fails = checks.filter((c) => c.level === 'fail').length;
-  const colorBy = useMemo(() => colorByPipes(net, result, viewOpts.colorBy), [net, result, viewOpts.colorBy, units]); // eslint-disable-line react-hooks/exhaustive-deps
+  const colorByBase = useMemo(() => colorByPipes(net, result, viewOpts.colorBy), [net, result, viewOpts.colorBy, units]); // eslint-disable-line react-hooks/exhaustive-deps
+  const epsCol = useMemo(() => (epsRes && bottom === 'eps' && epsColour !== 'none' ? epsPipeColours(epsRes.net, epsRes.r, epsColour, epsK) : null), [epsRes, bottom, epsColour, epsK]);
+  const colorBy = epsCol ?? colorByBase;
 
   // ── file actions ──
   const saveProject = () => download(`${safeName(net.name)}.surge.json`, projectJson({ ...net, cases: net.cases ? syncActive(net) : undefined }), 'application/json');
@@ -345,6 +375,7 @@ export default function App() {
       try { const o = await call<{ airValves: AirValveSuggestion[] }>({ type: 'airValves', net: netRef.current }, (m) => setBusy(m)); setAirSugg(o.airValves); return o.airValves; } finally { setBusy(null); }
     },
     select: (refs) => setSelected(refs),
+    runEPS: async () => { const r = await epsRef.current(); if (!r) throw new Error('The extended-period run did not finish (does the model have a fixed-level source or tank?).'); return r; },
   }), [setNet, run]);
   const openCopilot = () => { setShowRight(true); setRight('ai'); };
   const aiTask = (t: { prompt: string; label: string }) => { openCopilot(); if (!ai.accounts.length) { setDialog('ai'); return; } setAiQueued({ prompt: t.prompt, label: t.label }); };
@@ -455,9 +486,15 @@ export default function App() {
     { label: 'Analysis', items: [
       { label: 'Model Health Check…', action: () => setDialog('health') },
       { label: 'Run Setup…', action: () => setDialog('setup') },
-      { label: 'Run', shortcut: 'F5', action: () => run(), disabled: !!busy },
+      { label: 'Run surge', shortcut: 'F5', action: () => run(), disabled: !!busy },
       'sep',
       { label: 'Uncertainty (worst case)', action: doUncertainty, disabled: !!busy },
+      { label: 'Extended period (daily operation, water quality)…', action: () => { setBottom('eps'); if (dock === 'min') setDock('normal'); } },
+      { label: 'Run extended period', action: () => void doEPS(), disabled: !!busy },
+      { label: 'Surge engine', sub: [
+        { label: 'Wave (method of characteristics) — fast events', checked: (net.settings.engine ?? 'wave') === 'wave', action: () => setNet((n) => ({ ...n, settings: { ...n.settings, engine: 'wave' } }), 'Engine') },
+        { label: 'Rigid column — slow events, mass oscillation', checked: net.settings.engine === 'rigid', action: () => setNet((n) => ({ ...n, settings: { ...n.settings, engine: 'rigid' } }), 'Engine') },
+      ] },
       { label: 'Size protection (vessel, air valves)…', action: () => { setBottom('protection'); if (dock === 'min') setDock('normal'); } },
       { label: 'Run all cases and compare', action: () => { setBottom('cases'); if (dock === 'min') setDock('normal'); } },
     ] },
@@ -561,7 +598,7 @@ export default function App() {
   const tb = (k: ElementKind) => <RB key={k} el={k} label={EL[k].short} on={tool === k} onClick={() => pickTool(tool === k ? 'select' : k)} title={`${EL[k].name}${EL[k].key ? ` (${EL[k].key})` : ''} — ${EL[k].description}`} />;
 
   const legend = (() => {
-    if (mode === 'plain' || !result) {
+    if (epsCol || mode === 'plain' || !result) {
       const lg = colorBy.legend;
       if (!lg) return null;
       return <div className="legend card"><div className="legend-title">{lg.title}</div>{lg.items.slice(0, 12).map((i) => <div key={i.label} className="row" style={{ gap: 6 }}><span className="swatch" style={{ background: i.color }} />{i.label}</div>)}</div>;
@@ -653,7 +690,7 @@ export default function App() {
           <div className="canvas-wrap">
             <Canvas net={net} result={result} envelopes={unc?.envelopes} framePos={framePos} mode={result ? mode : 'plain'} selected={selected} onSelect={select}
               route={routeSet} flowDashes={flowDashes} playing={playing} sScale={sScale} tool={tool} onEdit={edit} view={viewOpts} defaults={defaults}
-              onCursor={setCursorW} fitKey={fitKey} bottomInset={result && dock !== 'max' ? 84 : 0} onContext={setCtx} onToolEnd={() => setTool('select')} colorFn={mode === 'plain' || !result ? colorBy.color : undefined} />
+              onCursor={setCursorW} fitKey={fitKey} bottomInset={result && dock !== 'max' ? 84 : 0} onContext={setCtx} onToolEnd={() => setTool('select')} colorFn={epsCol ? epsCol.color : mode === 'plain' || !result ? colorBy.color : undefined} />
             <div className="map-tools">
               <div className="seg" role="group" aria-label="Map view">
                 <button className={`seg-btn ${mode === 'plain' || !result ? 'on' : ''}`} onClick={() => { setMode('plain'); setPlaying(false); }}>Design</button>
@@ -702,7 +739,7 @@ export default function App() {
 
           <div className="dock">
             <div className="dock-tabs">
-              {([['profile', 'Profile'], ['graphs', 'Graphs'], ['checks', `Design checks${fails ? ` · ${fails}` : ''}`], ['tables', 'Data sheets'], ['cases', `Cases${net.cases?.length ? ` · ${net.cases.length}` : ''}`], ['protection', 'Protection sizing'], ['uncertainty', 'Uncertainty'], ['log', 'Run log']] as [BottomTab, string][]).map(([k, l]) => (
+              {([['profile', 'Profile'], ['graphs', 'Graphs'], ['checks', `Design checks${fails ? ` · ${fails}` : ''}`], ['tables', 'Data sheets'], ['cases', `Cases${net.cases?.length ? ` · ${net.cases.length}` : ''}`], ['protection', 'Protection sizing'], ['uncertainty', 'Uncertainty'], ['eps', 'Daily operation'], ['log', 'Run log']] as [BottomTab, string][]).map(([k, l]) => (
                 <button key={k} className={`dtab ${bottom === k ? 'on' : ''} ${k === 'checks' && fails ? 'bad' : ''}`} onClick={() => { setBottom(k); if (dock === 'min') setDock('normal'); }}>{l}</button>
               ))}
               <div style={{ flex: 1 }} />
@@ -733,7 +770,8 @@ export default function App() {
                 {bottom === 'tables' && <DataSheets net={net} setNet={setNet} result={result} onSelect={(r) => setSelected(r)} selected={selected} />}
                 {bottom === 'cases' && <CasesPanel net={net} setProject={setProject} busy={!!busy} setBusy={setBusy} />}
                 {bottom === 'protection' && <div style={{ maxWidth: 620 }}><ProtectionPanel net={net} setNet={(f) => setNet(f, 'Apply sizing')} busy={!!busy} onSizeVessel={doSize} onAirValves={doAir} sizing={sizing} airSugg={airSugg} /></div>}
-                {!result && !['tables', 'cases', 'protection'].includes(bottom) ? <div className="empty">Results appear here after a run. Press <b>Run</b> (F5).</div> : result && (
+                {bottom === 'eps' && <EPSPanel net={net} setNet={setNet} result={epsRes?.r ?? null} busy={!!busy} onRun={() => void doEPS()} k={Math.min(epsK, (epsRes?.r.times.length ?? 1) - 1)} setK={setEpsK} colour={epsColour} setColour={(c) => { setEpsColour(c); if (c !== 'none') setMode('plain'); }} onSurgeAt={surgeAt} selected={selected} />}
+                {!result && !['tables', 'cases', 'protection', 'eps'].includes(bottom) ? <div className="empty">Results appear here after a run. Press <b>Run</b> (F5).</div> : result && (
                   <>
                     {bottom === 'profile' && <ProfileView net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} uEnv={unc?.envelopes} showNow={live} height={dock === 'max' ? 420 : 250} />}
                     {bottom === 'graphs' && <GraphsView net={net} result={result} items={graphs} setItems={setGraphs} selected={selected} tNow={tNow} />}
