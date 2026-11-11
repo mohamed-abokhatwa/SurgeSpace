@@ -2,6 +2,7 @@
 import { designChecks } from '../src/engine/analysis';
 import { EXAMPLES } from '../src/engine/cases';
 import { runTransient } from '../src/engine/transient';
+import { solveSteady } from '../src/engine/steady';
 import { buildReport } from '../src/report/report';
 import { writeFileSync } from 'node:fs';
 
@@ -22,6 +23,15 @@ for (const ex of EXAMPLES) {
   const every = net.pipes.every((p) => html.includes(`<td>${p.id}</td>`)) && net.nodes.every((n) => html.includes(`<td>${n.id}</td>`));
   t(`${ex.id}: report complete (${(html.length / 1024).toFixed(0)} kB)`, !missing.length && html.includes(`Highest pressure</td><td>${pMax.toFixed(1)} m`) && every && html.includes('Test &lt;client&gt; &amp; co') && !html.includes('NaN') && !html.includes('undefined'), missing.join(', '));
   if (out && ex.id === EXAMPLES[1].id) writeFileSync(out, html);
+}
+{
+  // Arabic edition: right to left, headings and table headers in Arabic, numbers unchanged
+  const net = EXAMPLES[0].make();
+  const r = runTransient(net, { steady: solveSteady(net), frames: 100 });
+  const en = buildReport(net, r, designChecks(net, r), { version: 't', lang: 'en' });
+  const ar = buildReport(net, r, designChecks(net, r), { version: 't', lang: 'ar' });
+  const nums = (h: string) => (h.match(/<td>[^<]*?\d+\.\d+/g) ?? []).length;
+  t('Arabic report: RTL, Arabic headings, same numbers', ar.includes('dir="rtl"') && ar.includes('١. ملخص النتائج') && ar.includes('أعلى ضغط') && !/<th>(Pipe|Node|From|To)<\/th>/.test(ar) && nums(ar) === nums(en));
 }
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

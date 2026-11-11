@@ -16,8 +16,9 @@ export function ReportDialog({ net, result, checks, route, nodes, version, onSav
   const units = useUnits();
   const [info, setInfo] = useState<ReportInfo>(net.report ?? {});
   const [made, setMade] = useState(false);
+  const [lang, setLang] = useState<'en' | 'ar'>('en');
   const frame = useRef<HTMLIFrameElement>(null);
-  const html = useMemo(() => (made ? buildReport({ ...net, report: info }, result, checks, { version, route, nodes, units }) : ''), [made, net, info, result, checks, version, route, nodes, units]);
+  const html = useMemo(() => (made ? buildReport({ ...net, report: info }, result, checks, { version, route, nodes, units, lang }) : ''), [made, net, info, result, checks, version, route, nodes, units, lang]);
   const field = (k: Exclude<keyof ReportInfo, 'narrativeByAI'>, label: string, area = false) => (
     <label className="field" style={area ? { gridColumn: '1 / -1' } : undefined}><span>{label}</span>
       {area ? <textarea rows={3} value={info[k] ?? ''} onChange={(e) => setInfo({ ...info, [k]: e.target.value })} />
@@ -61,6 +62,7 @@ export function ReportDialog({ net, result, checks, route, nodes, version, onSav
               <button className="btn primary" onClick={() => frame.current?.contentWindow?.print()}>Print / Save as PDF</button>
               <button className="btn" onClick={() => download(`${fileBase}-report.html`, html, 'text/html')}>Download (.html)</button>
               <button className="btn ghost" onClick={() => setMade(false)}>Edit details</button>
+              <select className="cell boxed" style={{ width: 120 }} value={lang} onChange={(e) => setLang(e.target.value as 'en' | 'ar')} aria-label="Report language"><option value="en">English</option><option value="ar">العربية</option></select>
               <span className="small muted">To get a PDF, pick “Save as PDF” as the printer.</span>
             </div>
             <iframe ref={frame} title="Report preview" className="report-frame" srcDoc={html} />
