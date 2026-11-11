@@ -899,7 +899,7 @@ export default function App() {
       {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} onImport={(n, notes) => { setDialog(null); load(n, notes); }} />}
       {dialog === 'setup' && <RunSetupDialog net={net} setNet={setNet} onClose={() => setDialog(null)} defaults={defaults} setDefaults={setDefaults} />}
       {dialog === 'catalogues' && <CataloguesDialog net={net} onClose={() => setDialog(null)} onApplyWave={selected.some((r) => r.type === 'pipe') ? (a) => { const ids = new Set(selected.filter((r) => r.type === 'pipe').map((r) => r.id)); setNet((n) => ({ ...n, pipes: n.pipes.map((p) => (ids.has(p.id) ? { ...p, wavespeed: a } : p)) }), 'Wave speed'); setDialog(null); } : undefined} />}
-      {dialog === 'health' && <HealthDialog net={net} onClose={() => setDialog(null)} onGo={goTo} />}
+      {dialog === 'health' && <HealthDialog net={net} onClose={() => setDialog(null)} onGo={goTo} setNet={setNet} />}
       {dialog === 'project' && <ProjectDialog net={net} setNet={setNet} onClose={() => setDialog(null)} />}
       {(dialog === 'help' || dialog === 'keys' || dialog === 'about') && <HelpDialog onClose={() => setDialog(null)} initial={dialog === 'keys' ? 'keys' : dialog === 'about' ? 'about' : 'guide'} version={__APP_VERSION__} />}
       {dialog === 'background' && <BackgroundDialog net={net} setNet={setNet} onClose={() => setDialog(null)} />}

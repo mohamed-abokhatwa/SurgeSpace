@@ -520,7 +520,19 @@ export const COMMANDS: Command[] = [
     name: 'health_check', mutates: false,
     description: 'Check the model for errors and implausible inputs before running.',
     params: obj({}),
-    run: async (ctx) => healthCheck(ctx.getNet()).map((i) => ({ level: i.level, title: i.title, detail: i.detail })),
+    run: async (ctx) => healthCheck(ctx.getNet()).map((i) => ({ level: i.level, title: i.title, detail: i.detail, ...(i.fix ? { suggested_fix: i.fix.label } : {}) })),
+  },
+  {
+    name: 'apply_health_fixes', mutates: true,
+    description: 'Apply the suggested fix of every health-check finding that has one (or only those whose title contains `match`). One undo step.',
+    params: obj({ match: str('Only findings whose title contains this text') }),
+    run: async (ctx, a) => {
+      const net = ctx.getNet();
+      const fx = healthCheck(net).filter((i) => i.fix && (!a.match || i.title.includes(a.match)));
+      if (!fx.length) return { applied: 0 };
+      ctx.apply(fx.reduce((m, i) => i.fix!.apply(m), net), 'AI: health fixes');
+      return { applied: fx.length, fixes: fx.map((i) => `${i.title} → ${i.fix!.label}`) };
+    },
   },
   {
     name: 'run_analysis', mutates: false,

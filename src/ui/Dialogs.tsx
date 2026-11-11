@@ -211,19 +211,23 @@ export function CataloguesDialog({ net, onClose, onApplyWave }: { net: Network; 
   );
 }
 
-export function HealthDialog({ net, onClose, onGo }: { net: Network; onClose: () => void; onGo: (r: ElRef) => void }) {
+export function HealthDialog({ net, onClose, onGo, setNet }: { net: Network; onClose: () => void; onGo: (r: ElRef) => void; setNet?: SetNet }) {
   const issues: Issue[] = healthCheck(net);
   const count = (l: Issue['level']) => issues.filter((i) => i.level === l).length;
+  const fixable = issues.filter((i) => i.fix);
   return (
     <Modal title="Model Health Check" onClose={onClose} wide icon={<Ic name="health" />} footer={<button className="btn primary" onClick={onClose}>Close</button>}>
       <div className="row" style={{ gap: 8, marginBottom: 10 }}>
         <span className="pill bad">{count('error')} errors</span><span className="pill warn">{count('warn')} warnings</span><span className="pill">{count('info')} notes</span>
+        <div style={{ flex: 1 }} />
+        {setNet && fixable.length > 1 && <button className="btn small primary" onClick={() => setNet((n) => fixable.reduce((m, i) => i.fix!.apply(m), n), 'Fix all')} title="Apply every suggested fix (one undo step)">Fix all {fixable.length}</button>}
       </div>
       <div className="issues">
         {issues.map((i, k) => (
           <div key={k} className={`issue ${i.level}`}>
             <span className="dot" />
             <div style={{ flex: 1 }}><b>{i.title}</b>{i.detail && <div className="small muted">{i.detail}</div>}</div>
+            {setNet && i.fix && <button className="btn small primary" onClick={() => setNet(i.fix!.apply, 'Fix')}>{i.fix.label}</button>}
             {i.ref && <button className="btn small" onClick={() => { onGo(i.ref!); onClose(); }}>Show</button>}
           </div>
         ))}

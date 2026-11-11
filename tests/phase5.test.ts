@@ -11,6 +11,7 @@ import { applySnapshot, boundaryFromSeries, compareWithData, parseHistorianCsv, 
 import { fromGeoJSON, guessFields, toDXF, toGeoJSON } from '../src/app/exchange';
 import { importDxf } from '../src/engine/importers';
 import { xlsx } from '../src/app/xlsx';
+import { healthCheck } from '../src/app/health';
 import { resultsBook } from '../src/app/resultsBook';
 import { connectLive, mqttParse, mqttPublish, readPayloadValue } from '../src/app/live';
 
@@ -140,6 +141,16 @@ const extremes = (n: Network) => { const r = runTransient(n, { steady: solveStea
   const bytes = xlsx(book);
   const txt = new TextDecoder('latin1').decode(bytes);
   t('xlsx: zip with workbook, styles and a sheet per table', bytes[0] === 0x50 && bytes[1] === 0x4b && txt.includes('xl/workbook.xml') && book.length >= 4 && txt.includes(`xl/worksheets/sheet${book.length}.xml`) && txt.includes('<v>1200</v>'), book.map((b) => b.name).join(', '));
+}
+{
+  // health check fixes
+  const net = risingMain(true);
+  const bad: Network = { ...net, nodes: [...net.nodes.map((n) => (n.id === 'PS-D' ? { ...n, vessel: { ...n.vessel!, gasVolume: 40 } } : n)), { id: 'LOOSE', kind: 'junction', x: 0, y: 0, elev: 0 }], pumps: net.pumps.map((p) => ({ ...p, inertia: 0, efficiency: 84 })), pipes: net.pipes.map((p) => (p.id === 'M2' ? { ...p, diameter: 600 } : p)), settings: { ...net.settings, duration: 5 } };
+  const before = healthCheck(bad);
+  const fixed = before.filter((i) => i.fix).reduce((m, i) => i.fix!.apply(m), bad);
+  const after = healthCheck(fixed);
+  t('health fixes clear the errors and warnings they cover', before.filter((i) => i.fix).length >= 6 && !after.some((i) => i.level === 'error') && !after.some((i) => i.fix), `${before.filter((i) => i.fix).length} fixes; left: ${after.filter((i) => i.level !== 'info').map((i) => i.title).join('; ') || 'none'}`);
+  t('fixed model runs', runTransient(fixed, { steady: solveSteady(fixed), frames: 20 }).envelopes.length > 0);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
