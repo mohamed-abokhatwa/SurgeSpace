@@ -186,6 +186,9 @@ export interface NetNode {
   elev: number;
   /** Base demand, m³/s (junctions). */
   demand?: number;
+  /** Emitter: flow to the atmosphere that follows the pressure, Q = C·p^γ (leakage, sprinklers, hydrants), C in
+   *  m³/s at 1 m of pressure. */
+  emitter?: number;
   /** Fixed water surface elevation, m (reservoirs and tanks). */
   head?: number;
   /** Reservoirs: head varies with time during the transient. */
@@ -564,6 +567,14 @@ export interface Settings {
   gasFraction: number;
   /** Demands follow pressure (orifice law) during the transient. */
   pressureDependentDemand: boolean;
+  /** Steady and extended-period demand model (EPANET 2.2): demand-driven (default) or pressure-driven, where a
+   *  junction receives D·((p − pMin)/(pReq − pMin))^pExp between the two pressures. */
+  demandModel?: 'DDA' | 'PDA';
+  pdaMin?: number;
+  pdaReq?: number;
+  pdaExp?: number;
+  /** Emitter (leakage, sprinkler) exponent: Q = C·p^γ (default 0.5). */
+  emitterExp?: number;
   /** Minimum allowed pressure head, m (checks). */
   minPressure: number;
   /** Liquid (default water at 20 °C). */

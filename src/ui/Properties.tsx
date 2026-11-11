@@ -103,7 +103,8 @@ export function Properties({ net, setNet, selected, result, onSelect }: { net: N
         {n.kind === 'junction' ? (
           <Group title="Demand">
             <QNum label="Base demand" q="flow" value={n.demand ?? 0} onChange={(v) => set({ demand: v ?? 0 })} />
-            <p className="hint">Demands follow the pressure during the run when “pressure-dependent demands” is on in Run Setup.</p>
+            <label className="field"><span>Emitter / leakage C <em className="unit">L/s at 1 m</em></span><input type="number" step="any" min={0} value={n.emitter ? +(n.emitter * 1000).toPrecision(6) : ''} placeholder="none" onChange={(e) => { const v = Number(e.target.value); set({ emitter: v > 0 ? v / 1000 : undefined }); }} /></label>
+            <p className="hint">Demands follow the pressure during the run when “pressure-dependent demands” is on in Run Setup. An emitter discharges C·p^γ (leakage, sprinklers, hydrants) in every engine.</p>
           </Group>
         ) : (
           <Group title="Water level">

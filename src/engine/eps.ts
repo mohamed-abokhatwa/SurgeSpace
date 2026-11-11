@@ -260,7 +260,7 @@ export function runEPS(net: Network, onProgress?: (frac: number) => void): EPSRe
         const h = r.heads.get(n.id) ?? NaN;
         res.head[n.id].push(h);
         res.pressure[n.id].push(h - (n.kind === 'reservoir' && n.storage ? n.elev : n.elev));
-        res.demand[n.id].push(n.kind === 'junction' ? snap.nodes.find((x) => x.id === n.id)!.demand ?? 0 : -netInflow(net, r, n.id));
+        res.demand[n.id].push(n.kind === 'junction' ? r.outflow?.get(n.id) ?? snap.nodes.find((x) => x.id === n.id)!.demand ?? 0 : -netInflow(net, r, n.id));
       }
       for (const id of linkIds(net)) {
         const q = r.flows.get(id) ?? 0;
@@ -308,7 +308,7 @@ export function runEPS(net: Network, onProgress?: (frac: number) => void): EPSRe
     // advance
     if (wq) {
       // water quality runs over whole hydraulic periods (as EPANET): rule checks that change nothing extend the period
-      if (!qp) { const snap = snapshot(net, st); const fu = full, em = empty, rr = r; qp = { r: rr, t0: st.t, dt: 0, tankQ: (id) => (fu.has(id) || em.has(id) ? 0 : netInflow(net, rr, id)), demand: new Map(snap.nodes.map((n) => [n.id, n.demand ?? 0])) }; }
+      if (!qp) { const snap = snapshot(net, st); const fu = full, em = empty, rr = r; qp = { r: rr, t0: st.t, dt: 0, tankQ: (id) => (fu.has(id) || em.has(id) ? 0 : netInflow(net, rr, id)), demand: new Map(snap.nodes.map((n) => [n.id, rr.outflow?.get(n.id) ?? n.demand ?? 0])) }; }
       qp.dt += dt;
     }
     for (const n of tanks) {

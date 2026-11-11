@@ -67,6 +67,20 @@ export function RunSetupDialog({ net, setNet, onClose, defaults, setDefaults }: 
             </div>
             <label className="row small" style={{ marginTop: 12 }}><input type="checkbox" checked={s.unsteadyFriction} onChange={(e) => set({ unsteadyFriction: e.target.checked })} /> Unsteady friction (Brunone–Vítkovský with Vardy’s coefficient) — realistic wave damping</label>
             <label className="row small" style={{ marginTop: 6 }}><input type="checkbox" checked={s.pressureDependentDemand} onChange={(e) => set({ pressureDependentDemand: e.target.checked })} /> Pressure-dependent demands during the run (orifice law)</label>
+            <div className="grid2" style={{ marginTop: 10 }}>
+              <label className="field"><span>Demand model (steady state and daily operation)</span>
+                <select value={s.demandModel ?? 'DDA'} onChange={(e) => set({ demandModel: e.target.value as 'DDA' | 'PDA' })}>
+                  <option value="DDA">Demand-driven (demands always met)</option>
+                  <option value="PDA">Pressure-driven (demand falls with low pressure)</option>
+                </select>
+              </label>
+              <label className="field"><span>Emitter exponent γ <em className="unit">Q = C·p^γ</em></span><input type="number" step="0.05" value={s.emitterExp ?? 0.5} onChange={(e) => set({ emitterExp: Number(e.target.value) || 0.5 })} /></label>
+              {s.demandModel === 'PDA' && <>
+                <label className="field"><span>No supply below <em className="unit">m</em></span><input type="number" value={s.pdaMin ?? 0} onChange={(e) => set({ pdaMin: Number(e.target.value) || 0 })} /></label>
+                <label className="field"><span>Full demand above <em className="unit">m</em></span><input type="number" value={s.pdaReq ?? 0.1} onChange={(e) => set({ pdaReq: Number(e.target.value) || 0.1 })} /></label>
+                <label className="field"><span>Pressure exponent</span><input type="number" step="0.05" value={s.pdaExp ?? 0.5} onChange={(e) => set({ pdaExp: Number(e.target.value) || 0.5 })} /></label>
+              </>}
+            </div>
             <p className="hint">Animation frames set how smooth playback and graphs are; the solver always uses its own (much finer) time step. The wave engine handles every event; the rigid-column engine ignores pressure waves and is for slow operations, surge tank oscillation and long runs. Daily operation (tank levels, patterns, controls, water quality) runs from Analysis → Extended period.</p>
           </>
         )}

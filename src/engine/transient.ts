@@ -313,8 +313,12 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   const resH0 = nodes.map((n) => n.head ?? n.elev);
   const demK = new Float64Array(NN); // orifice coefficient (pressure-dependent) or constant demand
   const demConst = new Float64Array(NN);
+  // emitters (leakage, sprinklers): Q = C·p^γ at every step
+  const emC = new Float64Array(NN), emG = Math.max(st.emitterExp ?? 0.5, 0.05);
+  nodes.forEach((n, i) => { if (n.kind !== 'reservoir' && (n.emitter ?? 0) > 0) emC[i] = n.emitter!; });
   nodes.forEach((n, i) => {
-    const d = n.kind === 'reservoir' ? 0 : n.demand ?? 0;
+    // the demand delivered in the steady state (less than the set demand where pressure-driven demand cuts it)
+    const d = n.kind === 'reservoir' ? 0 : steady.outflow?.has(n.id) ? Math.max(steady.outflow.get(n.id)! - (steady.emitterFlow?.get(n.id) ?? 0), 0) : n.demand ?? 0;
     const p0 = Hprev[i] - n.elev;
     if (st.pressureDependentDemand && d > 0 && p0 > 0.5) demK[i] = d / Math.sqrt(p0);
     else demConst[i] = d;
@@ -651,6 +655,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     let q = Sc[i] - Sb[i] * H + qext;
     const p = H - n.elev;
     q -= demConst[i] + (demK[i] > 0 ? demK[i] * Math.sqrt(Math.max(p, 0)) : 0);
+    if (emC[i] > 0) q -= emC[i] * Math.max(p, 0) ** emG;
     if (n.relief) q -= reliefFlow(n.relief, p);
     const sv = savs[i];
     if (sv && sv.open > 0) q -= sv.cd * sv.A * sv.open * Math.sqrt(2 * G * Math.max(p, 0));
@@ -742,7 +747,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   };
 
   /** Closed-form DGCM solve for a plain node (no devices, constant demand). */
-  const plainNode = (i: number) => !nodes[i].relief && !vessels[i] && !airv[i] && !tanks[i] && !savs[i] && !outlets[i] && demK[i] === 0;
+  const plainNode = (i: number) => !nodes[i].relief && !vessels[i] && !airv[i] && !tanks[i] && !savs[i] && !outlets[i] && demK[i] === 0 && emC[i] === 0;
   const dgcm = (sb: number, sc: number, qext: number, z: number, C3: number, Vold: number) => {
     const E = Vold + dt * (sb * (z - HBc + HV) - sc - qext);
     const disc = Math.sqrt(E * E + 4 * dt * sb * C3);

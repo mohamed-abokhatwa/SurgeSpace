@@ -373,11 +373,15 @@ export const COMMANDS: Command[] = [
   {
     name: 'set_run_settings', mutates: true,
     description: `Change run settings: duration_s, friction (DW or HW), min_pressure_m, max_pressure_m, unsteady_friction, liquid (${FLUIDS.map((f) => f.name).slice(0, 5).join(', ')}…), site_elevation_m.`,
-    params: obj({ duration_s: num('Simulation time, s'), friction: str('Friction method', ['DW', 'HW']), min_pressure_m: num('Lowest allowed pressure, m'), max_pressure_m: num('Highest allowed pressure, m'), unsteady_friction: bool('Unsteady friction'), liquid: str('Liquid name'), site_elevation_m: num('Site elevation above sea level, m'), engine: str('Surge engine: wave (all events, default) or rigid (rigid columns: slow events, surge tank mass oscillation)', ['wave', 'rigid']) }),
+    params: obj({ duration_s: num('Simulation time, s'), friction: str('Friction method', ['DW', 'HW']), min_pressure_m: num('Lowest allowed pressure, m'), max_pressure_m: num('Highest allowed pressure, m'), unsteady_friction: bool('Unsteady friction'), liquid: str('Liquid name'), site_elevation_m: num('Site elevation above sea level, m'), engine: str('Surge engine: wave (all events, default) or rigid (rigid columns: slow events, surge tank mass oscillation)', ['wave', 'rigid']), demand_model: str('Steady and daily-operation demands: DDA (always met) or PDA (pressure-driven)', ['DDA', 'PDA']), pda_min_m: num('PDA: no supply below this pressure, m'), pda_required_m: num('PDA: full demand above this pressure, m'), emitter_exponent: num('Emitter exponent (default 0.5)') }),
     run: async (ctx, a) => {
       const net = ctx.getNet();
       const s = { ...net.settings };
       if (a.engine) s.engine = a.engine;
+      if (a.demand_model) s.demandModel = a.demand_model;
+      if (a.pda_min_m !== undefined) s.pdaMin = a.pda_min_m;
+      if (a.pda_required_m !== undefined) s.pdaReq = a.pda_required_m;
+      if (a.emitter_exponent !== undefined) s.emitterExp = a.emitter_exponent;
       if (a.duration_s !== undefined) s.duration = Math.max(0.1, a.duration_s);
       if (a.friction) s.friction = a.friction;
       if (a.min_pressure_m !== undefined) s.minPressure = a.min_pressure_m;

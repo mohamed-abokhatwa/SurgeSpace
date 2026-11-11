@@ -244,6 +244,19 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
     setting: (id, v) => { const valve = valves.find((x) => x.id === id); return valve?.control ? (valve.control.type === 'FCV' ? v * qf : v * (us ? 0.70307 : 1)) : v; },
   });
   if (rules.length) notes.push(`${rules.length} rule-based control(s) read.`);
+  // emitters and the pressure-driven demand model (EPANET 2.2 options)
+  const optVal = (k: string, sub: string) => { const v = opts.get(k); return v && v.startsWith(sub) ? Number(v.slice(sub.length).trim().split(' ')[0]) : undefined; };
+  const emExp = optVal('EMITTER', 'EXPONENT') ?? 0.5;
+  const pu = us ? 0.70307 : 1;
+  for (const r of sec('EMITTERS')) { const n = nodes.find((x) => x.id === r[0]); if (n && Number(r[1]) > 0) n.emitter = (Number(r[1]) * qf) / pu ** emExp; }
+  const hydro: Partial<Network['settings']> = {};
+  if (emExp !== 0.5) hydro.emitterExp = emExp;
+  if ((opts.get('DEMAND') ?? '').replace(/\s+/g, ' ').startsWith('MODEL PDA')) {
+    hydro.demandModel = 'PDA';
+    const mn = optVal('MINIMUM', 'PRESSURE'), rq = optVal('REQUIRED', 'PRESSURE'), ex = optVal('PRESSURE', 'EXPONENT');
+    hydro.pdaMin = (mn ?? 0) * pu; hydro.pdaReq = (rq ?? 0.1) * pu; hydro.pdaExp = ex ?? 0.5;
+    notes.push(`Pressure-driven demands: full demand above ${hydro.pdaReq.toFixed(1)} m, none below ${hydro.pdaMin.toFixed(1)} m.`);
+  }
   const title = sec('TITLE').map((r) => r.join(' ')).join(' ').trim();
   return {
     network: {
@@ -251,7 +264,7 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
       description: `Imported from EPANET (${units}, ${hl}).`,
       nodes, pipes, pumps, valves,
       event: pumps.length ? { kind: 'pumpTrip', targets: pumps.filter((p) => p.on).map((p) => p.id), start: 1 } : valves.length ? { kind: 'valveClose', targets: [valves[0].id], start: 1, duration: 5 } : { kind: 'none', targets: [], start: 0 },
-      settings: { ...defaultSettings(), friction },
+      settings: { ...defaultSettings(), friction, ...hydro },
       ...(patterns.length ? { patterns } : {}),
       ...(controls.length ? { controls } : {}),
       ...(rules.length ? { rules } : {}),
@@ -283,6 +296,8 @@ export function toInp(net: Network): string {
       L.push(`${v.id}  ${v.from}  ${v.to}  ${(v.diameter * 1000).toFixed(1)}  TCV  ${a > 0 ? +(v.k0 / (a * a)).toPrecision(6) : 1e12}  0`);
     }
   }
+  const em = net.nodes.filter((n) => n.kind === 'junction' && (n.emitter ?? 0) > 0);
+  if (em.length) { L.push('', '[EMITTERS]', ';Junction  Coefficient (L/s at 1 m)'); for (const n of em) L.push(`${n.id}  ${+(n.emitter! * 1000).toPrecision(8)}`); }
   L.push('', '[CURVES]');
   for (const p of net.pumps) for (const [q, h] of p.curve) L.push(`C_${p.id}  ${(q * 1000).toFixed(3)}  ${h}`);
   L.push('', '[STATUS]');
@@ -312,7 +327,10 @@ export function toInp(net: Network): string {
     }
   }
   const qopt = !e || e.quality === 'none' ? 'None' : e.quality === 'age' ? 'Age' : e.quality === 'trace' ? `Trace ${e.traceNode ?? ''}` : `${e.chemical ?? 'Chlorine'} mg/L`;
-  L.push('', '[OPTIONS]', 'Units  LPS', `Headloss  ${net.settings.friction === 'DW' ? 'D-W' : 'H-W'}`, `Quality  ${qopt}`, ...(e?.defaultPattern ? [`Pattern  ${e.defaultPattern}`] : []), '', '[COORDINATES]');
+  L.push('', '[OPTIONS]', 'Units  LPS', `Headloss  ${net.settings.friction === 'DW' ? 'D-W' : 'H-W'}`, `Quality  ${qopt}`, ...(e?.defaultPattern ? [`Pattern  ${e.defaultPattern}`] : []),
+    ...(net.settings.emitterExp !== undefined && net.settings.emitterExp !== 0.5 ? [`Emitter Exponent  ${net.settings.emitterExp}`] : []),
+    ...(net.settings.demandModel === 'PDA' ? ['Demand Model  PDA', `Minimum Pressure  ${net.settings.pdaMin ?? 0}`, `Required Pressure  ${net.settings.pdaReq ?? 0.1}`, `Pressure Exponent  ${net.settings.pdaExp ?? 0.5}`] : []),
+    '', '[COORDINATES]');
   for (const n of net.nodes) L.push(`${n.id}  ${n.x}  ${n.y}`);
   L.push('', '[END]');
   return L.join('\n');

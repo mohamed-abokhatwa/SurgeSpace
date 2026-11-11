@@ -138,7 +138,9 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   // ── state ──
   const H = nodes.map((n) => (n.kind === 'reservoir' ? n.head ?? n.elev : steady.heads.get(n.id) ?? n.elev));
   const res0 = nodes.map((n) => n.head ?? n.elev);
-  const demand = nodes.map((n) => (n.kind === 'junction' ? n.demand ?? 0 : 0));
+  const demand = nodes.map((n) => (n.kind !== 'junction' ? 0 : steady.outflow?.has(n.id) ? Math.max(steady.outflow.get(n.id)! - (steady.emitterFlow?.get(n.id) ?? 0), 0) : n.demand ?? 0));
+  const emG = Math.max(st.emitterExp ?? 0.5, 0.05);
+  const emC = nodes.map((n) => (n.kind === 'junction' ? Math.max(n.emitter ?? 0, 0) : 0));
   let slow = 0;
 
   const resHead = (i: number, t: number) => {
@@ -178,7 +180,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     const resid = (v: number[]) => {
       const r = new Array(n).fill(0);
       const h = (i: number) => (isRes[i] ? H[i] : v[fIdx.get(i)!]);
-      free.forEach((i, k) => (r[k] = -demand[i]));
+      free.forEach((i, k) => (r[k] = -demand[i] - (emC[i] > 0 ? emC[i] * Math.max(v[k] - nodes[i].elev, 0) ** emG : 0)));
       links.forEach((l, k) => {
         const q = v[nf + k];
         const fi = fIdx.get(l.i), fj = fIdx.get(l.j);

@@ -79,6 +79,9 @@ export const AR_PANELS: Record<string, string> = {
   'Fixed-level sources': 'مصادر ثابتة المنسوب', Junctions: 'العقد', 'Air vessels': 'الخزانات الهوائية', 'Pipe length': 'طول الأنابيب', 'Protected nodes': 'العقد المحمية',
   Reaches: 'المقاطع الحسابية', 'Time step': 'الخطوة الزمنية', 'Wave-speed change': 'تعديل سرعة الموجة', 'Filter elements…': 'تصفية العناصر…', 'Labels…': 'العناوين…', Turbines: 'التوربينات',
   'Surge tanks': 'خزانات الموازنة', 'Control valves': 'محابس التحكم', 'Check valves': 'محابس عدم الرجوع', 'Vapour': 'البخار', 'over class': 'فوق الرتبة',
+  'Demand model (steady state and daily operation)': 'نموذج الاستهلاك (الحالة المستقرة والتشغيل اليومي)', 'Demand-driven (demands always met)': 'مدفوع بالاستهلاك (يُلبى الاستهلاك دائمًا)',
+  'Pressure-driven (demand falls with low pressure)': 'مدفوع بالضغط (ينخفض الاستهلاك مع انخفاض الضغط)', 'No supply below': 'لا إمداد تحت', 'Full demand above': 'استهلاك كامل فوق',
+  'Pressure exponent': 'أس الضغط', 'Emitter / leakage C': 'معامل التسرب / الباعث C', 'Emitter exponent γ': 'أس الباعث γ',
   // added with the newer panels
   'Kaplan / propeller (flow rises with speed)': 'كابلان / مروحي (يزداد التصرف مع السرعة)', 'None — passes flow like a valve (gate only)': 'لا يوجد — يمرر التصرف كمحبس (البوابة فقط)',
   'Runner characteristic (flow and efficiency change with speed)': 'منحنى العضو الدوار (يتغير التصرف والكفاءة مع السرعة)', 'Differential surge tank (riser and chamber)': 'خزان موازنة تفاضلي (أنبوب صاعد وحجرة)',

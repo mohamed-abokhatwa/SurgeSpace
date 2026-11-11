@@ -17,6 +17,11 @@ export interface SteadyResult {
   controlStatus?: Map<string, 'active' | 'open' | 'closed'>;
   /** Relative speed of variable-speed pumps that hold a pressure (1 for the others). */
   speeds?: Map<string, number>;
+  /** Water leaving each junction: the demand delivered (pressure-driven model) plus emitter flow, m³/s. Only for
+   *  nodes where it differs from the set demand. */
+  outflow?: Map<string, number>;
+  /** Emitter flow at each node with an emitter, m³/s. */
+  emitterFlow?: Map<string, number>;
 }
 
 interface Link {
@@ -130,6 +135,21 @@ function solveFixed(net: Network, areas: Map<string, number>, withControl = fals
   });
   const demand = net.nodes.map((n) => (n.kind === 'reservoir' ? 0 : n.demand ?? 0));
   const curves = net.pumps.map((p) => pumpCurve(p));
+  // emitters and pressure-driven demands: flows from a node to a virtual source at the node elevation, with a head
+  // loss that grows with the flow (EPANET 2.2's treatment)
+  const st = net.settings;
+  const gEm = Math.max(st.emitterExp ?? 0.5, 0.05);
+  const emC = net.nodes.map((n) => (n.kind === 'reservoir' ? 0 : Math.max(n.emitter ?? 0, 0)));
+  const qEm = emC.map((c, i) => (c > 0 ? c * Math.sqrt(Math.max((init?.heads.get(net.nodes[i].id) ?? maxFixed) - net.nodes[i].elev, 1)) : 0));
+  const pda = st.demandModel === 'PDA';
+  const pMin = st.pdaMin ?? 0, pReq = Math.max(st.pdaReq ?? 0.1, pMin + 0.01), pExp = Math.max(st.pdaExp ?? 0.5, 0.05);
+  const pdaNode = demand.map((d) => pda && d > 0);
+  const qD = demand.map((d, i) => (pdaNode[i] ? d : 0));
+  const cap = demand.map(() => 0 as -1 | 0 | 1); // −1: no supply (p ≤ pMin), +1: full demand (p ≥ pReq)
+  const pEm = new Array(N).fill(0), yEm = new Array(N).fill(0), pD = new Array(N).fill(0), yD = new Array(N).fill(0);
+  const emLoss = (q: number, c: number) => Math.sign(q) * (Math.abs(q) / c) ** (1 / gEm);
+  const pdaLoss = (q: number, d: number) => pMin + (pReq - pMin) * (Math.max(q, 0) / d) ** (1 / pExp);
+  const outOf = (n: number) => (pdaNode[n] ? qD[n] : demand[n]) + qEm[n];
   // control valves (EPANET-style statuses), only in the control solve
   const cst: (CtlStatus | null)[] = links.map((l) => (withControl && l.kind === 'valve' && net.valves[l.ref].control && areas.get(l.id)! > 0 ? 'open' : null)); // start open: always a solvable system
   const ctlInfo = links.map((l, k) => {
@@ -192,6 +212,21 @@ function solveFixed(net: Network, areas: Map<string, number>, withControl = fals
         y[k] = p[k] * h;
       }
     });
+    for (let n = 0; n < N; n++) {
+      if (emC[n] > 0) {
+        const aq = Math.max(Math.abs(qEm[n]), 1e-9);
+        const dh = Math.max((emLoss(aq, emC[n]) / aq) / gEm, 1e-7);
+        pEm[n] = 1 / dh;
+        yEm[n] = pEm[n] * emLoss(qEm[n], emC[n]);
+      }
+      if (pdaNode[n]) {
+        if (cap[n] !== 0) { pD[n] = 1e-8; yD[n] = qD[n] - (cap[n] > 0 ? demand[n] : 0); continue; }
+        const q = Math.min(Math.max(qD[n], 1e-9 * demand[n]), demand[n]);
+        const dh = Math.max(((pReq - pMin) * (q / demand[n]) ** (1 / pExp) / q) / pExp, 1e-7);
+        pD[n] = 1 / dh;
+        yD[n] = pD[n] * pdaLoss(qD[n], demand[n]);
+      }
+    }
     // active PRV / PSV: the controlled node is held at the set head for this iteration (a fixed head)
     let fixedIt = fixed;
     if (withControl) {
@@ -208,7 +243,10 @@ function solveFixed(net: Network, areas: Map<string, number>, withControl = fals
     const F = new Array(N).fill(0);
     for (let n = 0; n < N; n++) {
       if (fixedIt[n]) continue;
-      F[n] = -demand[n];
+      F[n] = pdaNode[n] ? 0 : -demand[n];
+      // emitter and pressure-driven demand: links to a fixed head at the node elevation
+      if (emC[n] > 0) { diag[n] += pEm[n]; F[n] += -(qEm[n] - yEm[n]) + pEm[n] * net.nodes[n].elev; }
+      if (pdaNode[n]) { diag[n] += pD[n]; F[n] += -(qD[n] - yD[n]) + pD[n] * net.nodes[n].elev; }
       for (const k of adj[n]) {
         const l = links[k];
         diag[n] += p[k];
@@ -229,6 +267,15 @@ function solveFixed(net: Network, areas: Map<string, number>, withControl = fals
       qSum += Math.abs(Q[k]);
     });
     for (let n = 0; n < N; n++) if (!fixedIt[n]) H[n] = Hnew[n];
+    for (let n = 0; n < N; n++) {
+      if (fixedIt[n]) continue;
+      if (emC[n] > 0) { const dq = yEm[n] - pEm[n] * (H[n] - net.nodes[n].elev); qEm[n] -= dq; dqSum += Math.abs(dq); qSum += Math.abs(qEm[n]); }
+      if (pdaNode[n]) {
+        const dq = yD[n] - pD[n] * (H[n] - net.nodes[n].elev);
+        qD[n] = Math.min(Math.max(qD[n] - dq, 0), demand[n]);
+        dqSum += Math.abs(dq); qSum += Math.abs(qD[n]);
+      }
+    }
     // active control valves carry what balances their controlled node (FCV: the set flow)
     links.forEach((l, k) => {
       if (cst[k] !== 'active') return;
@@ -236,7 +283,7 @@ function solveFixed(net: Network, areas: Map<string, number>, withControl = fals
       let q = ci.c.set;
       if (ci.c.type !== 'FCV') {
         const n = ci.c.type === 'PRV' ? l.j : l.i;
-        let out = demand[n];
+        let out = outOf(n);
         for (const m of adj[n]) if (m !== k) out += links[m].i === n ? Q[m] : -Q[m];
         q = ci.c.type === 'PRV' ? out : -out;
       }
@@ -269,6 +316,13 @@ function solveFixed(net: Network, areas: Map<string, number>, withControl = fals
         }
       }
     });
+    // pressure-driven demand: hold a node at no supply or full demand while its pressure stays beyond the limits
+    for (let n = 0; n < N; n++) {
+      if (!pdaNode[n] || fixedIt[n]) continue;
+      const pr = H[n] - net.nodes[n].elev;
+      const next: -1 | 0 | 1 = cap[n] === 1 ? (pr < pReq - 1e-6 ? 0 : 1) : cap[n] === -1 ? (pr > pMin + 1e-6 ? 0 : -1) : qD[n] >= demand[n] && pr >= pReq ? 1 : qD[n] <= 0 && pr <= pMin ? -1 : 0;
+      if (next !== cap[n]) { cap[n] = next; if (next === 1) qD[n] = demand[n]; if (next === -1) qD[n] = 0; if (next === 0 && qD[n] <= 0) qD[n] = 1e-6 * demand[n]; statusChanged = true; }
+    }
     links.forEach((l, k) => {
       const s0 = cst[k];
       if (!s0) return;
@@ -318,6 +372,8 @@ function solveFixed(net: Network, areas: Map<string, number>, withControl = fals
     converged,
     warnings,
     openings: new Map(areas),
+    ...(emC.some((c) => c > 0) || pda ? { outflow: new Map(net.nodes.flatMap((n, i) => (emC[i] > 0 || pdaNode[i] ? [[n.id, outOf(i)] as [string, number]] : []))) } : {}),
+    ...(emC.some((c) => c > 0) ? { emitterFlow: new Map(net.nodes.flatMap((n, i) => (emC[i] > 0 ? [[n.id, qEm[i]] as [string, number]] : []))) } : {}),
     ...(withControl ? { controlStatus: new Map(links.flatMap((l, k) => (cst[k] ? [[l.id, cst[k]!] as [string, CtlStatus]] : []))) } : {}),
   };
 }

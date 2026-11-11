@@ -31,6 +31,7 @@ export const NODE_FIELDS: FieldDef<NetNode>[] = [
   { key: 'y', label: 'Y', type: 'number', unit: 'm', q: 'length', help: 'Map coordinate (north).', get: (e) => e.y, set: (e, v) => ({ ...e, y: n(v) }) },
   { key: 'elevation', label: 'Elevation', type: 'number', unit: 'm', q: 'elevation', help: 'Ground or pipe centreline level.', get: (e) => e.elev, set: (e, v) => ({ ...e, elev: n(v) }) },
   { key: 'demand_lps', label: 'Demand', type: 'number', unit: 'L/s', q: 'flow', help: 'Base demand of a junction.', get: (e) => (e.demand ?? 0) * 1000, set: (e, v) => ({ ...e, demand: n(v) / 1000 }) },
+  { key: 'emitter_lps_at_1m', label: 'Emitter coefficient', type: 'number', unit: 'L/s at 1 m', min: 0, help: 'Leakage, sprinkler or hydrant: flow C·p^γ to the atmosphere (0 = none).', get: (e) => (e.emitter ?? 0) * 1000, set: (e, v) => ({ ...e, emitter: n(v) > 0 ? n(v) / 1000 : undefined }) },
   { key: 'water_level_m', label: 'Water level', type: 'number', unit: 'm', q: 'head', help: 'Water surface level of a source.', get: (e) => e.head, set: (e, v) => ({ ...e, head: n(v) }) },
   { key: 'kind', label: 'Type', type: 'enum', options: ['junction', 'reservoir'], help: 'Junction or fixed-level source.', get: (e) => e.kind, set: (e, v) => (v === 'reservoir' ? { ...e, kind: 'reservoir', head: e.head ?? e.elev + 5 } : { ...e, kind: 'junction', headSchedule: undefined }) },
 ];
