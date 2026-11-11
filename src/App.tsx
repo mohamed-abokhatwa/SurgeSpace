@@ -25,6 +25,7 @@ import { BackgroundDialog, CataloguesDialog, FindDialog, HealthDialog, HelpDialo
 import { DataSheets } from './ui/DataSheets';
 import { CasesPanel, addCase, syncActive } from './ui/Cases';
 import { LivePanel } from './ui/LivePanel';
+import { MapDialog } from './ui/MapDialog';
 import { EPSPanel, epsPipeColours, type EPSColour } from './ui/EPSPanel';
 import { clock, networkAt, type EPSResult } from './engine/eps';
 import { skeletonise } from './engine/skeleton';
@@ -43,7 +44,7 @@ import { AIAccountsDialog, CopilotPanel } from './ui/AIPanel';
 type LeftTab = 'explorer' | 'operations';
 type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log' | 'eps' | 'live';
 interface UncertaintyOut { runs: { label: string; maxHead: number; minPressure: number }[]; envelopes: PipeEnvelope[]; spread: { maxHead: [number, number]; minPressure: [number, number] } }
-type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai';
+type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai' | 'map';
 
 const Logo = () => (
   <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
@@ -489,6 +490,7 @@ export default function App() {
       { label: 'Grid', checked: viewOpts.grid, action: () => setViewOpts((v) => ({ ...v, grid: !v.grid })) },
       { label: 'Snap to grid', checked: viewOpts.snap, action: () => setViewOpts((v) => ({ ...v, snap: !v.snap })) },
       { label: 'Element IDs', checked: viewOpts.ids, action: () => setViewOpts((v) => ({ ...v, ids: !v.ids })) },
+      { label: 'Map and terrain (basemap, elevations)…', action: () => setDialog('map') },
       { label: 'Background picture…', checked: !!net.background?.visible, action: () => setDialog('background') },
       { label: 'North arrow', checked: viewOpts.north, action: () => setViewOpts((v) => ({ ...v, north: !v.north })) },
       { label: 'Value labels', sub: valueLabels.map(([k, l]) => ({ label: l, checked: viewOpts.values === k, action: () => setViewOpts((v) => ({ ...v, values: k })) })) },
@@ -890,6 +892,7 @@ export default function App() {
       {dialog === 'report' && result && <ReportDialog net={net} result={result} checks={checks} route={route} nodes={graphs.filter((g) => g.ref.type === 'node').map((g) => g.ref.id)} version={__APP_VERSION__}
         onSaveInfo={(info) => setNetRaw((n) => ({ ...n, report: info }))} onClose={() => setDialog(null)} onDraftAI={() => { setDialog(null); aiTask(AI_TASKS.find((t) => t.id === 'report')!); }} />}
       {dialog === 'ai' && <AIAccountsDialog onClose={() => setDialog(null)} />}
+      {dialog === 'map' && <MapDialog net={net} setNet={setNet} onClose={() => setDialog(null)} onToast={setToast} />}
       {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} onImport={(n, notes) => { setDialog(null); load(n, notes); }} />}
       {dialog === 'setup' && <RunSetupDialog net={net} setNet={setNet} onClose={() => setDialog(null)} defaults={defaults} setDefaults={setDefaults} />}
       {dialog === 'catalogues' && <CataloguesDialog net={net} onClose={() => setDialog(null)} onApplyWave={selected.some((r) => r.type === 'pipe') ? (a) => { const ids = new Set(selected.filter((r) => r.type === 'pipe').map((r) => r.id)); setNet((n) => ({ ...n, pipes: n.pipes.map((p) => (ids.has(p.id) ? { ...p, wavespeed: a } : p)) }), 'Wave speed'); setDialog(null); } : undefined} />}

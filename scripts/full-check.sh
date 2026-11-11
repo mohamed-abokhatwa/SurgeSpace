@@ -18,6 +18,7 @@ echo "== pipe forces"; npx tsx tests/forces.test.ts | grep -E "FAIL|passed"
 echo "== variable-speed drives"; npx tsx tests/vsd.test.ts | grep -E "FAIL|passed"
 echo "== PBV, GPV, TCV vs EPANET"; npx tsx tests/valves2.test.ts | grep -E "FAIL|passed"
 echo "== viscoelastic pipes"; npx tsx tests/visco.test.ts | grep -E "FAIL|passed"
+echo "== maps and terrain"; npx tsx tests/geo.test.ts | grep -E "FAIL|passed"
 echo "== licence tests"; npx tsx tests/license.test.ts 2>/dev/null | tail -1
 echo "== examples vs baseline"; npx tsx validation/baseline.ts compare "$BASE"
 echo "== Benchmark Tnet0"; npx tsx validation/vs-benchmark-tnet0.ts | tail -2

@@ -571,6 +571,8 @@ export interface Network {
   /** Rule-based controls, checked every rule step of the extended-period run. */
   rules?: ControlRule[];
   eps?: EPSSettings;
+  /** Coordinate system of the model coordinates (for basemaps and terrain). */
+  crs?: { kind: 'utm'; zone: number; south: boolean } | { kind: 'webmercator' };
   /** Live and historian data: the source (no password is stored) and the tag-to-element mapping. */
   scada?: { source?: { kind: 'mqtt' | 'bridge'; url: string; topics?: string[]; username?: string }; tags: { tag: string; element: string; quantity: 'pressure' | 'head' | 'flow' | 'level' | 'status' | 'speed'; scale?: number; offset?: number }[] };
 }
@@ -582,6 +584,8 @@ export interface BackgroundImage {
   x0: number; y0: number; x1: number; y1: number;
   opacity: number;
   visible: boolean;
+  /** Credit line of a web basemap (shown on the drawing). */
+  attribution?: string;
 }
 
 /** A named variant of the model (what-if): stored as a full copy so it can be run and compared on its own. */

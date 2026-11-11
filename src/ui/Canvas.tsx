@@ -296,6 +296,14 @@ export function Canvas({
       ctx.globalAlpha = Math.max(0.05, Math.min(1, bg.opacity));
       ctx.drawImage(bgImg, X(bg.x0), Y(-bg.y1), (bg.x1 - bg.x0) * s, (bg.y1 - bg.y0) * s);
       ctx.globalAlpha = 1;
+      if (bg.attribution) {
+        ctx.font = '10px sans-serif';
+        const tw = ctx.measureText(bg.attribution).width;
+        ctx.fillStyle = theme.dark ? 'rgba(7,17,31,0.7)' : 'rgba(255,255,255,0.75)';
+        ctx.fillRect(size.w - tw - 10, size.h - bottomInset - 16, tw + 8, 14);
+        ctx.fillStyle = theme.dark ? '#cbd5e1' : '#334155';
+        ctx.fillText(bg.attribution, size.w - tw - 6, size.h - bottomInset - 5);
+      }
     }
     // contours (under the pipes)
     if (contours) {
