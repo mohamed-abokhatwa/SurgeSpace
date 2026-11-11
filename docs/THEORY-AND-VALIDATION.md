@@ -6,6 +6,11 @@ friction, minor losses, pump curves as EPANET interprets them (one point, three 
 (PRV, PSV, FCV) by status iteration, pressure-breaker and general-purpose valves, non-return valves, variable-speed
 pumps whose speed is found (secant) to meet a pressure set point.
 
+Emitters (Q = C·p^γ) and pressure-driven demands (EPANET 2.2: D·((p − p_min)/(p_req − p_min))^e between the two
+pressures) are links to a virtual source at the node elevation, linearised in the same Newton iteration, with the
+demand held at zero or in full while the pressure stays beyond the limits. In the surge engines the emitter keeps
+discharging C·p^γ at every step.
+
 ## 2. Wave engine (method of characteristics)
 - Characteristic equations on a fixed grid; one time step for the whole network, pipe wave speeds adjusted within a
   tolerance (default 0.5 %) and reported; very short pipes become rigid columns.
@@ -33,7 +38,10 @@ pumps whose speed is found (secant) to meet a pressure set point.
 
 ## 3. Rigid-column engine
 L/(gA)·dQ/dt = ΔH − losses for each pipe, continuity at the nodes, pump speed from the torque balance and storage
-devices (vessels, tanks) — solved together by Newton's method at each implicit step. No pressure waves.
+devices (vessels, tanks) — solved together by Newton's method at each implicit step. No pressure waves. On large
+models each Newton step eliminates the link, pump-speed and device unknowns (each local to one link or node), leaving
+a sparse symmetric system in the node heads solved by preconditioned conjugate gradients; it gives the same answers
+as the dense solve.
 
 ## 4. Extended period and water quality
 Sequence of steady states with tank level integration, pattern steps, simple controls (time, clock, level,
@@ -60,6 +68,11 @@ wall reactions with mass transfer (Sherwood number), completely mixed tanks, boo
 | Motor start | final speed and duty; run-up order DOL < star–delta < soft start | speed within 3 % of rated; engines agree |
 | Turbine runner characteristics | trends: Francis chokes (higher rise), Kaplan relieves (lower rise) vs a speed-independent runner | as expected; steady state unchanged |
 | Pipe class optimisation | rising main | feasible, cheaper than the highest classes, higher class near the pumps |
+| Emitters (leakage), Net1 over 24 h | EPANET 2.2 | heads within 0.008 m, demands within 0.003 L/s |
+| Pressure-driven demand, Net1 over 24 h | EPANET 2.2 | heads within 0.007 m, demands within 0.005 L/s |
+| Differential surge tank | SciPy ODE integration (independent code) | upsurge equal to 0.01 %; history within 0.06 m |
+| Motor start (direct on line) | SciPy ODE integration (independent code) | rigid within 0.03 %, wave within 1.2 % (compressibility) |
+| Rigid-column sparse solve | dense solve | identical results; 3,000-pipe grid at about 0.1 s per step |
 | Calibration | synthetic field data | recovers roughness ×3 and demand ×1.2 |
 | UTM conversion | PROJ | within 0.2 mm |
 | DXF export | ezdxf (independent reader) | no audit errors |

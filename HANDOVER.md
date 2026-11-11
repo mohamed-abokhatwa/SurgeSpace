@@ -58,8 +58,13 @@ GIS/CAD exchange and plug-ins (`plugins/`). Later slices added: differential sur
 turbine runner characteristics, pipe class / diameter optimisation, child cases stored as differences, streaming copilot
 replies, the New model wizard, Arabic panel contents, schema-driven data sheets and bulk edit, a Playwright click-through
 test, the QGIS plug-in tested inside QGIS 3.34, and the DXF audited by ezdxf (all in CI). Status: `docs/MASTER-PLAN.md`.
+Hardening: tests on every push, a results baseline for the examples, emitters and pressure-driven demand (validated
+against EPANET 2.2), a sparse rigid-column solver for large models, independent ODE checks, and an end-to-end test of
+the real desktop app (`tests/desktop-e2e.mjs`). Version 3.0.0; release notes in `docs/RELEASE-NOTES-3.0.md`.
+Demo/preview builds: `npm run build:demo` (licence rules inside the app) — never edit the public key out of the source.
 Open: ArcGIS Pro and AutoCAD plug-ins need testing inside those programs; shared cloud projects need a hosted service;
-the v3 Store release has not been made (the branch is `v3-program`, not yet merged or tagged).
+an Arabic-speaking engineer should review the Arabic terms; the copilot has been tested against simulated providers
+and a local server, not live accounts; the v3 Store release has not been made (`v3-program` not yet merged or tagged).
 
 ## 2. Features
 
@@ -169,4 +174,4 @@ Commands: `npm install`, `npm run dev`, `npx tsc -b`, `npx tsx tests/<name>.test
 - Mac: add the Apple secrets to GitHub, then run Desktop builds for a notarized DMG; decide where to host it.
 - Optional: Resend key for licence e-mail alerts.
 - The Cloudflare token pasted in an old chat should be revoked and replaced.
-- The preview page for testing: https://claude.ai/artifact/NqHhkbwFeYWJ6RBU99zYVW (demo build).
+- The preview page for testing: https://claude.ai/artifact/NqHhkbwFeYWJ6RBU99zYVW (demo build: `npm run build:demo`, publish `dist-demo`).

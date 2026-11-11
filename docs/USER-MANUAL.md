@@ -45,7 +45,7 @@ US customary; the model is always stored in SI). Every change can be undone (Ctr
 | Element | Key data |
 |---|---|
 | Fixed-level source | Water level; optionally a head schedule (tide, upstream station) or, for daily operation, a storage tank (levels, diameter) |
-| Junction | Elevation, demand (with a pattern for daily operation), protection devices |
+| Junction | Elevation, demand (with a pattern for daily operation), emitter (leakage, sprinkler, hydrant: Q = C·p^γ), protection devices |
 | Pipe | Length, internal diameter, roughness (ε or C), wave speed (calculator in Tools → Catalogues), pressure class, long section, non-return valve, viscoelastic creep (PE/PVC) |
 | Pump | Head curve (shut-off, duty, run-out), efficiency, speed, inertia (Thorley estimate offered), non-return valve, variable-speed drive holding a pressure, four-quadrant behaviour (generic or Suter data), motor start (direct on line, star–delta or soft starter, with a torque–speed curve) |
 | Valve | Diameter, loss, opening, characteristic (gate, globe, ball, butterfly, needle or manufacturer curve), check valve; control types PRV, PSV, FCV; pressure-breaker and general-purpose valves |
@@ -61,7 +61,9 @@ US customary; the model is always stored in SI). Every change can be undone (Ctr
    - *Wave engine* (default): method of characteristics with column separation (discrete gas cavity model) and
      unsteady friction. Use it for every fast event.
    - *Rigid-column engine*: incompressible water columns. Use it for slow operations, surge tank and vessel mass
-     oscillation, long runs and quick screening.
+     oscillation, long runs and quick screening. It handles models of thousands of pipes.
+   - *Demand model*: demand-driven (demands always met) or pressure-driven (EPANET 2.2: a junction gets its full demand
+     above the required pressure and none below the minimum), for the steady state and daily operation.
 3. **Run** (F5). Results: the map coloured by maximum, minimum or steady pressure, or animated; the long-section
    profile with envelopes, vapour pressure and pipe class; graphs at any element; result tables; design checks with
    the element at fault; the run log.

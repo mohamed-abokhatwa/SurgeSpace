@@ -92,5 +92,12 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 
 - **Slice 4 (11 Nov 2026):** queries and selection sets, case overlays on the profile, turbine speed governor, variable-area surge tanks, notes on the drawing, drawing to scale, tutorials.
 
+- **Hardening (11 Nov 2026):** tests on every push (`npm test` runs every test file; UI, large-model, QGIS and
+  desktop jobs), a results baseline for every example, faster start (main bundle 984 → 628 kB), emitters and
+  pressure-driven demand (EPANET 2.2, validated), rigid-column engine for large models (sparse Newton) with turbine
+  characteristics and governor, independent ODE checks of the differential tank and motor start, the real desktop
+  app driven end to end (WebDriver) including the copilot over the native HTTP client, demo builds by setting
+  (`npm run build:demo`), version 3.0.0 and release notes (`docs/RELEASE-NOTES-3.0.md`).
+
 ## Working method
 Each slice: one feature with tests and benchmarks, on a branch, with a preview. No Store release until a phase's done criteria are met.

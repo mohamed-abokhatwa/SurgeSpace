@@ -12,7 +12,7 @@ import { emptyData, memoryStore, type MemoryData } from './server/memoryStore';
  *  building with VITE_LICENCE_DEMO=1 — so a demo build never needs the key edited out of the source. */
 export const DEMO = !PUBLIC_KEY || (typeof import.meta.env !== 'undefined' && import.meta.env.VITE_LICENCE_DEMO === '1');
 export { CONTACT_EMAIL };
-export const APP_VERSION = '2.0.1';
+export const APP_VERSION = '3.0.0';
 
 export interface LicenceState {
   plan: Plan;
