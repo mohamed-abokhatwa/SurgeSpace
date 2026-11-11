@@ -145,11 +145,36 @@ export interface CopilotProps {
   /** A task or prompt queued from a menu; the panel runs it and calls `done`. */
   queued: { prompt: string; label: string } | null;
   done: () => void;
+  /** Conversation saved with the project (text only) and a way to save it. */
+  saved?: { role: 'user' | 'assistant'; text: string }[];
+  onSave?: (t: { role: 'user' | 'assistant'; text: string }[]) => void;
 }
 
-export function CopilotPanel({ ctx, hasResult, onAccounts, onUseNarrative, queued, done }: CopilotProps) {
+export function CopilotPanel({ ctx, hasResult, onAccounts, onUseNarrative, queued, done, saved, onSave }: CopilotProps) {
   const ai = useAI();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => (saved ?? []).map((m) => ({ role: m.role, parts: [{ type: 'text' as const, text: m.text }] })));
+  const [listening, setListening] = useState(false);
+  // keep the conversation with the project (text parts only; tool calls and results are not stored)
+  useEffect(() => {
+    if (!onSave) return;
+    const t = setTimeout(() => {
+      const out = messages.map((m) => ({ role: m.role, text: m.parts.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join('\n') })).filter((m) => m.text.trim()).slice(-60);
+      onSave(out);
+    }, 800);
+    return () => clearTimeout(t);
+  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
+  const SR = typeof window !== 'undefined' ? ((window as unknown as Record<string, unknown>).SpeechRecognition ?? (window as unknown as Record<string, unknown>).webkitSpeechRecognition) as (new () => { lang: string; interimResults: boolean; onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void; onend: () => void; onerror: () => void; start: () => void; stop: () => void }) | undefined : undefined;
+  const listen = () => {
+    if (!SR) return;
+    const r = new SR();
+    r.lang = navigator.language?.startsWith('ar') ? 'ar-SA' : navigator.language || 'en-US';
+    r.interimResults = false;
+    r.onresult = (e) => { const tx = Array.from(e.results).map((x) => x[0].transcript).join(' '); setInput((v) => (v ? `${v} ${tx}` : tx)); };
+    r.onend = () => setListening(false);
+    r.onerror = () => setListening(false);
+    setListening(true);
+    r.start();
+  };
   const [labels, setLabels] = useState<Record<number, string>>({}); // index of user message → task label shown instead of the long prompt
   const [input, setInput] = useState('');
   const [files, setFiles] = useState<{ name: string; part: Part }[]>([]);
@@ -335,7 +360,10 @@ export function CopilotPanel({ ctx, hasResult, onAccounts, onUseNarrative, queue
         <textarea rows={3} value={input} placeholder="Ask the copilot… (Enter to send, Shift+Enter for a new line)" onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (input.trim()) void send(input.trim()); } }} aria-label="Message to the copilot" />
         <div className="row" style={{ gap: 6, justifyContent: 'space-between' }}>
-          <button className="btn small ghost" onClick={attach} title="Attach a PDF data sheet, drawing, photo or CSV">Attach…</button>
+          <span className="row" style={{ gap: 2 }}>
+            <button className="btn small ghost" onClick={attach} title="Attach a PDF data sheet, drawing, photo or CSV">Attach…</button>
+            {SR && <button className={`btn small ghost ${listening ? 'on' : ''}`} onClick={listen} disabled={listening} title="Speak your request (English or Arabic)">{listening ? 'Listening…' : 'Speak'}</button>}
+          </span>
           <span className="small muted mono" title="Tokens used in this conversation (billed by your provider)">{usage.input + usage.output > 0 ? `${((usage.input + usage.output) / 1000).toFixed(1)}k tokens` : ''}</span>
           {running ? <button className="btn small" onClick={() => abort.current?.abort()}>Stop</button>
             : <button className="btn small primary" onClick={() => input.trim() && send(input.trim())} disabled={!input.trim()}>Send</button>}

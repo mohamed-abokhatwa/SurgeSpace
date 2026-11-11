@@ -155,6 +155,8 @@ export default function App() {
   useEffect(() => { const f = (e: Event) => setToast((e as CustomEvent<string[]>).detail); window.addEventListener('surgespace-toast', f); return () => window.removeEventListener('surgespace-toast', f); }, []);
   // the last run and the model it was made for (the copilot only reads results that match the current model)
   const lastRun = useRef<{ out: RunOutput; net: Network } | null>(null);
+  // copilot conversation: kept outside the model (so it never makes results look out of date) and saved with it
+  const copilotRef = useRef<Network['copilot']>(undefined);
 
   useEffect(() => {
     if (theme === 'auto') document.documentElement.removeAttribute('data-theme');
@@ -164,7 +166,7 @@ export default function App() {
   // autosave (recover from File menu)
   useEffect(() => {
     if (isExample.current) return;
-    const t = setTimeout(() => writeLS('surgespace.autosave', projectJson({ ...net, cases: net.cases ? syncActive(net) : undefined })), 1500);
+    const t = setTimeout(() => writeLS('surgespace.autosave', projectJson({ ...net, copilot: copilotRef.current, cases: net.cases ? syncActive(net) : undefined })), 1500);
     return () => clearTimeout(t);
   }, [net]);
 
@@ -233,6 +235,7 @@ export default function App() {
     setNetRaw(n);
     setStale(true); setResult(null); setChecks([]); setUnc(null); setSizing(null); setAirSugg(null); setSelected([]); setGraphs([]);
     lastRun.current = null;
+    copilotRef.current = n.copilot;
     setEpsRes(null); setEpsK(0); setEpsColour('none');
     setRoute(defaultRoute(n));
     setFitKey((k) => k + 1);
@@ -355,7 +358,7 @@ export default function App() {
   const colorBy = epsCol ?? colorByBase;
 
   // ── file actions ──
-  const saveProject = () => download(`${safeName(net.name)}.surge.json`, projectJson({ ...net, cases: net.cases ? syncActive(net) : undefined }), 'application/json');
+  const saveProject = () => download(`${safeName(net.name)}.surge.json`, projectJson({ ...net, copilot: copilotRef.current, cases: net.cases ? syncActive(net) : undefined }), 'application/json');
   const openProject = () => {
     const i = document.createElement('input');
     i.type = 'file'; i.accept = '.json';
@@ -872,7 +875,7 @@ export default function App() {
             </div>
             <div className="pane-body" style={right === 'props' ? undefined : { display: 'none' }}><Properties net={net} setNet={setNet} selected={selected} result={result} onSelect={(r) => setSelected(r)} /></div>
             <div className="pane-body copilot-body" style={right === 'ai' ? undefined : { display: 'none' }}>
-              <CopilotPanel ctx={aiCtx} hasResult={!!result} onAccounts={() => setDialog('ai')} onUseNarrative={applyNarrative} queued={aiQueued} done={() => setAiQueued(null)} />
+              <CopilotPanel key={fitKey} ctx={aiCtx} hasResult={!!result} onAccounts={() => setDialog('ai')} onUseNarrative={applyNarrative} queued={aiQueued} done={() => setAiQueued(null)} saved={copilotRef.current} onSave={(c) => { copilotRef.current = c.length ? c : undefined; }} />
             </div>
           </>}
         </aside>

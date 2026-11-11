@@ -571,6 +571,8 @@ export interface Network {
   /** Rule-based controls, checked every rule step of the extended-period run. */
   rules?: ControlRule[];
   eps?: EPSSettings;
+  /** AI copilot conversation kept with the project (text only). */
+  copilot?: { role: 'user' | 'assistant'; text: string }[];
   /** Coordinate system of the model coordinates (for basemaps and terrain). */
   crs?: { kind: 'utm'; zone: number; south: boolean } | { kind: 'webmercator' };
   /** Live and historian data: the source (no password is stored) and the tag-to-element mapping. */
