@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { connectLive, type LiveSource, type LiveValue } from '../app/live';
 import { applySnapshot, boundaryFromSeries, compareWithData, parseHistorianCsv, type Series, type TagMap, type TagQuantity } from '../app/scada';
 import type { EPSResult } from '../engine/eps';
+import { applyFactors, paramName, type CalParam } from '../app/calibrate';
+import { call } from './client';
 import type { Network } from '../engine/types';
 
 type SetNet = (f: (n: Network) => Network, label?: string) => void;
@@ -18,6 +20,10 @@ export function LivePanel({ net, setNet, eps, onToast }: { net: Network; setNet:
   const [vals, setVals] = useState<Record<string, LiveValue>>({});
   const [hist, setHist] = useState<Series | null>(null);
   const stop = useRef<(() => void) | null>(null);
+  const mats = [...new Set(net.pipes.map((p) => p.material).filter((m): m is string => !!m))];
+  const calOpts: CalParam[] = [{ kind: 'roughness' }, ...(mats.length > 1 ? mats.map((m) => ({ kind: 'roughness' as const, material: m })) : []), { kind: 'demand' }];
+  const [calSel, setCalSel] = useState<boolean[]>([true]);
+  const [calBusy, setCalBusy] = useState(false);
   useEffect(() => () => stop.current?.(), []);
   const maps: TagMap[] = cfg.tags;
   const setMaps = (f: (m: TagMap[]) => TagMap[]) => setNet((n) => ({ ...n, scada: { ...(n.scada ?? { tags: [] }), tags: f(n.scada?.tags ?? []) } }), 'Tag mapping');
@@ -56,6 +62,22 @@ export function LivePanel({ net, setNet, eps, onToast }: { net: Network; setNet:
           {hist && <span className="small muted">{Object.keys(hist.values).length} tags · {hist.times.length} rows</span>}
         </div>
         {hist && !eps && <p className="small muted">Run the daily operation (extended period) to compare the model with these data.</p>}
+        {hist && maps.length > 0 && (
+          <div className="row small" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+            <span className="muted">Calibrate:</span>
+            {calOpts.map((o, k) => <label key={k} className="row" style={{ gap: 3 }}><input type="checkbox" checked={calSel[k] ?? false} onChange={(e) => setCalSel((x) => { const y = [...x]; y[k] = e.target.checked; return y; })} />{paramName(o)}</label>)}
+            <button className="btn small" disabled={calBusy || !calSel.some(Boolean)} onClick={async () => {
+              const params = calOpts.filter((_, k) => calSel[k]);
+              setCalBusy(true);
+              try {
+                const o = await call<{ calibration: { factors: number[]; before: number; after: number; runs: number } }>({ type: 'calibrate', net, data: hist, maps, params }, (m) => onToast([m]));
+                const c = o.calibration;
+                setNet((n) => applyFactors(n, params, c.factors), 'Calibration');
+                onToast([`Calibrated in ${c.runs} runs: misfit ${c.before.toFixed(2)} → ${c.after.toFixed(2)}.`, ...params.map((p, k) => `${paramName(p)} × ${c.factors[k].toFixed(3)}`), 'Applied to the model (Undo with Ctrl+Z). Run the daily operation again to see the fit.']);
+              } catch (e) { onToast([(e as Error).message]); } finally { setCalBusy(false); }
+            }}>{calBusy ? 'Calibrating…' : 'Calibrate'}</button>
+          </div>
+        )}
         {cmp.length > 0 && (
           <table className="grid" style={{ marginTop: 6 }}>
             <thead><tr><th>Tag</th><th>Element</th><th>Points</th><th>Bias</th><th>RMS</th><th>r</th></tr></thead>

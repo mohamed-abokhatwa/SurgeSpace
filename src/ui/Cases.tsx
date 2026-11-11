@@ -1,7 +1,7 @@
 // Cases: named variants of the model (with / without a vessel, different closure times, future demand…).
 // Each case is a complete copy, so it can be edited, run and compared on its own. Run all → side-by-side table.
 import { useState } from 'react';
-import type { Network, ModelCase } from '../engine/types';
+import type { Network } from '../engine/types';
 import type { TransientResult } from '../engine/transient';
 import type { Check } from '../engine/analysis';
 import { callParallel } from './client';
@@ -10,31 +10,8 @@ import { fmtQ, useUnits } from '../app/units';
 export interface CaseSummary { id: string; name: string; maxHead: number; maxP: number; minP: number; cavity: number; slams: number; fails: number; warns: number; runtime: number; error?: string }
 
 type Model = Omit<Network, 'cases' | 'activeCase'>;
-const strip = (n: Network): Model => { const { cases: _c, activeCase: _a, ...m } = n; void _c; void _a; return structuredClone(m); };
-const newId = () => Math.random().toString(36).slice(2, 9);
-
-/** Make sure the project has a case list with the current model as the active case. */
-export function ensureCases(n: Network): Network {
-  if (n.cases?.length && n.activeCase) return n;
-  const id = newId();
-  return { ...n, cases: [{ id, name: 'Base case', model: strip(n) }], activeCase: id };
-}
-/** Store the model being edited into its case slot. */
-export function syncActive(n: Network): ModelCase[] {
-  return (n.cases ?? []).map((c) => (c.id === n.activeCase ? { ...c, model: strip(n) } : c));
-}
-export function switchCase(n: Network, id: string): Network {
-  const cases = syncActive(n);
-  const target = cases.find((c) => c.id === id);
-  if (!target) return n;
-  return { ...structuredClone(target.model), cases, activeCase: id } as Network;
-}
-export function addCase(n: Network, name: string): Network {
-  const base = ensureCases(n);
-  const cases = syncActive(base);
-  const id = newId();
-  return { ...base, cases: [...cases, { id, name, model: strip(base) }], activeCase: id };
-}
+export { ensureCases, syncActive, switchCase, addCase } from '../app/cases';
+import { ensureCases, syncActive, switchCase, addCase } from '../app/cases';
 
 /** What differs between two models, in words (first few). */
 export function diffModels(a: Model, b: Model): string[] {

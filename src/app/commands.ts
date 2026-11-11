@@ -12,6 +12,7 @@ import { defaultEPS, runEPS, type EPSResult } from '../engine/eps';
 import { applyDesign, candidates, optimiseProtection, type Design, type OptVar } from '../engine/optimise';
 import { skeletonise } from '../engine/skeleton';
 import { rulesFromText } from '../engine/inp';
+import { addCase } from './cases';
 import { FLUIDS } from './catalogues';
 import { addLink, addPipe, deleteElements, insertOnPipe, renameElement, uniqueId, DEFAULTS, type ElRef } from './edit';
 import { deviceDefaults, nodeDevices, removeDevice, type ElementKind } from './elements';
@@ -521,6 +522,18 @@ export const COMMANDS: Command[] = [
     description: 'Check the model for errors and implausible inputs before running.',
     params: obj({}),
     run: async (ctx) => healthCheck(ctx.getNet()).map((i) => ({ level: i.level, title: i.title, detail: i.detail, ...(i.fix ? { suggested_fix: i.fix.label } : {}) })),
+  },
+  {
+    name: 'create_case', mutates: true,
+    description: 'Keep the current model as a case and continue in a new named copy (e.g. "Power failure, both pumps", "Valve V1 closes in 10 s"). Then change that copy (operations, devices). Cases are compared side by side in the Cases tab.',
+    params: obj({ name: str('Name of the new case'), notes: str('What the case represents') }, ['name']),
+    run: async (ctx, a) => {
+      const net = ctx.getNet();
+      const n2 = addCase(net, String(a.name));
+      const c = n2.cases!.map((x) => (x.id === n2.activeCase && a.notes ? { ...x, notes: String(a.notes) } : x));
+      ctx.apply({ ...n2, cases: c }, `AI: case ${a.name}`);
+      return { cases: c.map((x) => x.name), active: a.name };
+    },
   },
   {
     name: 'apply_health_fixes', mutates: true,

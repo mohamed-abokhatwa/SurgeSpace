@@ -5,6 +5,8 @@ import { runTransient } from './engine/transient';
 import type { Network } from './engine/types';
 import { runEPS } from './engine/eps';
 import { candidates, optimiseProtection, type OptVar } from './engine/optimise';
+import { calibrate, type CalParam } from './app/calibrate';
+import type { Series, TagMap } from './app/scada';
 
 export type JobRequest =
   | { id: number; type: 'run'; net: Network }
@@ -12,6 +14,7 @@ export type JobRequest =
   | { id: number; type: 'sizeVessel'; net: Network; node: string }
   | { id: number; type: 'airValves'; net: Network }
   | { id: number; type: 'eps'; net: Network }
+  | { id: number; type: 'calibrate'; net: Network; data: Series; maps: TagMap[]; params: CalParam[] }
   | { id: number; type: 'optimise'; net: Network; vars?: OptVar[]; generations?: number; population?: number };
 
 export function handleJob(req: JobRequest, post: (msg: Record<string, unknown>) => void) {
@@ -32,6 +35,9 @@ export function handleJob(req: JobRequest, post: (msg: Record<string, unknown>) 
       let last = -1;
       const eps = runEPS(req.net, (f) => { const p = Math.floor(f * 20); if (p !== last) { last = p; post({ id: req.id, type: 'progress', message: `Extended period… ${p * 5} %` }); } });
       post({ id: req.id, type: 'done', eps });
+    } else if (req.type === 'calibrate') {
+      const c = calibrate(req.net, req.data, req.maps, req.params, (m) => post({ id: req.id, type: 'progress', message: m }));
+      post({ id: req.id, type: 'done', calibration: { factors: c.factors, before: c.before, after: c.after, runs: c.runs, fit: c.fit } });
     } else if (req.type === 'optimise') {
       const vars = req.vars ?? candidates(req.net);
       const r = optimiseProtection(req.net, { vars, generations: req.generations, population: req.population, onProgress: (m, f) => post({ id: req.id, type: 'progress', message: `Optimising · ${m} · ${Math.round(f * 100)} %` }) });

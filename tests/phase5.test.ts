@@ -13,6 +13,7 @@ import { importDxf } from '../src/engine/importers';
 import { xlsx } from '../src/app/xlsx';
 import { healthCheck } from '../src/app/health';
 import { addItem, allItems, applyItem } from '../src/app/library';
+import { applyFactors, calibrate } from '../src/app/calibrate';
 import { resultsBook } from '../src/app/resultsBook';
 import { connectLive, mqttParse, mqttPublish, readPayloadValue } from '../src/app/live';
 
@@ -163,6 +164,17 @@ const extremes = (n: Network) => { const r = runTransient(n, { steady: solveStea
   const n2 = applyItem(applyItem({ ...net, pumps: net.pumps.map((p) => ({ ...p, curve: [[0.1, 10]] as [number, number][], inertia: 1 })) }, pumpIt, ['PU2']), av, ['CH1200']);
   t('library: pump data and air valve applied', JSON.stringify(n2.pumps[1].curve) === JSON.stringify(net.pumps[0].curve) && n2.pumps[1].inertia === net.pumps[0].inertia && n2.pumps[0].inertia === 1 && !!n2.nodes.find((n) => n.id === 'CH1200')!.airValve);
   t('library: generic air valves and pipe types', its.some((i) => i.id === 'g-av100') && its.some((i) => i.kind === 'pipe'));
+}
+{
+  // calibration: "field data" made by the model with rougher pipes and 20 % more demand are recovered
+  const base = townSupply();
+  base.eps = { ...base.eps!, duration: 24 * 3600, hydStep: 3600, reportStep: 3600, quality: 'none' };
+  const truth = applyFactors(base, [{ kind: 'roughness' }, { kind: 'demand' }], [3, 1.2]);
+  const r = runEPS(truth);
+  const maps: TagMap[] = [{ tag: 'T2', element: 'T2', quantity: 'pressure' }, { tag: 'T4', element: 'T4', quantity: 'pressure' }, { tag: 'LVL', element: 'TANK', quantity: 'level' }, { tag: 'Q', element: 'RM1', quantity: 'flow' }];
+  const data = { times: r.times, values: { T2: r.pressure.T2, T4: r.pressure.T4, LVL: r.level.TANK, Q: r.flow.RM1 } };
+  const c = calibrate(base, data, maps, [{ kind: 'roughness' }, { kind: 'demand' }]);
+  t('calibration recovers roughness and demand factors', Math.abs(c.factors[0] - 3) < 0.3 && Math.abs(c.factors[1] - 1.2) < 0.03 && c.after < 0.05 * c.before, `roughness ×${c.factors[0].toFixed(2)}, demand ×${c.factors[1].toFixed(3)}, misfit ${c.before.toFixed(2)} → ${c.after.toFixed(3)} in ${c.runs} runs`);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
