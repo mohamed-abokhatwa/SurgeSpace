@@ -96,13 +96,19 @@ export function planAirValves(net: Network, o: AirValvePlanOptions = {}, steadyI
   const pipesAt = new Map<string, Pipe[]>();
   for (const p of open) { pipesAt.set(p.from, [...(pipesAt.get(p.from) ?? []), p]); pipesAt.set(p.to, [...(pipesAt.get(p.to) ?? []), p]); }
   // 1. high points at junctions (every pipe falls away), and pipe rising above the steady grade line
+  // pumps break the line (the suction side is not a high point); a valve joins the pipes on both sides
+  const pumpNode = new Set(net.pumps.flatMap((p) => [p.from, p.to]));
+  const valvePartners = new Map<string, string[]>();
+  for (const v of net.valves) { valvePartners.set(v.from, [...(valvePartners.get(v.from) ?? []), v.to]); valvePartners.set(v.to, [...(valvePartners.get(v.to) ?? []), v.from]); }
   for (const n of net.nodes) {
-    if (n.kind !== 'junction') continue;
+    if (n.kind !== 'junction' || pumpNode.has(n.id)) continue;
     const ps = pipesAt.get(n.id) ?? [];
     if (!ps.length) continue;
-    const drops = ps.map((p) => away(p, n.id));
+    const partners = valvePartners.get(n.id) ?? [];
+    const drops = [...ps.map((p) => away(p, n.id)), ...partners.flatMap((m) => (pipesAt.get(m) ?? []).map((p) => away(p, m)))];
+    if (partners.length && drops.every((d) => d.slope < -1e-4)) { if (partners.some((m) => items.has(`n:${m}`))) continue; }
     if (drops.every((d) => d.slope < -1e-4) && drops.some((d) => -d.slope * d.len >= minRise * 0.5)) add({ node: n.id }, n.elev, 'High point');
-    else if (ps.length === 2) {
+    else if (ps.length === 2 && !partners.length) {
       // grade change where two pipes meet, in the flow direction
       const q0 = steady?.flows.get(ps[0].id) ?? 1;
       const inP = (ps[0].to === n.id) === q0 >= 0 ? ps[0] : ps[1], outP = inP === ps[0] ? ps[1] : ps[0];

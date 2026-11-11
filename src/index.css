@@ -653,3 +653,14 @@ table.grid-table td .pill { margin: 0 3px 3px 0; }
 .test-cmp .arrow { font-size: 22px; color: var(--muted); }
 .open-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 @media (max-width: 900px) { .intake-review, .intake-build { grid-template-columns: 1fr; } .intake-how { grid-template-columns: 1fr; } .gap { grid-template-columns: 1fr; } .gap-a { justify-content: flex-start; } }
+.build-mode { display: flex; gap: 0; margin: 0 auto 14px; width: fit-content; border: 1px solid var(--line-2); border-radius: 9px; overflow: hidden; }
+.build-mode button { background: var(--panel); border: 0; padding: 7px 14px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
+.build-mode button.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.layer-list { display: flex; flex-direction: column; gap: 3px; max-height: 180px; overflow: auto; margin-bottom: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.plan-build h4 { margin: 10px 0 6px; }
+.plan-preview { padding: 10px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.plan-preview svg { max-width: 100%; height: auto; }
+.vessel-row { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr) auto; gap: 14px; align-items: center; padding: 12px 14px; margin-top: 12px; }
+.vessel-row > div:first-child { display: flex; flex-direction: column; gap: 2px; }
+.vessel-res { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+@media (max-width: 900px) { .vessel-row { grid-template-columns: 1fr; } }

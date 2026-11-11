@@ -5,6 +5,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAI, activeConfig } from '../ai/accounts';
 import { buildBasis, buildFromBasis, chainageAt, findGaps, lineChainage, newId, readDocument, sheetEvidence, verifyModel, EV_TYPES, type BuildBasis, type Evidence, type EvType, type Gap, type IntakeDoc, type VerifyItem } from '../app/intake';
 import type { AirValvePlanItem } from '../app/airValvePlan';
+import { finishPlanNetwork, guessPipeLayers, guessSymbol, planToNetwork, verifyNetwork, SYMBOL_KINDS, type EndRole, type SymbolKind } from '../app/planNetwork';
+import type { VesselSizing } from '../engine/analysis';
+import { materialId } from '../app/intake';
+import { NetThumb } from './Thumb';
 import type { Network } from '../engine/types';
 import { call } from './client';
 import { Ic } from './Icons';
@@ -17,7 +21,11 @@ export interface IntakeSession {
   summaries: Record<string, string>;
   read: Record<string, boolean>;
   name: string;
-  built?: { net: Network; notes: string[]; verify: VerifyItem[]; basis: BuildBasis };
+  built?: { net: Network; notes: string[]; verify: VerifyItem[]; basis: BuildBasis; mode?: 'line' | 'network' };
+  /** Single main from the long section, or a network from a plan drawing (DXF). */
+  mode?: 'line' | 'network';
+  netPlan?: { doc: string; layers: string[]; units: 'm' | 'mm'; symbols: Record<string, SymbolKind>; draft?: { net: Network; notes: string[]; ends: string[] }; roles: Record<string, EndRole> };
+  vessel?: VesselSizing;
   plan?: AirValvePlanItem[];
   test?: { before: { minPressure: number; at: string; cavity: number; slams: number }; after: { minPressure: number; at: string; cavity: number; slams: number }; antiSlam: string[]; net: Network };
 }
@@ -34,7 +42,8 @@ const parseValues = (s: string): Record<string, number | string> => {
   return out;
 };
 
-export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, onOpen }: {
+export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, onOpen, canSize = true }: {
+  canSize?: boolean;
   session: IntakeSession;
   setSession: (f: (s: IntakeSession) => IntakeSession) => void;
   onClose: () => void;
@@ -90,7 +99,9 @@ export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, 
   };
 
   // ── gaps follow the evidence ──
-  useEffect(() => { setSession((s) => ({ ...s, gaps: findGaps(s.evidence, s.gaps) })); }, [S.evidence, setSession]);
+  const hasPlan = S.docs.some((d) => d.kind === 'dxf' && (d.dxf?.layers.length ?? 0) > 0);
+  useEffect(() => { setSession((s) => ({ ...s, gaps: findGaps(s.evidence, s.gaps, hasPlan) })); }, [S.evidence, hasPlan, setSession]);
+  const mode: 'line' | 'network' = S.mode ?? (hasPlan && S.evidence.filter((e) => e.type === 'profilePoint' && e.status !== 'rejected').length < 2 ? 'network' : 'line');
   const openCritical = S.gaps.filter((g) => g.critical && g.status === 'open');
   const basis = useMemo(() => buildBasis(S.evidence, S.gaps, S.docs), [S.evidence, S.gaps, S.docs]);
 
@@ -101,8 +112,61 @@ export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, 
       const net2 = { ...net, sources: basis.trace };
       setBusy(tr('Checking it against the documents…'));
       const verify = await verifyModel(net2, basis);
-      set({ built: { net: net2, notes, verify, basis }, plan: undefined, test: undefined });
+      set({ built: { net: net2, notes, verify, basis, mode: 'line' }, plan: undefined, test: undefined, vessel: undefined });
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
+  };
+  // ── network from the plan drawing ──
+  const planCfg = (): NonNullable<IntakeSession['netPlan']> => {
+    if (S.netPlan) return S.netPlan;
+    const d = S.docs.find((x) => x.kind === 'dxf' && x.dxf?.layers.length)!;
+    // symbols and pipe layers: the AI's mapping where it gave one, else a guess from the names
+    const aiSym: Record<string, SymbolKind> = {}, aiLayers: string[] = [];
+    for (const e of S.evidence) if (e.status !== 'rejected' && e.type === 'note' && e.source.doc === d.id) {
+      if (e.values.block && SYMBOL_KINDS.includes(String(e.values.kind) as SymbolKind)) aiSym[String(e.values.block)] = String(e.values.kind) as SymbolKind;
+      if (e.values.layer && String(e.values.kind) === 'pipe') aiLayers.push(String(e.values.layer));
+    }
+    const pts = [...d.dxf!.blocks.flatMap((b) => b.at), ...d.dxf!.texts.map((t) => [t.x, t.y] as [number, number])];
+    const span = pts.length ? Math.max(Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1]))) : 0;
+    const layers = aiLayers.filter((l) => d.dxf!.layers.some((x) => x.name === l));
+    return { doc: d.id, layers: layers.length ? layers : guessPipeLayers(d.dxf!), units: span > 50000 ? 'mm' : 'm', symbols: Object.fromEntries(d.dxf!.blocks.map((b) => [b.name, aiSym[b.name] ?? guessSymbol(b.name)])), roles: {} };
+  };
+  const buildPlan = () => {
+    setErr(null);
+    try {
+      const cfg = planCfg();
+      const d = S.docs.find((x) => x.id === cfg.doc)!;
+      const r = planToNetwork(d.dxf!, { layers: cfg.layers, units: cfg.units, symbols: cfg.symbols, diameterMm: basis.diameterMm, material: materialId(basis.material), classM: basis.classM }, S.name);
+      // ends: a reservoir symbol is a source; otherwise closed until the engineer says
+      const roles: Record<string, EndRole> = {};
+      for (const id of r.ends) { const n = r.net.nodes.find((x) => x.id === id)!; roles[id] = cfg.roles[id] ?? (n.kind === 'reservoir' ? { role: 'source', level: n.head ?? n.elev } : { role: 'closed' }); }
+      for (const n of r.net.nodes) if (n.kind === 'reservoir' && !roles[n.id]) roles[n.id] = { role: 'source', level: n.head ?? n.elev };
+      set({ netPlan: { ...cfg, draft: { net: r.net, notes: r.notes, ends: [...new Set([...r.ends, ...r.net.nodes.filter((n) => n.kind === 'reservoir').map((n) => n.id)])] }, roles }, built: undefined, plan: undefined, test: undefined, vessel: undefined });
+    } catch (e) { setErr((e as Error).message); }
+  };
+  const finishPlan = async () => {
+    const np = S.netPlan;
+    if (!np?.draft) return;
+    setErr(null);
+    try {
+      const f = finishPlanNetwork(np.draft.net, np.roles);
+      let net = f.net;
+      // a pump curve from the data sheet, where the plan has pumps
+      if (basis.curve && net.pumps.length) net = { ...net, pumps: net.pumps.map((p) => ({ ...p, curve: basis.curve!.map(([q, h]) => [q / 1000, h] as [number, number]), ...(basis.inertia ? { inertia: basis.inertia } : {}) })) };
+      const trace = [{ what: 'Network', value: `${net.nodes.length} nodes, ${net.pipes.length} pipes`, from: S.docs.find((d) => d.id === np.doc)?.name ?? 'DXF' }, ...basis.trace.filter((x) => !['Long section', 'Start water level', 'End water level', 'Design flow', 'Air valves on the drawings'].includes(x.what))];
+      net = { ...net, sources: trace };
+      setBusy(tr('Checking it against the documents…'));
+      const verify = await verifyNetwork(net);
+      set({ built: { net, notes: [...np.draft.notes, ...f.notes], verify, basis: { ...basis, trace }, mode: 'network' }, plan: undefined, test: undefined, vessel: undefined });
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
+  };
+  const sizeVessel = async () => {
+    if (!S.built) return;
+    const net = S.test?.net ?? S.built.net;
+    const node = net.nodes.some((n) => n.id === 'PS-D') ? 'PS-D' : net.pumps[0]?.to;
+    if (!node) return;
+    setErr(null);
+    try { const o = await call<{ sizing: VesselSizing }>({ type: 'sizeVessel', net, node }, (m) => setBusy(`${tr('Sizing air vessel')} · ${m}`)); set({ vessel: o.sizing }); }
+    catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
   const plan = async (test: boolean) => {
     if (!S.built) return;
@@ -130,11 +194,22 @@ export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, 
         {stage === 'docs' && <DocsStage S={S} hasAI={hasAI} busy={!!busy} addFiles={addFiles} readWithAI={readWithAI} onOpenAccounts={onOpenAccounts} remove={(id) => setSession((s) => ({ ...s, docs: s.docs.filter((d) => d.id !== id), evidence: s.evidence.filter((e) => e.source.doc !== id) }))} />}
         {stage === 'review' && <ReviewStage S={S} setSession={setSession} />}
         {stage === 'gaps' && <GapsStage S={S} setSession={setSession} addFiles={async (f) => { const fresh = (await addFiles(f)).filter((d) => d.kind !== 'sheet' || !S.read[d.id]); if (fresh.length && hasAI) await readWithAI(fresh); }} />}
-        {stage === 'build' && <BuildStage S={S} basis={basis} build={build} busy={!!busy} />}
-        {stage === 'protect' && <ProtectStage S={S} plan={plan} busy={!!busy} onOpen={onOpen} />}
+        {stage === 'build' && (
+          <>
+            {hasPlan && (
+              <div className="build-mode seg" role="tablist">
+                <button className={mode === 'line' ? 'on' : ''} onClick={() => set({ mode: 'line' })}>{tr('Single main from the long section')}</button>
+                <button className={mode === 'network' ? 'on' : ''} onClick={() => set({ mode: 'network' })}>{tr('Network from the plan drawing (DXF)')}</button>
+              </div>
+            )}
+            {mode === 'line' ? <BuildStage S={S} basis={basis} build={build} busy={!!busy} />
+              : <PlanBuild S={S} cfg={S.netPlan ?? planCfg()} setCfg={(c) => set({ netPlan: c })} buildPlan={buildPlan} finishPlan={finishPlan} busy={!!busy} />}
+          </>
+        )}
+        {stage === 'protect' && <ProtectStage S={S} plan={plan} busy={!!busy} onOpen={onOpen} sizeVessel={sizeVessel} canSize={canSize} />}
       </div>
       <footer className="intake-foot">
-        <span className="small muted">{S.docs.length} {tr('documents')} · {S.evidence.filter((e) => e.status !== 'rejected').length} {tr('items')} · {S.gaps.filter((g) => g.status === 'open').length} {tr('open questions')}</span>
+        <span className="small muted">{S.docs.length} {tr(S.docs.length === 1 ? 'document' : 'documents')} · {S.evidence.filter((e) => e.status !== 'rejected').length} {tr('items')} · {S.gaps.filter((g) => g.status === 'open').length} {tr('open questions')}</span>
         <span style={{ flex: 1 }} />
         <button className="btn" disabled={k === 0} onClick={() => setStage(STAGES[k - 1][0])}>{tr('Back')}</button>
         {k < STAGES.length - 1 && <button className="btn primary intake-next" disabled={!stageOk[STAGES[k + 1][0]] || !!busy} onClick={() => setStage(STAGES[k + 1][0])}>{tr('Next')}: {tr(STAGES[k + 1][1])}</button>}
@@ -351,29 +426,96 @@ function BuildStage({ S, basis, build, busy }: { S: IntakeSession; basis: BuildB
 }
 const profileLevel = (p: [number, number][], ch: number) => { for (let k = 0; k + 1 < p.length; k++) if (ch >= p[k][0] && ch <= p[k + 1][0]) return p[k][1] + ((ch - p[k][0]) / (p[k + 1][0] - p[k][0] || 1)) * (p[k + 1][1] - p[k][1]); return p[p.length - 1]?.[1] ?? 0; };
 
-function ProtectStage({ S, plan, busy, onOpen }: { S: IntakeSession; plan: (test: boolean) => Promise<void>; busy: boolean; onOpen: (net: Network, notes: string[], sizeVessel: boolean) => void }) {
+const SYMBOL_NAMES: Record<SymbolKind, string> = { airValve: 'Air valve', washout: 'Washout', valve: 'Line valve', checkValve: 'Check valve', pump: 'Pump', reservoir: 'Reservoir', tank: 'Tank', hydrant: 'Hydrant', ignore: 'Not a pipeline item' };
+function PlanBuild({ S, cfg, setCfg, buildPlan, finishPlan, busy }: { S: IntakeSession; cfg: NonNullable<IntakeSession['netPlan']>; setCfg: (c: NonNullable<IntakeSession['netPlan']>) => void; buildPlan: () => void; finishPlan: () => Promise<void>; busy: boolean }) {
+  const d = S.docs.find((x) => x.id === cfg.doc);
+  if (!d?.dxf) return <div className="empty">{tr('No plan drawing (DXF) among the documents.')}</div>;
+  const draft = cfg.draft;
+  const setRole = (id: string, r: EndRole) => setCfg({ ...cfg, roles: { ...cfg.roles, [id]: r } });
+  const built = S.built?.mode === 'network' ? S.built : undefined;
+  return (
+    <div className="intake-build plan-build">
+      <div className="build-left">
+        <h4>{tr('Pipe layers')}</h4>
+        <div className="layer-list">
+          {d.dxf.layers.map((l) => (
+            <label key={l.name} className="check small"><input type="checkbox" checked={cfg.layers.includes(l.name)} onChange={(e) => setCfg({ ...cfg, layers: e.target.checked ? [...cfg.layers, l.name] : cfg.layers.filter((x) => x !== l.name), draft: undefined })} /> <span className="mono">{l.name}</span> <span className="muted">{l.lines}</span></label>
+          ))}
+        </div>
+        <label className="field small"><span>{tr('Drawing units')}</span>
+          <select value={cfg.units} onChange={(e) => setCfg({ ...cfg, units: e.target.value as 'm' | 'mm', draft: undefined })}><option value="m">{tr('metres')}</option><option value="mm">{tr('millimetres')}</option></select>
+        </label>
+        {d.dxf.blocks.length > 0 && <>
+          <h4>{tr('Symbols')}</h4>
+          <table className="grid-table small">
+            <thead><tr><th>{tr('Block')}</th><th>{tr('Count')}</th><th>{tr('Is')}</th></tr></thead>
+            <tbody>{d.dxf.blocks.map((b) => <tr key={b.name}><td className="mono">{b.name}</td><td className="mono">{b.count}</td><td>
+              <select value={cfg.symbols[b.name] ?? 'ignore'} onChange={(e) => setCfg({ ...cfg, symbols: { ...cfg.symbols, [b.name]: e.target.value as SymbolKind }, draft: undefined })} aria-label={`${b.name}`}>{SYMBOL_KINDS.map((k) => <option key={k} value={k}>{tr(SYMBOL_NAMES[k])}</option>)}</select>
+            </td></tr>)}</tbody>
+          </table>
+        </>}
+        <p className="small muted">{tr('Texts next to the lines give levels (IL, CL, RL; GL less 1.2 m cover) and sizes (DN…); levels not given are filled in from the neighbours.')}</p>
+      </div>
+      <div className="build-right">
+        <button className="btn primary big" disabled={busy || !cfg.layers.length} onClick={buildPlan}>{draft ? tr('Read the plan again') : tr('Read the plan')}</button>
+        {draft && (
+          <>
+            <div className="plan-preview card"><NetThumb net={draft.net} w={520} h={220} /><div className="small muted">{draft.notes.join(' · ')}</div></div>
+            <h4>{tr('Open ends')}</h4>
+            <table className="grid-table small">
+              <thead><tr><th>{tr('Node')}</th><th>{tr('Level')}</th><th>{tr('Is')}</th><th /></tr></thead>
+              <tbody>{draft.ends.map((id) => { const n = draft.net.nodes.find((x) => x.id === id)!; const r = cfg.roles[id] ?? { role: 'closed' as const }; return (
+                <tr key={id}><td className="mono">{id}</td><td className="mono">{n.elev.toFixed(1)}</td>
+                  <td><select value={r.role} onChange={(e) => setRole(id, e.target.value === 'source' ? { role: 'source', level: Math.round(n.elev + 10) } : e.target.value === 'demand' ? { role: 'demand', lps: 10 } : { role: 'closed' })} aria-label={`${id}`}><option value="closed">{tr('closed end')}</option><option value="source">{tr('source (reservoir or tank)')}</option><option value="demand">{tr('demand')}</option></select></td>
+                  <td>{r.role === 'source' ? <label className="gap-num"><input type="number" value={r.level} onChange={(e) => setRole(id, { role: 'source', level: Number(e.target.value) })} aria-label={tr('Water level')} /><span className="small muted">m</span></label>
+                    : r.role === 'demand' ? <label className="gap-num"><input type="number" value={r.lps} onChange={(e) => setRole(id, { role: 'demand', lps: Number(e.target.value) })} aria-label={tr('Demand')} /><span className="small muted">L/s</span></label> : null}</td></tr>); })}</tbody>
+            </table>
+            <button className="btn primary big" disabled={busy || !Object.values(cfg.roles).some((r) => r.role === 'source')} onClick={() => void finishPlan()}>{built ? tr('Build again') : tr('Build the model')}</button>
+          </>
+        )}
+        {built && (
+          <div className="verify card">
+            <b>{tr('Checks')}</b>
+            {built.verify.map((v, i) => <div key={i} className={`vrow ${v.ok ? 'v-ok' : 'v-warn'}`}><span>{v.ok ? '✓' : '!'}</span><div><b>{tr(v.what)}</b><span className="small">{v.detail}</span></div></div>)}
+            <div className="small muted" style={{ marginTop: 6 }}>{built.notes.join(' · ')}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProtectStage({ S, plan, busy, onOpen, sizeVessel, canSize }: { S: IntakeSession; plan: (test: boolean) => Promise<void>; busy: boolean; onOpen: (net: Network, notes: string[], sizeVessel: boolean) => void; sizeVessel: () => Promise<void>; canSize: boolean }) {
   const [vessel, setVessel] = useState(true);
   useEffect(() => { if (S.built && !S.plan && !busy) void plan(false); }, [S.built]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!S.built) return <div className="empty">{tr('Build the model first.')}</div>;
-  const net = S.built.net, b = S.built.basis;
-  const start = b.kind === 'pumped' ? 'PS-D' : 'R-UP';
+  const net = S.built.net, b = S.built.basis, isNet = S.built.mode === 'network';
+  const start = isNet ? (net.nodes.find((n) => n.kind === 'reservoir')?.id ?? net.nodes[0].id) : b.kind === 'pumped' ? 'PS-D' : 'R-UP';
   const ch = lineChainage(net, start);
   const rows = (S.plan ?? []).map((it) => ({ it, ch: chainageAt(net, ch, it.at) })).sort((a, b) => (a.ch ?? 1e9) - (b.ch ?? 1e9));
   const pumped = net.pumps.length > 0;
   const t = S.test;
+  // the vessel sized here goes into the model that is opened
+  const withVessel = (n: Network): Network => {
+    const v = S.vessel;
+    if (!v?.ok) return n;
+    return { ...n, nodes: n.nodes.map((x) => (x.id === v.node ? { ...x, vessel: { n: 1.2, kIn: 2.5, kOut: 0.5, ...x.vessel, volume: v.volume, gasVolume: v.gasVolume, gasInput: 'volume' as const, connDiameter: v.connDiameter } } : x)) };
+  };
+  const vNote = S.vessel?.ok ? [`${tr('Air vessel')} ${S.vessel.volume} m³ ${tr('at')} ${S.vessel.node}`] : [];
+  const sizeAfter = pumped && vessel && !S.vessel;
   const reasonsCell = (r: string[]): ReactNode => r.map((x, i) => <span key={i} className="pill">{tr(x)}</span>);
   return (
     <div className="intake-protect">
-      <LongSection b={b} items={[...b.airValves.map((a) => ({ ch: a.chainage, z: profileLevel(b.profile, a.chainage), label: tr('Air valve on the drawings'), kind: 'drawing' as const })), ...rows.filter((r) => r.ch !== undefined && !r.it.existing).map((r) => ({ ch: r.ch!, z: r.it.z, label: `${tr('Proposed air valve')} CH ${r.ch!.toFixed(0)}: ${r.it.reasons.join(', ')}`, kind: 'plan' as const }))]} />
+      {isNet ? <div className="plan-preview card"><NetThumb net={net} w={640} h={200} /></div> : <LongSection b={b} items={[...b.airValves.map((a) => ({ ch: a.chainage, z: profileLevel(b.profile, a.chainage), label: tr('Air valve on the drawings'), kind: 'drawing' as const })), ...rows.filter((r) => r.ch !== undefined && !r.it.existing).map((r) => ({ ch: r.ch!, z: r.it.z, label: `${tr('Proposed air valve')} CH ${r.ch!.toFixed(0)}: ${r.it.reasons.join(', ')}`, kind: 'plan' as const }))]} />}
       <div className="row" style={{ gap: 10, alignItems: 'center', margin: '8px 0' }}>
         <span className="ilegend small"><i className="lg drawing" />{tr('on the drawings')}</span><span className="ilegend small"><i className="lg plan" />{tr('proposed')}</span>
         <span style={{ flex: 1 }} />
         <button className="btn" disabled={busy} onClick={() => void plan(false)}>{tr('Plan again')}</button>
-        <button className="btn primary" disabled={busy || !S.plan} onClick={() => void plan(true)}>{tr('Test the plan in surge runs')}</button>
+        <button className="btn primary" disabled={busy || !S.plan || !canSize} title={canSize ? undefined : tr('Part of SurgeSpace Pro (start an evaluation)')} onClick={() => void plan(true)}>{tr('Test the plan in surge runs')}</button>
       </div>
       <table className="grid-table small">
-        <thead><tr><th>{tr('Chainage')}</th><th>{tr('Level')}</th><th>{tr('Why')}</th><th>{tr('Type')}</th><th>{tr('Large orifice')}</th><th>{tr('Drain / fill flow')}</th></tr></thead>
-        <tbody>{rows.map(({ it, ch: c }) => <tr key={it.id} className={it.existing ? 'muted' : ''}><td className="mono">{c !== undefined ? c.toFixed(0) : '—'}</td><td className="mono">{it.z.toFixed(1)}</td><td>{reasonsCell(it.reasons)}</td><td>{it.existing ? tr('existing') : it.type === 'threeStage' ? tr('anti-slam (three-stage)') : tr('double orifice')}</td><td className="mono">DN{Math.round(it.inDiameter * 1000)}</td><td className="mono">{(it.qDrain * 1000).toFixed(0)} / {(it.qFill * 1000).toFixed(0)} L/s</td></tr>)}</tbody>
+        <thead><tr><th>{isNet ? tr('Where') : tr('Chainage')}</th><th>{tr('Level')}</th><th>{tr('Why')}</th><th>{tr('Type')}</th><th>{tr('Large orifice')}</th><th>{tr('Drain / fill flow')}</th></tr></thead>
+        <tbody>{rows.map(({ it, ch: c }) => <tr key={it.id} className={it.existing ? 'muted' : ''}><td className="mono">{isNet ? ('node' in it.at ? it.at.node : `${it.at.pipe} @ ${it.at.s.toFixed(0)} m`) : c !== undefined ? c.toFixed(0) : '—'}</td><td className="mono">{it.z.toFixed(1)}</td><td>{reasonsCell(it.reasons)}</td><td>{it.existing ? tr('existing') : it.type === 'threeStage' ? tr('anti-slam (three-stage)') : tr('double orifice')}</td><td className="mono">DN{Math.round(it.inDiameter * 1000)}</td><td className="mono">{(it.qDrain * 1000).toFixed(0)} / {(it.qFill * 1000).toFixed(0)} L/s</td></tr>)}</tbody>
       </table>
       {t && (
         <div className="test-cmp">
@@ -382,15 +524,22 @@ function ProtectStage({ S, plan, busy, onOpen }: { S: IntakeSession; plan: (test
           <div className="card good"><span className="small muted">{tr('With the plan')}</span><b className="mono">{t.after.minPressure.toFixed(1)} m</b><span className="small">{tr('lowest pressure')} · {t.after.at}</span><span className="small">{tr('largest vapour cavity')} {(t.after.cavity * 1000).toFixed(0)} L · {t.after.slams} {tr('air valve slams')}</span>{t.antiSlam.length > 0 && <span className="small muted">{tr('anti-slam (three-stage) where the run showed a slam')}: {t.antiSlam.join(', ')}</span>}</div>
         </div>
       )}
+      {pumped && (
+        <div className="vessel-row card">
+          <div><b>{tr('Air vessel at the pump discharge')}</b><span className="small muted">{tr('The smallest vessel that keeps every point above the minimum pressure and within class after the pumps trip, with the air valve plan in place.')}</span></div>
+          {S.vessel ? <div className="vessel-res mono">{S.vessel.ok ? '✓' : '!'} {S.vessel.volume} m³ · {tr('gas')} {S.vessel.gasVolume} m³ · DN{Math.round(S.vessel.connDiameter * 1000)} · {tr('lowest pressure')} {S.vessel.minPressure.toFixed(1)} m<span className="small muted">{S.vessel.message}</span></div> : null}
+          <button className="btn" disabled={busy || !canSize} title={canSize ? undefined : tr('Part of SurgeSpace Pro (start an evaluation)')} onClick={() => void sizeVessel()}>{S.vessel ? tr('Size again') : tr('Size the air vessel')}</button>
+        </div>
+      )}
       <div className="open-row">
-        {pumped && <label className="check"><input type="checkbox" checked={vessel} onChange={(e) => setVessel(e.target.checked)} /> {tr('Size an air vessel at the pump discharge after opening')}</label>}
+        {pumped && !S.vessel && <label className="check"><input type="checkbox" checked={vessel} onChange={(e) => setVessel(e.target.checked)} /> {tr('Size an air vessel at the pump discharge after opening')}</label>}
         <span style={{ flex: 1 }} />
-        <button className="btn" onClick={() => onOpen(net, [...S.built!.notes, tr('Air valves from the plan not added')], pumped && vessel)}>{tr('Open without the plan')}</button>
+        <button className="btn" onClick={() => onOpen(withVessel(net), [...S.built!.notes, ...vNote, tr('Air valves from the plan not added')], sizeAfter)}>{tr('Open without the plan')}</button>
         <button className="btn primary big" disabled={!S.plan} onClick={() => void (async () => {
           const n = S.plan!.filter((p) => !p.existing).length;
-          if (t) { onOpen(t.net, [...S.built!.notes, `${n} ${tr('air valves from the plan, tested in surge runs')}`], pumped && vessel); return; }
+          if (t) { onOpen(withVessel(t.net), [...S.built!.notes, ...vNote, `${n} ${tr('air valves from the plan, tested in surge runs')}`], sizeAfter); return; }
           const { applyAirValvePlan } = await import('../app/airValvePlan');
-          onOpen(applyAirValvePlan(net, S.plan!).net, [...S.built!.notes, `${n} ${tr('air valves from the plan (not yet tested in surge runs)')}`], pumped && vessel);
+          onOpen(withVessel(applyAirValvePlan(net, S.plan!).net), [...S.built!.notes, ...vNote, `${n} ${tr('air valves from the plan (not yet tested in surge runs)')}`], sizeAfter);
         })()}>{t ? tr('Open the model with the tested plan') : tr('Open the model')}</button>
       </div>
     </div>

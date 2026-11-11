@@ -1,6 +1,6 @@
 // Model from documents: spreadsheets read by their headers, AI tool output parsed, gaps found, the basis traced to
 // its sources, the model built with the air valves where the drawings show them, DXF symbols and texts summarised.
-import { buildBasis, buildFromBasis, verifyModel, dxfSummary, findGaps, levelAt, materialId, parseRecorded, sheetEvidence, type Evidence, type IntakeDoc } from '../src/app/intake';
+import { fitPumpCurve, buildBasis, buildFromBasis, verifyModel, dxfSummary, findGaps, levelAt, materialId, parseRecorded, sheetEvidence, type Evidence, type IntakeDoc } from '../src/app/intake';
 import { solveSteady } from '../src/engine/steady';
 
 let pass = 0, fail = 0;
@@ -52,6 +52,14 @@ t('level interpolated along the long section', Math.abs(levelAt(b.profile, 1950)
 const rej = all.map((e) => (e.type === 'tank' ? { ...e, status: 'rejected' as const } : e));
 t('rejected evidence is not used (the end level becomes a question)', findGaps(rej).some((g) => g.id === 'endLevel'));
 
+// pump curve from a data sheet: an exact quadratic is recovered, evaluated at shut-off, duty and the end of the curve
+const fq = (q: number) => 62 - 0.0005 * q * q;
+const fc = fitPumpCurve([0, 50, 100, 150, 200].map((q) => [q, fq(q)] as [number, number]), 160);
+t('pump curve fitted through the points read (shut-off, duty, end)', Math.abs(fc[0][1] - 62) < 0.01 && fc[1][0] === 160 && Math.abs(fc[1][1] - fq(160)) < 0.01 && fc[2][0] >= 200, JSON.stringify(fc));
+const curveEv = sheetEvidence(curve);
+const bc = buildBasis([...all, ...curveEv.map((e) => ({ ...e, status: 'accepted' as const }))], g2, [...docs, { id: 'd2', name: 'pump.csv' }]);
+t('the curve from the data sheet goes into the basis, traced to its cells', !!bc.curve && bc.trace.some((x) => x.what === 'Pump curve' && x.from.includes('pump!A2')), bc.trace.filter((x) => x.what.startsWith('Pump')).map((x) => `${x.what}: ${x.value} (${x.from})`).join(' | '));
+
 const run = async () => {
   const { net, notes } = await buildFromBasis(b, 'From documents');
   t('model built: 2 pumps, the air valve from the drawing at CH 1950 on the pipe', net.pumps.length === 2 && net.nodes.some((n) => n.airValve && Math.abs(n.elev - levelAt(b.profile, 1950)) < 0.01), notes.join(' | '));
@@ -65,6 +73,9 @@ const run = async () => {
   t('with the estimated duty the flow and class check, and the high point above the tank level (140 > 134 m) is flagged', ver2[0].ok && ver2[2].ok && !ver2[1].ok && ver2[1].detail.includes('CH2600'), ver2.map((x) => `${x.ok ? '✓' : '✗'} ${x.detail}`).join(' | '));
   const st = solveSteady(net2);
   t('steady state solves', st.heads.size > 0);
+
+  const { net: nc } = await buildFromBasis(bc, 'with curve');
+  t('the model uses the data-sheet pump curve', nc.pumps.every((p) => Math.abs(p.curve[0][1] - bc.curve![0][1]) < 1e-9 && Math.abs(p.curve[1][0] * 1000 - bc.curve![1][0]) < 1e-6));
 
   // DXF: blocks (symbols) and texts summarised for the AI to map
   const dxf = ['0', 'SECTION', '2', 'ENTITIES',

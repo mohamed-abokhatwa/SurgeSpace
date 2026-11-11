@@ -54,9 +54,12 @@ try {
   // evaluation (the free plan limits model size) and an AI account
   await p.locator('.start-go').click().catch(() => {});
   await p.waitForTimeout(300);
-  await p.getByText('Start 14-day evaluation').click().catch(() => {});
-  await p.waitForTimeout(300);
-  await p.keyboard.press('Escape');
+  // an evaluation, as a new user would start one (the free plan has no sizing or surge tests of the plan)
+  await p.locator('.menu-btn', { hasText: /^Tools$/ }).click();
+  await p.locator('.menu-item', { hasText: 'Licence…' }).click();
+  await p.getByText('Start 14-day evaluation').click({ timeout: 5000 }).catch(() => {});
+  await p.waitForTimeout(600);
+  for (let i = 0; i < 3 && await p.locator('.modal-back').count(); i++) { await p.locator('.modal-back button[aria-label=Close]').first().click().catch(() => p.keyboard.press('Escape')); await p.waitForTimeout(200); }
 
   // open from the start page card
   await p.locator('.menu-btn', { hasText: /^File$/ }).click();
@@ -125,7 +128,7 @@ try {
   await p.getByRole('button', { name: 'Build the model' }).click();
   await p.waitForSelector('.verify', { timeout: 15000 });
   const ver = await p.locator('.vrow').allTextContents();
-  t('model checked against the documents (flow within 10 %, the high point above the tank level flagged)', ver.length === 4 && ver[0].startsWith('✓') && ver[1].startsWith('!') && ver[1].includes('CH2600'), ver.map((v) => v.slice(0, 60)).join(' | '));
+  t('model checked against the documents (flow within 10 %, the data-sheet pump curve agrees with the duty point, the high point above the tank level flagged)', ver.length === 5 && ver[0].startsWith('✓') && ver[1].startsWith('!') && ver[1].includes('CH2600') && ver.some((v) => v.startsWith('✓Pump curve')), ver.map((v) => v.slice(0, 60)).join(' | '));
   if (shots) await p.screenshot({ path: `${shots}/intake-4-build.png` });
 
   // protection

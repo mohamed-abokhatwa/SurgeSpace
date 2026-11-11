@@ -203,8 +203,8 @@ Record only what the document shows; never invent values. Give every item a conf
 Item types:
 - profilePoint: a point of a long section (chainage_m and level_m; ground_m if shown). Read the chainage/level table under a long section column by column; include every column.
 - reservoir / tank: source or delivery reservoir, sump, tank (level_m, min_level_m, max_level_m, diameter_m, chainage_m).
-- pump: pump station or duty pump (count, duty_flow_lps per pump, duty_head_m, speed_rpm, power_kw, efficiency_pct, standby).
-- pumpCurvePoint: a point read from a pump curve (flow_lps, head_m, pump name).
+- pump: pump station or duty pump (count, duty_flow_lps per pump, duty_head_m, speed_rpm, power_kw, efficiency_pct, standby, inertia_kgm2 = moment of inertia J of pump plus motor; if only GD² is given, J = GD²/4).
+- pumpCurvePoint: a point of ONE pump's head curve at rated speed (flow_lps per pump, head_m; efficiency_pct if shown). For a curve drawn as a graph, read the axis scales and units first, then record 6–10 points along the head curve from shut-off (zero flow) to the end of the curve; convert m³/h to L/s (÷ 3.6) and bar to m (× 10.2). If several impeller diameters are drawn, use the one marked as selected or duty, and say which in the label.
 - pipe: pipe data (diameter_mm, material, class, length_m, from/to chainage).
 - valve: line valve (kind gate|butterfly|globe|ball|prv|psv|fcv, diameter_mm, chainage_m, closure_s).
 - checkValve, airValve (kind double|single|vacuum|antislam, diameter_mm, chainage_m), washout (chainage_m, diameter_mm).
@@ -270,7 +270,9 @@ export function pageTextForAI(p: IntakePage, max = 1400): string {
 // ── what is missing ─────────────────────────────────────────────────────────
 const acc = (ev: Evidence[]) => ev.filter((e) => e.status !== 'rejected');
 const first = (ev: Evidence[], t: EvType, k: string) => { for (const e of acc(ev)) if (e.type === t && e.values[k] !== undefined && e.values[k] !== '') return e.values[k]; return undefined; };
-export function findGaps(ev: Evidence[], prev: Gap[] = []): Gap[] {
+/** `plan`: a plan drawing (DXF) is there, so the network can come from it: the long section, levels and flow are
+ *  then not needed (the ends are set as sources and demands on the plan). */
+export function findGaps(ev: Evidence[], prev: Gap[] = [], plan = false): Gap[] {
   const keep = new Map(prev.map((g) => [g.id, g]));
   const out: Gap[] = [];
   const add = (g: Omit<Gap, 'status'>) => out.push({ ...g, status: keep.get(g.id)?.status ?? 'open', answer: keep.get(g.id)?.answer });
@@ -291,13 +293,14 @@ export function findGaps(ev: Evidence[], prev: Gap[] = []): Gap[] {
     if (first(ev, 'pump', 'speed_rpm') === undefined) add({ id: 'speed', question: 'Pump speed', why: 'With the inertia it sets how fast the pumps run down after a trip.', unit: 'rpm', typical: 1480 });
     if (first(ev, 'pump', 'inertia_kgm2') === undefined) add({ id: 'inertia', question: 'Pump and motor inertia (data sheet)', why: 'The run-down after a power failure — the main driver of the down-surge.', unit: 'kg·m²', typical: 'estimate (Thorley)' });
   } else if (first(ev, 'valve', 'closure_s') === undefined) add({ id: 'closure', question: 'Closure time of the downstream valve', why: 'The event analysed on a gravity main.', unit: 's', typical: 30 });
+  if (plan) for (const g of out) if (['profile', 'flow', 'startLevel', 'endLevel', 'diameter'].includes(g.id)) g.critical = false;
   return out;
 }
 
 export const gapValue = (g: Gap | undefined) => (g && g.status !== 'open' ? (g.status === 'assumed' ? g.typical : g.answer) : undefined);
 
 /** Everything the model will be built from, as one record (accepted evidence plus answers), with the trace. */
-export interface BuildBasis { profile: [number, number][]; startLevel: number; endLevel: number; diameterMm: number; material: string; classM: number; flowLps: number; kind: 'pumped' | 'gravity'; pumps: number; speedRpm: number; dutyHead?: number; closureS: number; airValves: { chainage: number; diameterMm?: number; kind?: string }[]; washouts: number[]; inertia?: number; trace: { what: string; value: string; from: string }[] }
+export interface BuildBasis { curve?: [number, number][]; profile: [number, number][]; startLevel: number; endLevel: number; diameterMm: number; material: string; classM: number; flowLps: number; kind: 'pumped' | 'gravity'; pumps: number; speedRpm: number; dutyHead?: number; closureS: number; airValves: { chainage: number; diameterMm?: number; kind?: string }[]; washouts: number[]; inertia?: number; trace: { what: string; value: string; from: string }[] }
 
 export function buildBasis(ev: Evidence[], gaps: Gap[], docs: { id: string; name: string }[]): BuildBasis {
   const trace: BuildBasis['trace'] = [];
@@ -344,6 +347,16 @@ export function buildBasis(ev: Evidence[], gaps: Gap[], docs: { id: string; name
     trace.push({ what: 'Pump duty head', value: 'lift + friction + 5 %', from: 'assumed (estimate)' });
     return undefined;
   })() : undefined;
+  // pump curve read from a data sheet (table or graph): fitted, then evaluated at shut-off, duty and maximum flow
+  const curvePts = acc(ev).filter((e) => e.type === 'pumpCurvePoint').map((e) => [N(e.values.flow_lps), N(e.values.head_m)] as [number, number]).filter(([q, h]) => Number.isFinite(q) && Number.isFinite(h) && q >= 0 && h > 0);
+  let curve: [number, number][] | undefined;
+  if (curvePts.length >= 3) {
+    curve = fitPumpCurve(curvePts, flowLps / Math.max(1, pumps));
+    const e = acc(ev).find((x) => x.type === 'pumpCurvePoint')!;
+    const k = trace.findIndex((x) => x.what === 'Pump duty head' && x.from.startsWith('assumed'));
+    if (k >= 0) trace[k] = { what: 'Pump duty head', value: `${curve[1][1]} m at ${curve[1][0]} L/s`, from: 'from the pump curve' };
+    trace.push({ what: 'Pump curve', value: `${curvePts.length} points → ${curve.map(([q, h]) => `${q.toFixed(0)} L/s ${h.toFixed(1)} m`).join(', ')}`, from: name(e) });
+  }
   const inertia = pumped ? (() => {
     const i = first(ev, 'pump', 'inertia_kgm2');
     if (i !== undefined) { const e = acc(ev).find((x) => x.type === 'pump' && x.values.inertia_kgm2 !== undefined)!; trace.push({ what: 'Pump and motor inertia', value: `${i} kg·m²`, from: name(e) }); return N(i); }
@@ -356,7 +369,30 @@ export function buildBasis(ev: Evidence[], gaps: Gap[], docs: { id: string; name
   const airValves = acc(ev).filter((e) => e.type === 'airValve' && Number.isFinite(N(e.values.chainage_m))).map((e) => ({ chainage: N(e.values.chainage_m), diameterMm: Number.isFinite(N(e.values.diameter_mm)) ? N(e.values.diameter_mm) : undefined, kind: e.values.kind ? String(e.values.kind) : undefined }));
   if (airValves.length) trace.push({ what: 'Air valves on the drawings', value: airValves.map((a) => `CH ${a.chainage}`).join(', '), from: 'drawings' });
   const washouts = acc(ev).filter((e) => e.type === 'washout' && Number.isFinite(N(e.values.chainage_m))).map((e) => N(e.values.chainage_m));
-  return { profile, startLevel, endLevel, diameterMm, material, classM, flowLps, kind: pumped ? 'pumped' : 'gravity', pumps, speedRpm, dutyHead, inertia, closureS, airValves, washouts, trace };
+  return { curve, profile, startLevel, endLevel, diameterMm, material, classM, flowLps, kind: pumped ? 'pumped' : 'gravity', pumps, speedRpm, dutyHead, inertia, closureS, airValves, washouts, trace };
+}
+
+/** Pump head curve through the points read (L/s, m): least-squares quadratic h = a + b·q + c·q², evaluated at
+ *  shut-off, at the duty flow per pump and at the largest flow read — the three points the engines use. */
+export function fitPumpCurve(pts: [number, number][], dutyLps: number): [number, number][] {
+  const P = [...pts].sort((a, b) => a[0] - b[0]);
+  const qMax = P[P.length - 1][0];
+  // normal equations for [a, b, c]
+  const S = [0, 0, 0, 0, 0], T = [0, 0, 0];
+  for (const [q, h] of P) { let x = 1; for (let k = 0; k < 5; k++) { S[k] += x; if (k < 3) T[k] += h * x; x *= q; } }
+  const A = [[S[0], S[1], S[2]], [S[1], S[2], S[3]], [S[2], S[3], S[4]]];
+  const det3 = (m: number[][]) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const D = det3(A);
+  let a: number, b: number, c: number;
+  if (Math.abs(D) > 1e-12 * Math.max(1, Math.abs(S[4]) * S[0])) {
+    const col = (i: number) => A.map((r, k) => r.map((v, j) => (j === i ? T[k] : v)));
+    a = det3(col(0)) / D; b = det3(col(1)) / D; c = det3(col(2)) / D;
+  } else { a = P[0][1]; b = 0; c = (P[P.length - 1][1] - a) / (qMax * qMax || 1); }
+  const h = (q: number) => a + b * q + c * q * q;
+  const qd = dutyLps > 0 && dutyLps < qMax * 1.05 ? dutyLps : qMax * 0.65;
+  const q3 = Math.max(qMax, qd * 1.15);
+  const r = (v: number) => Math.round(v * 100) / 100;
+  return [[0, r(Math.max(h(0), h(qd)))], [r(qd), r(h(qd))], [r(q3), r(Math.max(0.1, h(q3)))]];
 }
 
 /** Catalogue material id for a material name read from a drawing. */
@@ -386,8 +422,11 @@ export async function buildFromBasis(b: BuildBasis, name: string): Promise<{ net
   const out = await buildFromWizard({ kind: b.kind, name, profile: b.profile, startLevel: b.startLevel, endLevel: b.endLevel, diameterMm: b.diameterMm, material: materialId(b.material), pressureClassM: b.classM, flowLps: b.flowLps, pumps: b.pumps, speedRpm: b.speedRpm, closureS: b.closureS, operation: b.kind === 'pumped' ? 'trip' : 'closure' });
   let net = out.net;
   const notes = [...out.notes];
-  // the stated duty head replaces the estimate (the pump curve keeps its shape through the new duty point)
-  if (b.kind === 'pumped' && b.dutyHead && net.pumps.length) {
+  // a pump curve from the data sheet replaces the estimate; otherwise a stated duty head scales it
+  if (b.kind === 'pumped' && b.curve && net.pumps.length) {
+    net = { ...net, pumps: net.pumps.map((p) => ({ ...p, curve: b.curve!.map(([q, h]) => [q / 1000, h] as [number, number]) })) };
+    notes.push(`Pump curve from the data sheet: ${b.curve.map(([q, h]) => `${q.toFixed(0)} L/s at ${h.toFixed(1)} m`).join(', ')}`);
+  } else if (b.kind === 'pumped' && b.dutyHead && net.pumps.length) {
     net = { ...net, pumps: net.pumps.map((p) => { const k = b.dutyHead! / (p.curve[1]?.[1] || b.dutyHead!); return { ...p, curve: p.curve.map(([q, h]) => [q, h * k] as [number, number]) }; }) };
     notes.push(`Pump duty head ${b.dutyHead} m from the documents`);
   }
@@ -444,6 +483,10 @@ export async function verifyModel(net: Network, b: BuildBasis): Promise<VerifyIt
   for (const n of net.nodes) { if (n.kind === 'reservoir') continue; const p = (st.heads.get(n.id) ?? 0) - n.elev; if (p < pmin) { pmin = p; at = n.id; } if (p > pmax) { pmax = p; atMax = n.id; } }
   out.push({ what: 'Steady pressure stays positive', ok: pmin > 2, detail: `lowest ${pmin.toFixed(1)} m at ${at}${pmin <= 2 ? ' — the hydraulic grade line is near or below the pipe; air valves there may admit air in normal operation' : ''}` });
   out.push({ what: 'Steady pressure within the class', ok: pmax < b.classM, detail: `highest ${pmax.toFixed(1)} m at ${atMax}, class ${b.classM} m` });
+  if (b.curve && b.dutyHead) {
+    const d = (b.curve[1][1] - b.dutyHead) / b.dutyHead;
+    out.push({ what: 'Pump curve against the stated duty point', ok: Math.abs(d) <= 0.05, detail: `the curve gives ${b.curve[1][1]} m at ${b.curve[1][0]} L/s; the documents state ${b.dutyHead} m (${d >= 0 ? '+' : ''}${(d * 100).toFixed(0)} %)${Math.abs(d) > 0.05 ? ' — check the impeller diameter or speed of the curve read' : ''}` });
+  }
   const v = (b.flowLps / 1000) / ((Math.PI / 4) * (b.diameterMm / 1000) ** 2);
   out.push({ what: 'Velocity', ok: v > 0.3 && v < 2.5, detail: `${v.toFixed(2)} m/s at the design flow` });
   return out;

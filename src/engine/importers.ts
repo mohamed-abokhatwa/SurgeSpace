@@ -193,7 +193,7 @@ export function buildFromProfile(inp: ProfileInput): { network: Network; notes: 
  * DXF import: LINE, LWPOLYLINE and POLYLINE entities become pipes; vertices become nodes (merged within
  * `tol` drawing units). Levels come from vertex Z, or from the polyline elevation; drawing units × `scale` = m.
  */
-export function importDxf(text: string, opts: { tol: number; scale: number; diameter: number; wavespeed: number; layerFilter?: string }): TableImport {
+export function importDxf(text: string, opts: { tol: number; scale: number; diameter: number; wavespeed: number; layerFilter?: string; layers?: string[] }): TableImport {
   const notes: string[] = [];
   const lines = text.replace(/\r/g, '').split('\n');
   const pairs: [number, string][] = [];
@@ -239,7 +239,8 @@ export function importDxf(text: string, opts: { tol: number; scale: number; diam
       polys.push({ layer, pts });
     }
   }
-  const filtered = opts.layerFilter ? polys.filter((p) => p.layer.toLowerCase().includes(opts.layerFilter!.toLowerCase())) : polys;
+  const want = opts.layers?.length ? new Set(opts.layers.map((l) => l.toLowerCase())) : null;
+  const filtered = (opts.layerFilter ? polys.filter((p) => p.layer.toLowerCase().includes(opts.layerFilter!.toLowerCase())) : polys).filter((p) => !want || want.has(p.layer.toLowerCase()));
   if (!filtered.length) throw new Error('No LINE or POLYLINE entities found' + (opts.layerFilter ? ` on layers matching "${opts.layerFilter}".` : '.'));
   const nodes: NetNode[] = [];
   const pipes: Pipe[] = [];

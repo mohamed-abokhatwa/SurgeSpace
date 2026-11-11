@@ -1089,7 +1089,7 @@ export default function App() {
         onSaveInfo={(info) => setNetRaw((n) => ({ ...n, report: info }))} onClose={() => setDialog(null)} onDraftAI={() => { setDialog(null); aiTask(AI_TASKS.find((t) => t.id === 'report')!); }} />}
       {dialog === 'ai' && <AIAccountsDialog onClose={() => setDialog(null)} />}
       {dialog === 'script' && <ScriptDialog ctx={aiCtx} onClose={() => setDialog(null)} />}
-      {intakeOpen && intake && <IntakeWorkspace session={intake} setSession={setIntakeF} onClose={() => setIntakeOpen(false)} onOpenAccounts={() => setDialog('ai')}
+      {intakeOpen && intake && <IntakeWorkspace canSize={lic.features.protectionSizing} session={intake} setSession={setIntakeF} onClose={() => setIntakeOpen(false)} onOpenAccounts={() => setDialog('ai')}
         onOpen={(n, notes, vessel) => { setIntakeOpen(false); openBuilt(n, notes, true, vessel, 'Model from documents'); }} />}
       {dialog === 'wizard' && <WizardDialog onClose={() => setDialog(null)} onBuilt={(n, notes, go) => openBuilt(n, notes, go, go, 'New model wizard')} />}
       {dialog === 'map' && <MapDialog net={net} setNet={setNet} onClose={() => setDialog(null)} onToast={setToast} />}
