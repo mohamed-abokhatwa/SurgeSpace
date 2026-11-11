@@ -30,6 +30,8 @@ import { EPSPanel, epsPipeColours, type EPSColour } from './ui/EPSPanel';
 import { clock, networkAt, type EPSResult } from './engine/eps';
 import { skeletonise } from './engine/skeleton';
 import { fromGeoJSON, toDXF, toGeoJSON, type GeoJSON } from './app/exchange';
+import { xlsx } from './app/xlsx';
+import { resultsBook } from './app/resultsBook';
 import { applyDesign, type Design, type OptVar } from './engine/optimise';
 import { Explorer } from './ui/Explorer';
 import { GraphsView, type GraphItem } from './ui/GraphsView';
@@ -470,6 +472,7 @@ export default function App() {
       { label: 'Export GIS (GeoJSON, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.geojson`, JSON.stringify(toGeoJSON(net, result, epsRes?.r ?? null)), 'application/geo+json') },
       { label: 'Export CAD (DXF, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.dxf`, toDXF(net, result, Math.max(1, Math.round(Math.max(...net.nodes.map((n) => Math.abs(n.x)), 100) / 300))), 'application/dxf') },
       { label: 'Export envelopes .csv', action: exportEnv, disabled: !result },
+      { label: 'Export results workbook (Excel .xlsx)', action: () => { if (!allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.')) return; const bytes = xlsx(resultsBook(net, result, checks, epsRes?.r ?? null)); const blob = new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${safeName(net.name)}-results.xlsx`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); } },
       'sep',
       { label: 'Project details…', action: () => setDialog('project') },
       { label: 'Detailed report…', action: openReport, disabled: !result },

@@ -10,6 +10,8 @@ import { runEPS } from '../src/engine/eps';
 import { applySnapshot, boundaryFromSeries, compareWithData, parseHistorianCsv, type TagMap } from '../src/app/scada';
 import { fromGeoJSON, guessFields, toDXF, toGeoJSON } from '../src/app/exchange';
 import { importDxf } from '../src/engine/importers';
+import { xlsx } from '../src/app/xlsx';
+import { resultsBook } from '../src/app/resultsBook';
 import { connectLive, mqttParse, mqttPublish, readPayloadValue } from '../src/app/live';
 
 let pass = 0, fail = 0;
@@ -129,6 +131,15 @@ const extremes = (n: Network) => { const r = runTransient(n, { steady: solveStea
   const dxf = toDXF(net, r);
   const di = importDxf(dxf, { tol: 0.5, scale: 1, diameter: 0.3, wavespeed: 1000, layerFilter: 'SS_PIPES' });
   t('DXF export reads back as the same pipe network', di.pipes.length === net.pipes.length, `${di.pipes.length} pipes`);
+}
+{
+  // results workbook (.xlsx): a valid zip with one worksheet per table (also opened with openpyxl during development)
+  const net = risingMain(true);
+  const r = runTransient(net, { steady: solveSteady(net), frames: 50 });
+  const book = resultsBook(net, r, [], null);
+  const bytes = xlsx(book);
+  const txt = new TextDecoder('latin1').decode(bytes);
+  t('xlsx: zip with workbook, styles and a sheet per table', bytes[0] === 0x50 && bytes[1] === 0x4b && txt.includes('xl/workbook.xml') && book.length >= 4 && txt.includes(`xl/worksheets/sheet${book.length}.xml`) && txt.includes('<v>1200</v>'), book.map((b) => b.name).join(', '));
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
