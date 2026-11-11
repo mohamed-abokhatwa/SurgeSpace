@@ -59,7 +59,7 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 
 ### Phase 5 — Integrations and utility features
 - [~] S5.1 AutoCAD / BricsCAD plug-in (AutoLISP: SSEXPORT, SSRESULTS) — written, not yet tested inside AutoCAD
-- [~] S5.2 MicroStation — through DXF (no plug-in needed); DXF export tested by reading it back
+- [x] S5.2 MicroStation — through DXF (no plug-in needed); the DXF is read back by SurgeSpace and audited without errors by an independent reader (ezdxf) in CI
 - [~] S5.3 QGIS plug-in — tested inside QGIS 3.34 (headless, in CI): export, import by SurgeSpace, results as graduated layers (done); ArcGIS Pro toolbox — written and syntax-checked, needs ArcGIS Pro (arcpy) to test
 - [x] S5.4 Live SCADA: MQTT over WebSocket (tested against a real broker), OPC UA and Modbus TCP through the SurgeSpace data bridge (tested against local servers), historian CSV, tag mapping, set the model to the live state, compare the model with field data
 - [x] S5.5 Water quality: age, source trace, chlorine (bulk and wall) — matches EPANET 2.2 (chlorine within 0.003 mg/L on Net1)

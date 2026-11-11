@@ -40,6 +40,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run build && node tests/ui-smoke.mjs
       - run: npx tsx validation/control-valves-vs-epanet.ts
+      - run: pip install ezdxf && npx tsx validation/dxf-check.ts /tmp/s.dxf && python3 validation/dxf-audit.py /tmp/s.dxf
 
   qgis-plugin:
     # the QGIS plug-in, run inside a real (headless) QGIS
