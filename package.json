@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "tsx tests/engine.test.ts && tsx tests/license.test.ts && tsx tests/ai.test.ts",
+    "test": "node scripts/run-tests.mjs",
+    "test:ui": "vite build && node tests/ui-smoke.mjs",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build"

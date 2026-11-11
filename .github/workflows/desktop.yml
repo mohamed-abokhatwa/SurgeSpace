@@ -11,47 +11,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - run: npx tsc -b
-      - run: npx tsx tests/engine.test.ts
-      - run: npx tsx tests/license.test.ts
-      - run: npx tsx tests/devices.test.ts
-      - run: npx tsx tests/valves.test.ts
-      - run: npx tsx tests/report.test.ts
-      - run: npx tsx tests/workspace.test.ts
-      - run: npx tsx tests/ai.test.ts
-      - run: npx tsx tests/eps.test.ts
-      - run: npx tsx tests/fourq.test.ts
-      - run: npx tsx tests/rigid.test.ts
-      - run: npx tsx tests/phase5.test.ts
-      - run: npx tsx tests/forces.test.ts
-      - run: npx tsx tests/vsd.test.ts
-      - run: npx tsx tests/valves2.test.ts
-      - run: npx tsx tests/visco.test.ts
-      - run: npx tsx tests/geo.test.ts
-      - run: npx tsx tests/governor.test.ts
-      - run: npx tsx tests/cases.test.ts
-      - run: npx tsx tests/wizard.test.ts
-      - run: npx playwright install --with-deps chromium
-      - run: npm run build && node tests/ui-smoke.mjs
-      - run: npx tsx validation/control-valves-vs-epanet.ts
-      - run: pip install ezdxf && npx tsx validation/dxf-check.ts /tmp/s.dxf && python3 validation/dxf-audit.py /tmp/s.dxf
-
-  qgis-plugin:
-    # the QGIS plug-in, run inside a real (headless) QGIS
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-qgis qgis-providers
-      - run: QT_QPA_PLATFORM=offscreen /usr/bin/python3 plugins/qgis/tests/test_plugin.py
+    uses: ./.github/workflows/tests.yml
 
   windows-store:
     needs: test

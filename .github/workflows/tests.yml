@@ -1,0 +1,48 @@
+# Tests on every push and pull request (and called by the desktop build before packaging).
+name: Tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npm test
+      - run: npx tsx validation/control-valves-vs-epanet.ts
+      - run: npx tsx validation/examples-baseline.ts
+      - run: pip install ezdxf && npx tsx validation/dxf-check.ts /tmp/s.dxf && python3 validation/dxf-audit.py /tmp/s.dxf
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build && node tests/ui-smoke.mjs
+
+  qgis-plugin:
+    # the QGIS plug-in, run inside a real (headless) QGIS
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-qgis qgis-providers
+      - run: QT_QPA_PLATFORM=offscreen /usr/bin/python3 plugins/qgis/tests/test_plugin.py
