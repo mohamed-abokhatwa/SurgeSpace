@@ -9,7 +9,7 @@ import { solveSteady } from '../engine/steady';
 import { runTransient, type TransientResult } from '../engine/transient';
 import { allEvents, area, defaultSettings, type Network, type NetNode, type SimpleControl, type TransientEvent } from '../engine/types';
 import { defaultEPS, runEPS, type EPSResult } from '../engine/eps';
-import { applyDesign, candidates, optimiseProtection, type Design, type OptVar } from '../engine/optimise';
+import { applyDesign, candidates, optimiseProtection, pipeCandidates, type Design, type OptVar } from '../engine/optimise';
 import { skeletonise } from '../engine/skeleton';
 import { rulesFromText } from '../engine/inp';
 import { addCase } from './cases';
@@ -492,8 +492,8 @@ export const COMMANDS: Command[] = [
   },
   {
     name: 'optimise_protection', mutates: true,
-    description: 'Least-cost surge protection by a genetic algorithm: chooses sizes (or none) for candidate air vessels and air valves so the pressure limits are met, judging every design with a full surge run. Without candidates it uses vessels at pump discharges and air valves at high points. Applies the best design. Takes from seconds to a few minutes.',
-    params: obj({ candidates: { type: 'array', items: obj({ node: str('Junction id'), kind: str('Device', ['vessel', 'airValve']), options: { type: 'array', items: { type: 'number' }, description: 'Sizes: vessel m³, air valve inflow diameter m; include 0 for none' } }, ['node', 'kind']) } }),
+    description: 'Least-cost surge protection by a genetic algorithm: chooses sizes (or none) for candidate air vessels and air valves — and optionally the pressure class or diameter of the pipes — so the pressure limits are met, judging every design with a full surge run. Without candidates it uses vessels at pump discharges and air valves at high points. Applies the best design. Takes from seconds to a few minutes.',
+    params: obj({ candidates: { type: 'array', items: obj({ node: str('Junction id'), kind: str('Device', ['vessel', 'airValve']), options: { type: 'array', items: { type: 'number' }, description: 'Sizes: vessel m³, air valve inflow diameter m; include 0 for none' } }, ['node', 'kind']) }, pipes: str('Also choose pipe pressure classes (class) or diameters (diameter)', ['none', 'class', 'diameter']) }),
     run: async (ctx, a) => {
       const net = ctx.getNet();
       const def = candidates(net);
@@ -501,10 +501,11 @@ export const COMMANDS: Command[] = [
         if (!net.nodes.some((n) => n.id === c.node && n.kind === 'junction')) fail(`No junction "${c.node}".`);
         return { node: c.node, kind: c.kind, options: c.options?.length ? [...new Set([0, ...c.options])].sort((x, y) => x - y) : def.find((d) => d.kind === c.kind)?.options ?? (c.kind === 'vessel' ? [0, 5, 10, 20, 40] : [0, 0.05, 0.1, 0.15]) };
       }) : def;
+      if (a.pipes === 'class' || a.pipes === 'diameter') vars.push(...pipeCandidates(net, a.pipes));
       if (!vars.length) fail('No candidate locations: give candidates.');
       const r = ctx.optimise ? await ctx.optimise(vars) : optimiseProtection(net, { vars, population: 10, generations: 6 });
       ctx.apply(applyDesign(net, vars, r.best.genes), 'AI: optimised protection');
-      return { feasible: r.best.feasible, relative_cost: r2(r.best.cost, 1), lowest_pressure_m: r2(r.best.minP, 1), highest_vs_class_pct: r2(r.best.maxRatio * 100, 0), surge_runs: r.evaluations, design: vars.map((v, k) => ({ node: v.node, device: v.kind, size: v.options[r.best.genes[k]], unit: v.kind === 'vessel' ? 'm³' : 'm (inflow diameter)' })) };
+      return { feasible: r.best.feasible, relative_cost: r2(r.best.cost, 1), lowest_pressure_m: r2(r.best.minP, 1), highest_vs_class_pct: r2(r.best.maxRatio * 100, 0), surge_runs: r.evaluations, design: vars.map((v, k) => ({ [v.pipes ? 'pipes' : 'node']: v.pipes ? v.pipes.join(', ') : v.node, choice: v.kind, size: v.options[r.best.genes[k]], unit: v.kind === 'vessel' ? 'm³' : v.kind === 'pipeClass' ? 'm (allowed pressure head)' : v.kind === 'pipeDiameter' ? 'm (internal diameter)' : 'm (inflow diameter)' })) };
     },
   },
   {

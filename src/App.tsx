@@ -322,16 +322,16 @@ export default function App() {
     setProject({ ...sk.net, cases: withCase.cases, activeCase: withCase.activeCase }, 'Skeletonise');
     setToast([`New case “Skeleton”: ${cur.pipes.length} → ${sk.net.pipes.length} pipes, ${cur.nodes.length} → ${sk.net.nodes.length} nodes. Removed junctions are kept as profile points, so levels and high points are unchanged. Selected nodes were kept.`, ...sk.changes.slice(0, 5)]);
   };
-  const doOptimise = async () => {
+  const doOptimise = async (pipes?: 'class' | 'diameter') => {
     if (!allowed(lic.features.protectionSizing, 'Protection optimisation is part of SurgeSpace Pro.')) return;
     setBusy('Optimising protection…');
     try {
-      const out = await call<{ optimise: { best: Design; evaluations: number; vars: OptVar[] } }>({ type: 'optimise', net: netRef.current }, (m) => setBusy(m));
+      const out = await call<{ optimise: { best: Design; evaluations: number; vars: OptVar[] } }>({ type: 'optimise', net: netRef.current, pipes }, (m) => setBusy(m));
       const { best, vars, evaluations } = out.optimise;
       const cur = netRef.current;
       const withCase = addCase(cur, 'Optimised protection');
       setProject({ ...applyDesign(cur, vars, best.genes), cases: withCase.cases, activeCase: withCase.activeCase }, 'Optimise protection');
-      const lines = vars.map((v, k) => `${v.kind === 'vessel' ? 'Air vessel' : 'Air valve'} at ${v.node}: ${v.options[best.genes[k]] ? (v.kind === 'vessel' ? `${v.options[best.genes[k]]} m³` : `DN${Math.round(v.options[best.genes[k]] * 1000)}`) : 'none'}`);
+      const lines = vars.map((v, k) => { const x = v.options[best.genes[k]]; return v.kind === 'pipeClass' ? `Pipe ${v.node}: class ${x.toFixed(0)} m (PN${Math.round(x / 10.2)})` : v.kind === 'pipeDiameter' ? `Pipe ${v.node}: DN${Math.round(x * 1000)}` : `${v.kind === 'vessel' ? 'Air vessel' : 'Air valve'} at ${v.node}: ${x ? (v.kind === 'vessel' ? `${x} m³` : `DN${Math.round(x * 1000)}`) : 'none'}`; });
       setToast([best.feasible ? `Least-cost design meeting the limits (${evaluations} surge runs), applied as case “Optimised protection”:` : `No design met all limits; the best found (${evaluations} surge runs) is applied as case “Optimised protection”:`, ...lines, `Lowest pressure ${best.minP.toFixed(1)} m; highest ${(best.maxRatio * 100).toFixed(0)} % of the pipe class. Press Run to see it.`]);
     } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
   };
@@ -547,6 +547,8 @@ export default function App() {
         { label: 'Rigid column — slow events, mass oscillation', checked: net.settings.engine === 'rigid', action: () => setNet((n) => ({ ...n, settings: { ...n.settings, engine: 'rigid' } }), 'Engine') },
       ] },
       { label: 'Optimise protection (genetic algorithm)', action: () => void doOptimise(), disabled: !!busy },
+      { label: 'Optimise protection and pipe classes', action: () => void doOptimise('class'), disabled: !!busy },
+      { label: 'Optimise protection and pipe diameters', action: () => void doOptimise('diameter'), disabled: !!busy },
       { label: 'Skeletonise model (new case)', action: doSkeleton },
       { label: 'Live data and field data…', action: () => { setBottom('live'); if (dock === 'min') setDock('normal'); } },
       { label: 'Size protection (vessel, air valves)…', action: () => { setBottom('protection'); if (dock === 'min') setDock('normal'); } },

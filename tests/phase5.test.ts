@@ -1,6 +1,6 @@
 // Skeletonisation and protection optimisation.
 import { skeletonise } from '../src/engine/skeleton';
-import { candidates, optimiseProtection } from '../src/engine/optimise';
+import { candidates, optimiseProtection, pipeCandidates } from '../src/engine/optimise';
 import { solveSteady } from '../src/engine/steady';
 import { runTransient } from '../src/engine/transient';
 import { risingMain, EXAMPLES } from '../src/engine/cases';
@@ -69,6 +69,20 @@ const extremes = (n: Network) => { const r = runTransient(n, { steady: solveStea
   const applied = r.apply(net);
   const chk = extremes(applied);
   t('applied design re-checks', chk.min >= -5 - 0.05, `${chk.min.toFixed(2)} m`);
+}
+{
+  // pipe class selection with the vessel in place: the cheapest classes that hold the surge, higher near the pumps
+  const net = risingMain(true);
+  const vars = pipeCandidates(net, 'class');
+  t('class candidates: one per pipe, only classes that hold the steady pressure', vars.length === net.pipes.length && vars.every((v) => v.options.length >= 1), vars.map((v) => `${v.node}: ${v.options.join('/')}`).join('; '));
+  const r = optimiseProtection(net, { vars, minPressure: -100, population: 12, generations: 8, seed: 3 });
+  const cls = Object.fromEntries(vars.map((v, k) => [v.node, v.options[r.best.genes[k]]]));
+  t('class selection: feasible, M1 (by the pumps) needs a higher class than M4 (far end)', r.best.feasible && r.best.maxRatio <= 1 && cls.M1 > cls.M4, JSON.stringify(cls) + ` · peak ${(r.best.maxRatio * 100).toFixed(0)} % of class`);
+  const allTop = vars.map((v) => v.options.length - 1);
+  const topCost = vars.reduce((s, v, k) => s + (net.pipes.filter((p) => v.pipes!.includes(p.id)).reduce((a, p) => a + p.length * p.diameter * (0.85 + 0.0015 * v.options[allTop[k]]), 0)), 0);
+  t('class selection: cheaper than the highest classes', r.best.cost < topCost, `${r.best.cost.toFixed(0)} vs ${topCost.toFixed(0)}`);
+  const dv = pipeCandidates(net, 'diameter');
+  t('diameter candidates: current size and two up', dv.every((v) => v.options.length === 3 && v.options[0] < v.options[2]));
 }
 {
   // historian data, comparison, live snapshot, boundary from data

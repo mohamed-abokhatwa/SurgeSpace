@@ -4,7 +4,7 @@ import { solveSteady } from './engine/steady';
 import { runTransient } from './engine/transient';
 import type { Network } from './engine/types';
 import { runEPS } from './engine/eps';
-import { candidates, optimiseProtection, type OptVar } from './engine/optimise';
+import { candidates, optimiseProtection, pipeCandidates, type OptVar } from './engine/optimise';
 import { calibrate, type CalParam } from './app/calibrate';
 import type { Series, TagMap } from './app/scada';
 
@@ -15,7 +15,7 @@ export type JobRequest =
   | { id: number; type: 'airValves'; net: Network }
   | { id: number; type: 'eps'; net: Network }
   | { id: number; type: 'calibrate'; net: Network; data: Series; maps: TagMap[]; params: CalParam[] }
-  | { id: number; type: 'optimise'; net: Network; vars?: OptVar[]; generations?: number; population?: number };
+  | { id: number; type: 'optimise'; net: Network; vars?: OptVar[]; generations?: number; population?: number; pipes?: 'class' | 'diameter' };
 
 export function handleJob(req: JobRequest, post: (msg: Record<string, unknown>) => void) {
   try {
@@ -39,7 +39,7 @@ export function handleJob(req: JobRequest, post: (msg: Record<string, unknown>) 
       const c = calibrate(req.net, req.data, req.maps, req.params, (m) => post({ id: req.id, type: 'progress', message: m }));
       post({ id: req.id, type: 'done', calibration: { factors: c.factors, before: c.before, after: c.after, runs: c.runs, fit: c.fit } });
     } else if (req.type === 'optimise') {
-      const vars = req.vars ?? candidates(req.net);
+      const vars = req.vars ?? [...candidates(req.net), ...(req.pipes ? pipeCandidates(req.net, req.pipes) : [])];
       const r = optimiseProtection(req.net, { vars, generations: req.generations, population: req.population, onProgress: (m, f) => post({ id: req.id, type: 'progress', message: `Optimising · ${m} · ${Math.round(f * 100)} %` }) });
       post({ id: req.id, type: 'done', optimise: { best: r.best, evaluations: r.evaluations, history: r.history, vars } });
     } else if (req.type === 'airValves') {
