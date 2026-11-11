@@ -32,6 +32,7 @@ jobs:
       - run: npx tsx tests/forces.test.ts
       - run: npx tsx tests/vsd.test.ts
       - run: npx tsx tests/valves2.test.ts
+      - run: npx tsx tests/visco.test.ts
       - run: npx tsx validation/control-valves-vs-epanet.ts
 
   windows-store:

@@ -155,6 +155,9 @@ interface PipeState {
   env: PipeEnvelope;
   samples: Int32Array;
   pipeIndex: number;
+  /** Viscoelastic creep: compliances (1/Pa), decay factors e^(−dt/τ), retarded strains per element and point,
+   *  steady heads, and the stress per metre of head ρ g D / 2e. */
+  ve?: { J: Float64Array; decay: Float64Array; eps: Float64Array; H0: Float64Array | null; fac: number; alpha: number };
 }
 
 /** State of a check valve that does not close ideally (delay / reverse velocity / dynamic characteristic). */
@@ -290,8 +293,15 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       from, to, CP: 0, CM: 0,
       env: { id: p.id, s, z, hSteady: H.slice(), hMax: H.slice(), hMin: H.slice(), cavMax: new Float64Array(N + 1), tMax: new Float64Array(N + 1), tMin: new Float64Array(N + 1) },
       samples, pipeIndex: net.pipes.indexOf(p),
+      ...(p.viscoelastic?.J.length && p.wall ? { ve: {
+        J: Float64Array.from(p.viscoelastic.J, (j) => j * 1e-9),
+        decay: Float64Array.from(p.viscoelastic.tau, (tau) => Math.exp(-dt / Math.max(tau, 1e-9))),
+        eps: new Float64Array(p.viscoelastic.J.length * (N + 1)), H0: null, fac: (RHO * G * p.diameter) / (2 * p.wall / 1000),
+        alpha: 2 * A * dx * ((RHO * G * p.diameter) / (2 * p.wall / 1000)) * p.viscoelastic.J.reduce((sum, j, k) => sum + j * 1e-9 * (1 - Math.exp(-dt / Math.max(p.viscoelastic!.tau[k] ?? 1, 1e-9))), 0),
+      } } : {}),
     };
   });
+  for (const p of net.pipes) if (p.viscoelastic?.J.length && !p.wall) warnings.push(`Pipe ${p.id}: viscoelastic data need the wall thickness; it was run as elastic.`);
 
   // ── nodes and devices ──────────────────────────────────────────────────
   const Hn = new Float64Array(NN);
@@ -1056,17 +1066,32 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       } else hu.fill(0, 0, N + 1);
       const sb = 2 / B, dtsb = dt * sb, z = p.z, C3a = p.C3, V = p.V, Hn2 = p.Hn, Qun = p.Qun, Qdn = p.Qdn;
       const offs = -HBc + HV;
+      const ve = p.ve;
+      if (ve && !ve.H0) ve.H0 = Float64Array.from(H);
+      const nk = ve ? ve.J.length : 0;
       for (let i = 1; i < N; i++) {
         const qa = Qd[i - 1], qb = Qu[i + 1];
         const CP = H[i - 1] + B * qa - fR[i - 1] * qa * Math.abs(qa) - hu[i - 1];
         const CM = H[i + 1] - B * qb + fR[i + 1] * qb * Math.abs(qb) + hu[i + 1];
-        // discrete gas cavity model, closed form (ψ = 1)
+        // discrete gas cavity model, closed form (ψ = 1). Viscoelastic creep (Kelvin–Voigt, exact exponential over
+        // the step, implicit in the new head) adds the volume the swelling pipe makes room for: creep = α(H − H0) − β
         const C3 = C3a[i];
-        const E = V[i] + dt * (sb * (z[i] + offs) - (CP + CM) / B);
-        const disc = Math.sqrt(E * E + 4 * dtsb * C3);
-        const y = E > 0 ? (2 * C3) / (E + disc) : (-E + disc) / (2 * dtsb);
+        let E = V[i] + dt * (sb * (z[i] + offs) - (CP + CM) / B), a2 = dtsb;
+        if (ve) {
+          let beta = 0;
+          for (let k = 0; k < nk; k++) beta += ve.eps[k * (N + 1) + i] * (1 - ve.decay[k]);
+          beta *= 2 * A * dx;
+          E += ve.alpha * (z[i] + offs - ve.H0![i]) - beta;
+          a2 += ve.alpha;
+        }
+        const disc = Math.sqrt(E * E + 4 * a2 * C3);
+        const y = E > 0 ? (2 * C3) / (E + disc) : (-E + disc) / (2 * a2);
         const Hh = y + z[i] + offs;
         Hn2[i] = Hh;
+        if (ve) {
+          const F = ve.fac * (Hh - ve.H0![i]);
+          for (let k = 0; k < nk; k++) { const j = k * (N + 1) + i; ve.eps[j] = ve.J[k] * F + (ve.eps[j] - ve.J[k] * F) * ve.decay[k]; }
+        }
         V[i] = C3 / (y > 1e-12 ? y : 1e-12);
         Qun[i] = (CP - Hh) / B;
         Qdn[i] = (Hh - CM) / B;

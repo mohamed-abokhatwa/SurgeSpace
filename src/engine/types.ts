@@ -309,6 +309,9 @@ export interface Pipe {
   label?: string;
   /** Check valve at the start of the pipe (flow only from `from` to `to`). */
   checkValve?: CheckValveSpec;
+  /** Viscoelastic wall (PE, PVC): Kelvin–Voigt creep compliances J (1/GPa) with retardation times τ (s). The wave
+   *  speed is then the instantaneous one. Needs the wall thickness. */
+  viscoelastic?: { J: number[]; tau: number[] };
   /** Water quality: bulk (1/day) and wall (m/day) reaction coefficients for this pipe (default the global ones). */
   bulkCoeff?: number;
   wallCoeff?: number;

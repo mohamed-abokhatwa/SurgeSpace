@@ -49,6 +49,8 @@ export const PIPE_FIELDS: FieldDef<Pipe>[] = [
   { key: 'check_valve', label: 'Non-return valve', type: 'boolean', help: 'Ideal non-return valve at the start of the pipe.', get: (e) => !!e.checkValve, set: (e, v) => ({ ...e, checkValve: v ? e.checkValve ?? { mode: 'ideal', kOpen: 1 } : undefined }) },
 ];
 
+export const PIPE_VISCO_FIELD: FieldDef<Pipe> = { key: 'viscoelastic', label: 'Viscoelastic creep', type: 'string', help: 'PE/PVC wall creep as "J1/τ1, J2/τ2" (J in 1/GPa, τ in s), "" = elastic. Needs wall_mm.', get: (e) => (e.viscoelastic ? e.viscoelastic.J.map((j, k) => `${j}/${e.viscoelastic!.tau[k]}`).join(', ') : ''), set: (e, v) => { const pairs = String(v).split(',').map((x) => x.split('/').map(Number)).filter((x) => x.length === 2 && x.every(Number.isFinite)); return { ...e, viscoelastic: pairs.length ? { J: pairs.map((x) => x[0]), tau: pairs.map((x) => x[1]) } : undefined }; } };
+
 export const PUMP_FIELDS: FieldDef<Pump>[] = [
   { key: 'label', label: 'Label', type: 'string', help: 'Free text.', get: (e) => e.label ?? '', set: (e, v) => ({ ...e, label: String(v) || undefined }) },
   { key: 'curve', label: 'Head curve', type: 'string', help: 'Points "flow L/s : head m", e.g. "0:98, 250:74, 375:52" (shut-off, duty, run-out).', get: (e) => e.curve.map(([q, h]) => `${+(q * 1000).toFixed(3)}:${+h.toFixed(3)}`).join(', '), set: (e, v) => ({ ...e, curve: parseCurve(String(v)) }) },
@@ -121,7 +123,7 @@ export function parseCurve(s: string): [number, number][] {
 }
 
 export type ElType = 'node' | 'pipe' | 'pump' | 'valve';
-export const FIELDS: Record<ElType, FieldDef<any>[]> = { node: NODE_FIELDS, pipe: PIPE_FIELDS, pump: PUMP_FIELDS, valve: VALVE_FIELDS }; // eslint-disable-line @typescript-eslint/no-explicit-any
+export const FIELDS: Record<ElType, FieldDef<any>[]> = { node: NODE_FIELDS, pipe: [...PIPE_FIELDS, PIPE_VISCO_FIELD], pump: PUMP_FIELDS, valve: VALVE_FIELDS }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 /** Apply a set of field values to an element, validating names, types and limits. */
 export function applyFields<T>(type: ElType, e: T, values: Record<string, unknown>): { el: T; errors: string[] } {

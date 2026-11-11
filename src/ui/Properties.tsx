@@ -270,6 +270,16 @@ function PipeProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
         {Number.isFinite(aCalc) && <p className="hint">Calculated for {mat!.name.toLowerCase()}, {fluid.name.toLowerCase()}, restrained: <b>{fmtQ(aCalc, 'wavespeed', 0, units)}</b> · <button className="linkbtn" onClick={() => set({ wavespeed: Math.round(aCalc) })}>use it</button></p>}
         <label className="field" style={{ marginTop: 8 }}><span>Minor loss coefficient ΣK</span><input type="number" step="any" value={p.minorLoss ?? 0} onChange={(e) => set({ minorLoss: num(e.target.value) || 0 })} /></label>
       </Group>
+      <Group title="Viscoelastic wall (PE, PVC)" open={!!p.viscoelastic} right={p.viscoelastic ? <span className="pill good">{p.viscoelastic.J.length} element{p.viscoelastic.J.length > 1 ? 's' : ''}</span> : undefined}>
+        <label className="row small"><input type="checkbox" checked={!!p.viscoelastic} onChange={(e) => set({ viscoelastic: e.target.checked ? { J: [0.1, 0.1, 0.09], tau: [0.05, 0.5, 1.5] } : undefined })} /> Creep of the pipe wall damps and slows the waves</label>
+        {p.viscoelastic && (
+          <label className="field" style={{ marginTop: 6 }}><span>Kelvin–Voigt elements: creep compliance J (1/GPa) and retardation time τ (s), one per line</span>
+            <textarea rows={3} defaultValue={p.viscoelastic.J.map((j, k) => `${j}\t${p.viscoelastic!.tau[k]}`).join('\n')} onBlur={(e) => { const rows = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 2 && r.every((x) => Number.isFinite(x) && x >= 0)); if (rows.length) set({ viscoelastic: { J: rows.map((r) => r[0]), tau: rows.map((r) => Math.max(r[1], 1e-3)) } }); }} />
+          </label>
+        )}
+        {p.viscoelastic && !p.wall && <p className="hint bad">Enter the wall thickness (Material and wave speed): it is needed for the wall stress.</p>}
+        <p className="hint">Use the instantaneous wave speed. The starting values are indicative for HDPE from published tests; calibrate them to the pipe (or to field records) for design.</p>
+      </Group>
       <Group title="Long section" open={!!p.profile?.length}>
         <PairsField label="Chainage from start (m), pipe level (m)" value={p.profile?.map((x) => [x.s, x.z] as [number, number])} onChange={(v) => set({ profile: v.length ? v.map(([s, z]) => ({ s, z })).sort((a, b) => a.s - b.s) : undefined })} rows={5} note="High and low points between the end nodes; used for cavity checks and the profile." />
       </Group>
