@@ -12,6 +12,7 @@ import { pipeLengthFromDrawing, renameElement, reversePipe, type ElRef } from '.
 import { fmtQ, unitOf, useUnits, type Quantity } from '../app/units';
 import { DEFAULT_FLUID, PIPE_MATERIALS, waveSpeed } from '../app/catalogues';
 import { ElIcon } from './Icons';
+import { FIELDS, applyFields, type ElType } from '../app/schema';
 
 type SetNet = (f: (n: Network) => Network, label?: string) => void;
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s));
@@ -442,10 +443,45 @@ function MultiEdit({ net, setNet, selected, onSelect }: { net: Network; setNet: 
           </div>
         </Group>
       )}
+      <SchemaBulkEdit setNet={setNet} selected={selected} />
       <Group title="Selection">
         <div className="sel-list">{selected.slice(0, 200).map((r) => <button key={`${r.type}:${r.id}`} className="chip" onClick={() => onSelect([r])}>{r.id}</button>)}</div>
       </Group>
     </div>
+  );
+}
+
+/** Set any field of the element schema on every selected element of one type (values in the schema's units). */
+function SchemaBulkEdit({ setNet, selected }: { setNet: SetNet; selected: ElRef[] }) {
+  const types = (['pipe', 'pump', 'valve', 'node'] as ElType[]).filter((t) => selected.some((r) => r.type === t));
+  const [type, setType] = useState<ElType>(types[0] ?? 'pipe');
+  const t = types.includes(type) ? type : types[0];
+  const defs = t ? FIELDS[t] : [];
+  const [key, setKey] = useState('');
+  const [val, setVal] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!t) return null;
+  const d = defs.find((x) => x.key === key) ?? defs[0];
+  const ids = new Set(selected.filter((r) => r.type === t).map((r) => r.id));
+  const apply = () => {
+    const v = d.type === 'boolean' ? val === 'true' : d.type === 'number' ? Number(val) : val;
+    const errs = new Set<string>();
+    const listKey = t === 'node' ? 'nodes' : t === 'pipe' ? 'pipes' : t === 'pump' ? 'pumps' : 'valves';
+    setNet((n) => ({ ...n, [listKey]: (n[listKey] as { id: string }[]).map((e) => { if (!ids.has(e.id)) return e; const r = applyFields(t, e, { [d.key]: v }); r.errors.forEach((x) => errs.add(x)); return r.errors.length ? e : r.el; }) }), `Set ${d.label}`);
+    setMsg(errs.size ? [...errs].join(' ') : `${d.label} set on ${ids.size} ${t}${ids.size > 1 ? 's' : ''}.`);
+  };
+  return (
+    <Group title="Set any field on the selection" open={false}>
+      <div className="grid2">
+        {types.length > 1 && <label className="field"><span>Elements</span><select value={t} onChange={(e) => { setType(e.target.value as ElType); setKey(''); }}>{types.map((x) => <option key={x} value={x}>{x}s</option>)}</select></label>}
+        <label className="field"><span>Field</span><select value={d.key} onChange={(e) => { setKey(e.target.value); setVal(''); setMsg(null); }}>{defs.map((f) => <option key={f.key} value={f.key}>{f.label}{f.unit ? ` (${f.unit})` : ''}</option>)}</select></label>
+        <label className="field"><span>Value</span>{d.type === 'enum' || d.type === 'boolean'
+          ? <select value={val} onChange={(e) => setVal(e.target.value)}><option value="">—</option>{(d.type === 'boolean' ? ['true', 'false'] : d.options ?? []).map((o) => <option key={o}>{o}</option>)}</select>
+          : <input value={val} onChange={(e) => setVal(e.target.value)} placeholder={d.type === 'number' ? 'number' : 'text'} />}</label>
+      </div>
+      <div className="row" style={{ gap: 6, marginTop: 6 }}><button className="btn small primary" disabled={val === ''} onClick={apply}>Apply to {ids.size}</button><span className="muted small">{d.help}</span></div>
+      {msg && <p className="hint">{msg}</p>}
+    </Group>
   );
 }
 

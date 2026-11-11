@@ -8,6 +8,7 @@ import { EL, valveKind } from '../app/elements';
 import { PIPE_MATERIALS } from '../app/catalogues';
 import type { ElRef } from '../app/edit';
 import { download } from './util';
+import { FIELDS, applyFields, type ElType, type FieldDef } from '../app/schema';
 
 type SetNet = (f: (n: Network) => Network, label?: string) => void;
 type V = number | string | boolean | undefined;
@@ -23,6 +24,22 @@ const nodeBase: Col<NetNode>[] = [
   { key: 'elev', label: 'Elevation', q: 'elevation', get: (r) => r.elev, set: (r, v) => ({ ...r, elev: num(v) }), digits: 3 },
 ];
 const writeNodes = (n: Network, rows: NetNode[]) => { const m = new Map(rows.map((r) => [r.id, r])); return { ...n, nodes: n.nodes.map((x) => m.get(x.id) ?? x) }; };
+
+/** Columns straight from the element field schema (values in the units the schema names). */
+function schemaCols<T extends { id: string }>(type: ElType): Col<T>[] {
+  const defs = FIELDS[type] as FieldDef<T>[];
+  return [
+    { key: 'id', label: 'ID', get: (r) => r.id, type: 'text' },
+    ...defs.map((d): Col<T> => ({
+      key: `s:${d.key}`, label: d.unit ? `${d.label} (${d.unit})` : d.label,
+      get: (r) => { const v = d.get(r); return typeof v === 'number' ? (Number.isFinite(v) ? +v.toFixed(4) : '') : (v as V); },
+      set: (r, v) => { const val = d.type === 'boolean' ? v === '1' : d.type === 'number' ? num(v) : v; const out = applyFields(type, r, { [d.key]: val }); return out.errors.length ? r : out.el; },
+      type: d.type === 'boolean' ? 'bool' : d.type === 'enum' ? 'select' : d.type === 'string' ? 'text' : 'num',
+      options: d.options,
+    })),
+  ];
+}
+const write = <T extends { id: string }>(k: 'nodes' | 'pipes' | 'pumps' | 'valves') => (n: Network, rows: T[]) => { const m = new Map(rows.map((r) => [r.id, r])); return { ...n, [k]: (n[k] as unknown as T[]).map((x) => m.get(x.id) ?? x) } as Network; };
 
 function sheets(): Sheet<any>[] { // eslint-disable-line @typescript-eslint/no-explicit-any
   const junctions: Sheet<NetNode> = {
@@ -168,7 +185,11 @@ function sheets(): Sheet<any>[] { // eslint-disable-line @typescript-eslint/no-e
       ];
     },
   };
-  return [junctions, sources, pipes, pumps, valves, vessels, airValves, otherDev, nodeRes, pipeRes];
+  // every field of the schema, including the advanced ones (drives, starters, four-quadrant, creep, set points)
+  const allPipes: Sheet<Pipe> = { key: 'allpipes', label: 'Pipes · all fields', id: (r) => r.id, ref: (r) => ({ type: 'pipe', id: r.id }), write: write('pipes'), rows: (n) => n.pipes, cols: () => schemaCols<Pipe>('pipe') };
+  const allPumps: Sheet<Pump> = { key: 'allpumps', label: 'Pumps · all fields', id: (r) => r.id, ref: (r) => ({ type: 'pump', id: r.id }), write: write('pumps'), rows: (n) => n.pumps, cols: () => schemaCols<Pump>('pump') };
+  const allValves: Sheet<Valve> = { key: 'allvalves', label: 'Valves · all fields', id: (r) => r.id, ref: (r) => ({ type: 'valve', id: r.id }), write: write('valves'), rows: (n) => n.valves, cols: () => schemaCols<Valve>('valve') };
+  return [junctions, sources, pipes, pumps, valves, vessels, airValves, otherDev, allPipes, allPumps, allValves, nodeRes, pipeRes];
 }
 
 const show = (v: V, q: Quantity | undefined, u: UnitPrefs, digits = 3): string => {
