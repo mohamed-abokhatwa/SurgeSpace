@@ -1,7 +1,7 @@
 // Daily operation: extended-period simulation (tanks, patterns, controls) and water quality, in the results dock.
 // Run it, scrub through the day, colour the map by pressure or quality at any hour, and start a surge run from
 // the state at that hour.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { clock, defaultEPS, type EPSResult } from '../engine/eps';
 import { rulesFromText, rulesToText } from '../engine/inp';
 import type { EPSSettings, Network, QualityMode, SimpleControl, StorageTank } from '../engine/types';
@@ -23,6 +23,16 @@ export function EPSPanel({ net, setNet, result, busy, onRun, k, setK, colour, se
 }) {
   const units = useUnits();
   const [tab, setTab] = useState<'results' | 'setup' | 'tanks' | 'patterns' | 'controls'>(result ? 'results' : 'setup');
+  // play the day on the map, an hour step every 0.35 s
+  const [play, setPlay] = useState(false);
+  const kRef = useRef(k);
+  kRef.current = k;
+  useEffect(() => {
+    if (!play || !result) return;
+    if (colour === 'none') setColour('pressure');
+    const iv = setInterval(() => { const nk = kRef.current + 1; if (nk >= result.times.length) { setPlay(false); return; } setK(nk); }, 350);
+    return () => clearInterval(iv);
+  }, [play, result]); // eslint-disable-line react-hooks/exhaustive-deps
   const e: EPSSettings = { ...defaultEPS(), ...(net.eps ?? {}) };
   const setE = (p: Partial<EPSSettings>) => setNet((n) => ({ ...n, eps: { ...defaultEPS(), ...(n.eps ?? {}), ...p } }), 'Extended period settings');
   const tanks = net.nodes.filter((n) => n.storage);
@@ -167,6 +177,7 @@ export function EPSPanel({ net, setNet, result, busy, onRun, k, setK, colour, se
         <div>
           <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
             <span className="mono small" style={{ minWidth: 48 }}>{clock(result.times[k] ?? 0)}</span>
+            <button className="btn small" onClick={() => setPlay((v) => !v)} aria-label={play ? 'Pause the day' : 'Play the day'} title="Play the day hour by hour on the map">{play ? '❚❚' : '▶'}</button>
             <input type="range" min={0} max={result.times.length - 1} value={k} onChange={(ev) => setK(+ev.target.value)} style={{ flex: 1, minWidth: 160 }} aria-label="Time of day" />
             <select className="cell boxed" style={{ width: 170 }} value={colour} onChange={(ev) => setColour(ev.target.value as EPSColour)} aria-label="Colour the map by">
               <option value="none">Map: design colours</option><option value="pressure">Map: pressure</option><option value="demand">Map: demand</option>{result.quality && <option value="quality">Map: water quality</option>}

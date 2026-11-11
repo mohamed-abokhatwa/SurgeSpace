@@ -57,7 +57,7 @@ export function buildProfile(net: Network, r: TransientResult, a: string, b: str
   return out;
 }
 
-export function ProfileView({ net, result, a, b, framePos, uEnv, showNow, height, overlay }: { net: Network; result: TransientResult; a: string; b: string; framePos: number; uEnv?: PipeEnvelope[]; showNow: boolean; height?: number; overlay?: { name: string; envelopes: PipeEnvelope[] }[] }) {
+export function ProfileView({ net, result, a, b, framePos, uEnv, showNow, height, overlay, probe, onProbe }: { net: Network; result: TransientResult; a: string; b: string; framePos: number; uEnv?: PipeEnvelope[]; showNow: boolean; height?: number; overlay?: { name: string; envelopes: PipeEnvelope[] }[]; probe?: { pipe: string; s: number } | null; onProbe?: (p: { pipe: string; s: number } | null) => void }) {
   const units = useUnits();
   const prof = useMemo(() => buildProfile(net, result, a, b, uEnv), [net, result, a, b, uEnv]);
   // route samples for the live line: chainage and an index into each pipe's frame data
@@ -157,5 +157,13 @@ export function ProfileView({ net, result, a, b, framePos, uEnv, showNow, height
   const S = series.map((q) => ({ ...q, x: sx(q.x), y: sy(q.y) }));
   const B = bands.filter((b) => b.name).map((q) => ({ ...q, x: sx(q.x), lo: sy(q.lo), hi: sy(q.hi) }));
   const M = prof.markers.map((m) => ({ ...m, x: m.x * fL }));
-  return <Chart series={S} bands={B} markers={M} xLabel={`Chainage along route (${uL})`} yLabel={`Elevation / head (${uH})`} yUnit={uH} xUnit={uL} height={height ?? 250} />;
+  // linked with the map: the probe (pointer on a pipe there) shows as a line here, and the other way round
+  const pc = probe ? prof.pieces.find((q) => q.pipe === probe.pipe) : undefined;
+  const vLine = pc && probe ? (pc.c0 + (pc.reversed ? pc.L - probe.s : probe.s)) * fL : undefined;
+  const hoverX = onProbe ? (x: number | null) => {
+    if (x === null) { onProbe(null); return; }
+    const c = x / fL, q = prof.pieces.find((r) => c >= r.c0 - 1e-6 && c <= r.c0 + r.L + 1e-6);
+    onProbe(q ? { pipe: q.pipe, s: q.reversed ? q.L - (c - q.c0) : c - q.c0 } : null);
+  } : undefined;
+  return <Chart series={S} bands={B} markers={M} xLabel={`Chainage along route (${uL})`} yLabel={`Elevation / head (${uH})`} yUnit={uH} xUnit={uL} height={height ?? 250} vLine={vLine} onHoverX={hoverX} />;
 }

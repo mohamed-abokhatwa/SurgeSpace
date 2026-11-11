@@ -4,7 +4,7 @@
 // Tools: select / move, pan, and one tool per element in the palette (nodes, links, protection devices).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PipeEnvelope, TransientResult } from '../engine/transient';
-import { area, type Network, type NetNode } from '../engine/types';
+import { HB, HV, area, type Network, type NetNode } from '../engine/types';
 import { pressureColor } from './util';
 import { EL, deviceDefaults, nodeDevices, valveKind, type ElementKind } from '../app/elements';
 import { addLink, addNode, addPipe, insertOnPipe, moveNodes, nearestFraction, pipePath, splitPipe, type ElRef, type ElementDefaults } from '../app/edit';
@@ -20,6 +20,8 @@ export type ContourBy = 'none' | 'elevation' | 'steadyPressure' | 'maxPressure' 
 export interface ViewOpts { ids: boolean; values: ValueLabel; grid: boolean; snap: boolean; colorBy: ColorBy; north: boolean; contour?: ContourBy }
 
 interface Theme { text: string; muted: string; faint: string; panel: string; line: string; line1: string; accent: string; cyan: string; warn: string; bad: string; good: string; neutral: string; bg: string; dark: boolean }
+const reduceMotion = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
 function readTheme(): Theme {
   const cs = getComputedStyle(document.documentElement);
   const v = (k: string) => cs.getPropertyValue(k).trim();
@@ -109,7 +111,7 @@ type Preview = { kind: 'node'; ids: string[]; dx: number; dy: number } | { kind:
 
 export function Canvas({
   net: netIn, result, envelopes, framePos, mode, selected, onSelect, route, flowDashes, playing, sScale = 1,
-  tool, onEdit, view: vo, defaults, onCursor, fitKey, onContext, onToolEnd, colorFn, bottomInset = 0,
+  tool, onEdit, view: vo, defaults, onCursor, fitKey, onContext, onToolEnd, colorFn, bottomInset = 0, probe, onProbe, tankFill,
 }: {
   net: Network;
   result: TransientResult | null;
@@ -134,6 +136,12 @@ export function Canvas({
   colorFn?: (pipeId: string) => string | null;
   /** Space taken by overlays at the bottom (player), px. */
   bottomInset?: number;
+  /** A point on a pipe highlighted from another view (profile, graphs). */
+  probe?: { pipe: string; s: number } | null;
+  /** Hovering a pipe reports the point under the pointer (for the profile and graphs). */
+  onProbe?: (p: { pipe: string; s: number } | null) => void;
+  /** Daily operation: storage tank fill (0–1) at the time shown. */
+  tankFill?: (nodeId: string) => number | null;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const cvs = useRef<HTMLCanvasElement>(null);
@@ -241,9 +249,11 @@ export function Canvas({
   }, [net.pumps]);
   const selSet = useMemo(() => new Set(selected.map((r) => `${r.type}:${r.id}`)), [selected]);
 
-  const anim = useRef({ phase: new Map<string, number>(), rotor: new Map<string, number>(), last: performance.now() });
-  const props = useRef({ framePos, mode, route, flowDashes, playing, drawing, tool, vo, selSet });
-  props.current = { framePos, mode, route, flowDashes, playing, drawing, tool, vo, selSet };
+  const anim = useRef({ phase: new Map<string, number>(), rotor: new Map<string, number>(), last: performance.now(), reveal: 0, needMore: false });
+  // results sweep in across the drawing when a run finishes
+  useEffect(() => { if (result) anim.current.reveal = performance.now(); }, [result]);
+  const props = useRef({ framePos, mode, route, flowDashes, playing, drawing, tool, vo, selSet, probe });
+  props.current = { framePos, mode, route, flowDashes, playing, drawing, tool, vo, selSet, probe };
 
   const toWorld = (sx: number, sy: number) => ({ x: view.current.ox + sx / view.current.s, y: -(view.current.oy + sy / view.current.s) });
   const snapW = (q: { x: number; y: number }) => {
@@ -259,7 +269,8 @@ export function Canvas({
     const { w, h, dpr } = size;
     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+    // opaque background, so exported pictures and recorded films look like the screen
+    ctx.fillStyle = theme.bg || '#f4f6fa'; ctx.fillRect(0, 0, w, h);
     const { s, ox, oy } = view.current;
     const X = (x: number) => (x - ox) * s, Y = (y: number) => (y - oy) * s;
     const { framePos: fp, mode: md, route: rt, flowDashes: dashes, drawing: dr, vo: opt, selSet: ss } = props.current;
@@ -460,7 +471,52 @@ export function Canvas({
     }
     if (casingW) { ctx.strokeStyle = theme.dark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.95)'; ctx.lineWidth = casingW; ctx.stroke(casing); }
     ctx.lineCap = !result || md === 'plain' ? 'round' : 'butt';
-    for (const g of groups.values()) { ctx.strokeStyle = g.col; ctx.lineWidth = g.w; ctx.stroke(g.path); }
+    const rvT = result && md !== 'plain' && !reduceMotion ? (now - anim.current.reveal) / 700 : 1;
+    if (rvT < 1) {
+      // reveal: neutral pipes, the result colours sweeping across from the left with a bright leading edge
+      const e = 1 - (1 - Math.max(0, rvT)) ** 3, xe = -40 + (w + 80) * e;
+      for (const g of groups.values()) { ctx.strokeStyle = theme.dark ? '#41516a' : '#b8c2cf'; ctx.lineWidth = g.w; ctx.stroke(g.path); }
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, Math.max(0, xe), h); ctx.clip();
+      for (const g of groups.values()) { ctx.strokeStyle = g.col; ctx.lineWidth = g.w; ctx.stroke(g.path); }
+      ctx.restore();
+      const gr = ctx.createLinearGradient(xe - 40, 0, xe, 0);
+      gr.addColorStop(0, 'rgba(255,122,26,0)'); gr.addColorStop(1, theme.dark ? 'rgba(255,122,26,0.22)' : 'rgba(255,122,26,0.16)');
+      ctx.fillStyle = gr; ctx.fillRect(xe - 40, 0, 40, h);
+      anim.current.needMore = true;
+    } else for (const g of groups.values()) { ctx.strokeStyle = g.col; ctx.lineWidth = g.w; ctx.stroke(g.path); }
+    // vapour cavities: bubbles along pipe stretches at vapour pressure in this frame
+    if (live && result) {
+      const vapP = HV - HB + 0.4;
+      ctx.fillStyle = theme.dark ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.95)';
+      ctx.strokeStyle = theme.dark ? 'rgba(92,200,255,0.9)' : 'rgba(10,106,176,0.8)';
+      ctx.lineWidth = 1;
+      for (const p of geo.pipes) {
+        const sm = result.frameSamples[p.id], hs = result.frameHeads[p.id], env = envMap.get(p.id);
+        const sp = SP.get(p.id);
+        if (!sm || !hs || !env || !sp) continue;
+        const ns = sm.length;
+        for (let k = 0; k < ns; k++) {
+          const hk = hs[f0 * ns + k];
+          const zk = env.z[Math.min(env.z.length - 1, Math.round((k / Math.max(ns - 1, 1)) * (env.z.length - 1)))];
+          if (hk - zk > vapP) continue;
+          const [px2, py2] = at(p, sp, sm[k] / p.L); const pt = { x: px2, y: py2 };
+          const rr = Math.max(2, Math.min(5, baseW * 0.9)) * (0.8 + 0.25 * Math.sin(now / 140 + k));
+          ctx.beginPath(); ctx.arc(pt.x, pt.y - baseW, rr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+      }
+    }
+    // probe from the profile or graphs: a pulsing marker at the point
+    const pr = props.current.probe;
+    if (pr) {
+      const gp = geo.pipes.find((q) => q.id === pr.pipe), sp = SP.get(pr.pipe);
+      if (gp && sp) {
+        const [px3, py3] = at(gp, sp, Math.max(0, Math.min(1, pr.s / gp.L))); const pt = { x: px3, y: py3 };
+        const pulse = (now % 1200) / 1200;
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 6 + pulse * 14, 0, Math.PI * 2); ctx.strokeStyle = theme.accent; ctx.globalAlpha = 1 - pulse; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2); ctx.fillStyle = theme.accent; ctx.fill(); ctx.strokeStyle = theme.panel; ctx.lineWidth = 2; ctx.stroke();
+        anim.current.needMore = true;
+      }
+    }
     ctx.lineCap = 'round';
     if (dashGroups.size) {
       ctx.save();
@@ -583,7 +639,14 @@ export function Canvas({
         ctx.fillStyle = theme.panel; ctx.fill();
         ctx.save(); ctx.clip();
         const wave = n.headSchedule ? Math.sin(now / 500) * 2.5 : Math.sin(now / 600) * 1.2;
-        ctx.fillStyle = theme.cyan; ctx.globalAlpha = 0.4; ctx.fillRect(x - r, y - r * 0.2 + wave, 2 * r, r * 1.2); ctx.restore();
+        const tf = n.storage ? tankFill?.(n.id) ?? null : null;
+        if (tf !== null) {
+          // storage tank in daily operation: the water level at the time shown
+          const top = y - r * 0.65, bot = y + r * 0.7;
+          ctx.fillStyle = theme.cyan; ctx.globalAlpha = 0.55; ctx.fillRect(x - r, bot - (bot - top) * Math.max(0, Math.min(1, tf)), 2 * r, (bot - top) * Math.max(0, Math.min(1, tf)) + 1); ctx.restore();
+          ctx.globalAlpha = 1; ctx.fillStyle = theme.text; ctx.font = '600 10px IBM Plex Mono, monospace'; ctx.fillText(`${Math.round(tf * 100)}%`, x + r + 3, y + 4);
+        } else { ctx.fillStyle = theme.cyan; ctx.globalAlpha = 0.4; ctx.fillRect(x - r, y - r * 0.2 + wave, 2 * r, r * 1.2); ctx.restore(); }
+        ctx.globalAlpha = 1;
         ctx.strokeStyle = isS ? theme.accent : theme.cyan; ctx.lineWidth = 2; ctx.stroke();
         if (n.headSchedule) { ctx.strokeStyle = theme.cyan; ctx.lineWidth = 1.4; ctx.beginPath(); for (let k = 0; k <= 12; k++) { const xx = x - r * 0.7 + (k / 12) * r * 1.4, yy = y - r * 0.95 + Math.sin((k / 12) * Math.PI * 2) * 2.5; k ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); } ctx.stroke(); }
       } else {
@@ -812,16 +875,16 @@ export function Canvas({
         ctx.font = '700 10px IBM Plex Sans, system-ui'; ctx.textAlign = 'center'; ctx.fillText('N', nx, ny + 16); ctx.textAlign = 'left';
       }
     }
-  }, [theme, size, geo, result, envMap, sScale, lut, pumpGroups, net, editing, colorFn, bottomInset, bgImg, contours, contourBy]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [theme, size, geo, result, envMap, sScale, lut, pumpGroups, net, editing, colorFn, bottomInset, bgImg, contours, contourBy, tankFill]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const liveFrame = mode === 'surge' || mode === 'pressure' ? framePos : -1;
   useEffect(() => {
     let raf = 0;
     const continuous = !!result && (mode === 'surge' || mode === 'pressure') && (flowDashes || playing);
-    const loop = () => { draw(); if (continuous) raf = requestAnimationFrame(loop); };
+    const loop = () => { anim.current.needMore = false; draw(); if (continuous || anim.current.needMore) raf = requestAnimationFrame(loop); };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [draw, liveFrame, mode, selected, route, flowDashes, playing, result, vo, drawing, tool]);
+  }, [draw, liveFrame, mode, selected, route, flowDashes, playing, result, vo, drawing, tool, probe]);
 
   // ── hit testing ──
   const pick = (sx: number, sy: number, only?: 'node' | 'pipe'): { ref: ElRef; u?: number; vertex?: number } | null => {
@@ -1091,6 +1154,7 @@ export function Canvas({
           if (tool !== 'pan') {
             const hit = pick(p.x, p.y);
             setHover(hit ? { x: p.x, y: p.y, sel: hit.ref } : null);
+            if (onProbe) { const gp = hit?.ref.type === 'pipe' ? net.pipes.find((q) => q.id === hit.ref.id) : null; onProbe(gp && hit?.u !== undefined ? { pipe: gp.id, s: hit.u * gp.length } : null); }
           }
           if (tool !== 'select' && tool !== 'pan') draw();
         }}
@@ -1131,7 +1195,7 @@ export function Canvas({
           }
           clickTool(p, e.shiftKey);
         }}
-        onPointerLeave={() => { setHover(null); cursor.current = null; onCursor?.(null); }}
+        onPointerLeave={() => { setHover(null); cursor.current = null; onCursor?.(null); onProbe?.(null); }}
         onDoubleClick={(e) => {
           const p = local(e);
           if (drawing) { setDrawing(null); return; }

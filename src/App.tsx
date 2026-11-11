@@ -36,6 +36,7 @@ import { StartPage } from './ui/StartPage';
 import { RunScreen, type RunProg } from './ui/RunScreen';
 import { Tour, TourInvite } from './ui/Tour';
 import { Palette } from './ui/Palette';
+import { Waterfall } from './ui/Waterfall';
 import { addRecent, type RecentEntry } from './app/recent';
 import { bootDone, bootStep } from './app/boot';
 
@@ -170,6 +171,8 @@ export default function App() {
   const [framePos, setFramePos] = useState(0);
   const [flowDashes, setFlowDashes] = useState(true);
   const [playing, setPlaying] = useState(false);
+  const playingRef = useRef(false);
+  playingRef.current = playing;
   const [speed, setSpeed] = useState(1);
   const [selected, setSelected] = useState<ElRef[]>([]);
   const [route, setRoute] = useState<[string, string]>(() => defaultRoute(net));
@@ -179,6 +182,8 @@ export default function App() {
   const [dock, setDock] = useState<'normal' | 'max' | 'min'>('normal');
   const [dialog, setDialog] = useState<Dialog>(null);
   const [runProg, setRunProg] = useState<RunProg | null>(null);
+  const [profView, setProfView] = useState<'section' | 'waterfall'>('section');
+  const [probe, setProbe] = useState<{ pipe: string; s: number; from: 'map' | 'profile' } | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [home, setHome] = useState(() => readLS('surgespace.start') !== 'off');
   const [showAtStart, setShowAtStartRaw] = useState(() => readLS('surgespace.start') !== 'off');
@@ -250,7 +255,7 @@ export default function App() {
         setRunProg((p) => ({ ...(p ?? { t0 }), ...d }));
       });
       setRunProg((p) => (p ? { ...p, stage: 'done', elapsed: (performance.now() - t0) / 1000 } : p));
-      setTimeout(() => setRunProg((p) => (p?.stage === 'done' ? null : p)), 1100);
+      setTimeout(() => setRunProg((p) => (p?.stage === 'done' ? null : p)), 750);
       lastRun.current = { out, net: n };
       setResult(out.result);
       setChecks(out.checks);
@@ -438,6 +443,42 @@ export default function App() {
     i.click();
   };
   const newProject = () => { load(blankModel()); setTool('pipe'); setToast(['New model. Draw with the Pipe tool: click to place junctions, Shift+click for bends. Add a Fixed-Level Source first.']); };
+  // the surge animation on the drawing recorded as a WebM video (for reports and presentations)
+  const [recording, setRecording] = useState(false);
+  const recordVideo = async () => {
+    const c = document.querySelector('.canvas-wrap canvas') as HTMLCanvasElement | null;
+    if (!c || !result || typeof MediaRecorder === 'undefined' || !c.captureStream) { setToast(['Video recording is not available in this window.']); return; }
+    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m));
+    if (!mime) { setToast(['This window cannot record video.']); return; }
+    const rec = new MediaRecorder(c.captureStream(30), { mimeType: mime, videoBitsPerSecond: 6_000_000 });
+    const parts: Blob[] = [];
+    rec.ondataavailable = (e) => { if (e.data.size) parts.push(e.data); };
+    const done = new Promise<void>((r) => { rec.onstop = () => r(); });
+    setRecording(true);
+    // a film of about 20 s whatever the run length (the player speed is restored afterwards)
+    const dur = result.times[result.times.length - 1], oldSpeed = speed;
+    setSpeed(Math.max(dur / 20, 0.05));
+    setMode('surge'); setFlowDashes(true); setFramePos(0);
+    await new Promise((r) => setTimeout(r, 120));
+    rec.start(250);
+    setPlaying(true);
+    await new Promise((r) => setTimeout(r, 400));
+    // stop when the playback reaches the end (or after 2 minutes)
+    const t0 = performance.now();
+    await new Promise<void>((r) => { const iv = setInterval(() => { if (!playingRef.current || performance.now() - t0 > 120000) { clearInterval(iv); r(); } }, 150); });
+    await new Promise((r) => setTimeout(r, 400));
+    rec.stop(); await done;
+    setRecording(false); setSpeed(oldSpeed);
+    const blob = new Blob(parts, { type: mime.split(';')[0] });
+    const a2 = document.createElement('a'); a2.href = URL.createObjectURL(blob); a2.download = `${safeName(netRef.current.name)}-surge.${mime.includes('mp4') ? 'mp4' : 'webm'}`; a2.click();
+    setTimeout(() => URL.revokeObjectURL(a2.href), 5000);
+    setToast([`Surge animation saved (${(blob.size / 1e6).toFixed(1)} MB). A film of about 20 s from the drawing, with the surge colours and flow.`]);
+  };
+  const epsTankFill = useMemo(() => {
+    if (!epsRes || epsColour === 'none') return undefined;
+    const r = epsRes.r, k = Math.min(epsK, r.times.length - 1);
+    return (id: string) => { const n = net.nodes.find((x) => x.id === id); const lv = r.level[id]; return n?.storage && lv ? (lv[k] - n.storage.minLevel) / Math.max(n.storage.maxLevel - n.storage.minLevel, 1e-6) : null; };
+  }, [epsRes, epsK, epsColour, net]);
   const startFromDocuments = () => { openCopilot(); setToast(['Attach the drawings, long sections, data sheets or spreadsheets in the Copilot (paper clip), then ask it to build the model.']); };
   const [tourOn, setTourOn] = useState(false);
   const [palette, setPalette] = useState(false);
@@ -553,6 +594,7 @@ export default function App() {
       { label: 'Export GIS (GeoJSON, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && void import('./app/exchange').then(({ toGeoJSON }) => download(`${safeName(net.name)}.geojson`, JSON.stringify(toGeoJSON(net, result, epsRes?.r ?? null)), 'application/geo+json')) },
       { label: 'Export CAD (DXF, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && void import('./app/exchange').then(({ toDXF }) => download(`${safeName(net.name)}.dxf`, toDXF(net, result, Math.max(1, Math.round(Math.max(...net.nodes.map((n) => Math.abs(n.x)), 100) / 300))), 'application/dxf')) },
       { label: 'Export envelopes .csv', action: exportEnv, disabled: !result },
+      { label: 'Export surge animation (video)', action: () => void recordVideo(), disabled: !result || recording },
       { label: 'Export drawing to scale (SVG)', sub: (['A3', 'A1'] as const).map((sh) => ({ label: `${sh} sheet`, action: async () => { const { plotSVG } = await import('./app/plot'); const p = plotSVG(net, result, { sheet: sh }); download(`${safeName(net.name)}-${sh}-1to${p.scale}.svg`, p.svg, 'image/svg+xml'); setToast([`Drawing at 1:${p.scale} on ${sh}. Print at 100 % (actual size) to keep the scale.`]); } })) },
       { label: 'Export results workbook (Excel .xlsx)', action: async () => { if (!allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.')) return; const [{ xlsx }, { resultsBook }] = await Promise.all([import('./app/xlsx'), import('./app/resultsBook')]); const bytes = xlsx(resultsBook(net, result, checks, epsRes?.r ?? null)); const blob = new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${safeName(net.name)}-results.xlsx`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); } },
       'sep',
@@ -836,7 +878,7 @@ export default function App() {
           <div className="canvas-wrap">
             <Canvas net={net} result={result} envelopes={unc?.envelopes} framePos={framePos} mode={result ? mode : 'plain'} selected={selected} onSelect={select}
               route={routeSet} flowDashes={flowDashes} playing={playing} sScale={sScale} tool={tool} onEdit={edit} view={viewOpts} defaults={defaults}
-              onCursor={setCursorW} fitKey={fitKey} bottomInset={result && dock !== 'max' ? 84 : 0} onContext={setCtx} onToolEnd={() => setTool('select')} colorFn={epsCol ? epsCol.color : mode === 'plain' || !result ? colorBy.color : undefined} />
+              onCursor={setCursorW} fitKey={fitKey} bottomInset={result && dock !== 'max' ? 84 : 0} onContext={setCtx} onToolEnd={() => setTool('select')} probe={probe?.from === 'profile' ? probe : null} tankFill={epsTankFill} onProbe={result && bottom === 'profile' && dock !== 'min' ? (p2) => setProbe((o) => (!p2 && !o) || (p2 && o && o.pipe === p2.pipe && Math.abs(o.s - p2.s) < 1) ? o : p2 ? { ...p2, from: 'map' } : null) : undefined} colorFn={epsCol ? epsCol.color : mode === 'plain' || !result ? colorBy.color : undefined} />
             <div className="map-tools">
               <div className="seg" role="group" aria-label="Map view">
                 <button className={`seg-btn ${mode === 'plain' || !result ? 'on' : ''}`} onClick={() => { setMode('plain'); setPlaying(false); }}>Design</button>
@@ -926,7 +968,15 @@ export default function App() {
                 {bottom === 'live' && <Suspense fallback={LOADING}><LivePanel net={net} setNet={setNet} eps={epsRes?.r ?? null} onToast={setToast} /></Suspense>}
                 {!result && !['tables', 'cases', 'protection', 'eps', 'live'].includes(bottom) ? <div className="empty">Results appear here after a run. Press <b>Run</b> (F5).</div> : result && (
                   <>
-                    {bottom === 'profile' && <ProfileView net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} uEnv={unc?.envelopes} showNow={live} height={dock === 'max' ? 420 : 250} overlay={caseRes.filter((c) => overlayIds.includes(c.id) && c.id !== net.activeCase)} />}
+                    {bottom === 'profile' && (
+                      <div className="profile-wrap">
+                        <div className="seg profile-seg" role="tablist" aria-label="Profile view">
+                          <button className={`seg-btn ${profView === 'section' ? 'on' : ''}`} onClick={() => setProfView('section')}>{tr('Long section')}</button>
+                          <button className={`seg-btn ${profView === 'waterfall' ? 'on' : ''}`} onClick={() => setProfView('waterfall')}>{tr('Waterfall (3D)')}</button>
+                        </div>
+                        {profView === 'section' ? <ProfileView probe={probe?.from === 'map' ? probe : null} onProbe={(p2) => setProbe(p2 ? { ...p2, from: 'profile' } : null)} net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} uEnv={unc?.envelopes} showNow={live} height={dock === 'max' ? 420 : 250} overlay={caseRes.filter((c) => overlayIds.includes(c.id) && c.id !== net.activeCase)} /> : <Waterfall net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} height={dock === 'max' ? 440 : 270} />}
+                      </div>
+                    )}
                     {bottom === 'graphs' && <GraphsView net={net} result={result} items={graphs} setItems={setGraphs} selected={selected} tNow={tNow} />}
                     {bottom === 'checks' && <ChecksView checks={checks} onFocus={(c) => { if (c.where?.pipe) setSelected([{ type: 'pipe', id: c.where.pipe }]); else if (c.where?.node) setSelected([{ type: 'node', id: c.where.node }]); setMode(c.title.toLowerCase().includes('minimum') || c.title.toLowerCase().includes('column') ? 'min' : 'max'); }} />}
                     {bottom === 'uncertainty' && (

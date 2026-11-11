@@ -5,7 +5,7 @@ import { tr } from '../app/i18n';
 
 const STEPS: { sel: string; title: string; text: string }[] = [
   { sel: '.ribbon', title: 'Build the network', text: 'Place sources, pipes, pumps, valves and protection devices from the ribbon. The AI group builds, reviews and protects for you.' },
-  { sel: '.map-wrap', title: 'The drawing', text: 'Click to select, drag to move, scroll to zoom. After a run the pipes show the pressures; Space plays the surge.' },
+  { sel: '.canvas-wrap', title: 'The drawing', text: 'Click to select, drag to move, scroll to zoom. After a run the pipes show the pressures; Space plays the surge.' },
   { sel: '.pane.left', title: 'Explorer and operations', text: 'Every element by type, and Operations: what happens in the surge run — a pump trip, a valve closure, a start.' },
   { sel: '.pane.right', title: 'Properties and Copilot', text: 'Edit what you select. The Copilot tab is an AI engineer that works through the same commands you use.' },
   { sel: '.ribbon .rb.run', title: 'Run', text: 'F5 runs the surge analysis: steady state, surge run and design checks, with the envelope growing as it goes.' },

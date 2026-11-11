@@ -471,7 +471,7 @@ table.grid td.num { text-align: right; font-family: var(--mono); }
 
 /* ── run screen ── */
 .run-screen { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter: blur(2px); animation: rs-in 0.18s ease both; }
-.run-screen.done { animation: rs-out 0.45s ease 0.55s both; }
+.run-screen.done { animation: rs-out 0.3s ease 0.35s both; pointer-events: none; }
 @keyframes rs-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rs-out { to { opacity: 0; visibility: hidden; } }
 .run-card { width: min(500px, 92%); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 18px 48px rgba(4, 12, 24, 0.22); animation: rc-pop 0.22s cubic-bezier(.2,.9,.3,1.2) both; }
@@ -528,3 +528,8 @@ table.grid td.num { text-align: right; font-family: var(--mono); }
 .tour-nav { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
 .tour-invite { position: fixed; left: 16px; bottom: 34px; z-index: 55; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; width: 260px; box-shadow: var(--shadow); animation: rc-pop 0.25s ease both; }
 @media (prefers-reduced-motion: reduce) { .tour-hole, .tour-card, .pal-back, .pal { transition: none !important; animation: none !important; } }
+.profile-wrap { position: relative; }
+.profile-seg { position: absolute; right: 8px; top: -2px; z-index: 2; transform: scale(0.92); transform-origin: top right; }
+.waterfall { padding-top: 6px; }
+.wf-ctl { display: flex; align-items: center; gap: 8px; padding: 2px 8px; }
+.wf-ctl input { width: 140px; }

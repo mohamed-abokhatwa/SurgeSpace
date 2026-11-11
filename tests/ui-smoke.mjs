@@ -44,6 +44,10 @@ try {
   const rs = await p.waitForSelector('.run-screen', { timeout: 5000 }).then(() => 1, () => 0);
   await p.waitForFunction(() => !document.querySelector('.run-screen'), null, { timeout: 30000 });
   t('run screen shows the stages, then clears', rs === 1);
+  await p.locator('.dtab', { hasText: 'Profile' }).first().click();
+  await p.locator('.seg-btn', { hasText: 'Waterfall' }).click(); await p.waitForTimeout(400);
+  t('waterfall (3D) view draws', (await p.locator('.waterfall canvas').count()) === 1);
+  await p.locator('.seg-btn', { hasText: 'Long section' }).click();
   for (const m of ['File', 'Edit', 'View', 'Model', 'Analysis', 'Results', 'Tools', 'AI', 'Help']) {
     await p.locator('.menu-btn', { hasText: new RegExp(`^${m}$`) }).click();
     const n = await p.locator('.menu-item').count();

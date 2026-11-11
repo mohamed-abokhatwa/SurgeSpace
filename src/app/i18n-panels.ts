@@ -97,6 +97,7 @@ export const AR_PANELS: Record<string, string> = {
   'Build the network': 'إنشاء الشبكة', 'The drawing': 'الرسم', 'Explorer and operations': 'المستكشف والعمليات', 'Properties and Copilot': 'الخصائص والمساعد', 'Find anything': 'ابحث عن أي شيء',
   'Type a command, an element id or a setting…': 'اكتب أمرًا أو رقم عنصر أو إعدادًا…', 'Nothing matches. Try fewer letters.': 'لا توجد نتائج. جرّب أحرفًا أقل.', move: 'تنقل', run: 'تشغيل', close: 'إغلاق',
   'Command palette…': 'لوحة الأوامر…', 'Kept on this device': 'محفوظ على هذا الجهاز',
+'Waterfall (3D)': 'الشلال (ثلاثي الأبعاد)', 'Export surge animation (video)': 'تصدير حركة الطرق (فيديو)',
   // added with the newer panels
   'Kaplan / propeller (flow rises with speed)': 'كابلان / مروحي (يزداد التصرف مع السرعة)', 'None — passes flow like a valve (gate only)': 'لا يوجد — يمرر التصرف كمحبس (البوابة فقط)',
   'Runner characteristic (flow and efficiency change with speed)': 'منحنى العضو الدوار (يتغير التصرف والكفاءة مع السرعة)', 'Differential surge tank (riser and chamber)': 'خزان موازنة تفاضلي (أنبوب صاعد وحجرة)',
