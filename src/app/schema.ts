@@ -57,6 +57,8 @@ export const PUMP_FIELDS: FieldDef<Pump>[] = [
   { key: 'inertia_kgm2', label: 'Inertia', type: 'number', unit: 'kg·m²', q: 'inertia', ...pos, help: 'Pump + motor rotating inertia.', get: (e) => e.inertia, set: (e, v) => ({ ...e, inertia: n(v) }) },
   { key: 'check_valve', label: 'Discharge non-return valve', type: 'boolean', help: 'Non-return valve on the discharge.', get: (e) => e.checkValve, set: (e, v) => ({ ...e, checkValve: !!v }) },
   { key: 'running', label: 'Running', type: 'boolean', help: 'Running in the steady state.', get: (e) => e.on, set: (e, v) => ({ ...e, on: !!v }) },
+  { key: 'vsd_node', label: 'Variable-speed drive: controlled node', type: 'string', help: 'Node whose pressure the drive holds ("" = fixed speed).', get: (e) => e.vsd?.node ?? '', set: (e, v) => (String(v) ? { ...e, vsd: { setPressure: 30, ...(e.vsd ?? {}), node: String(v) } } : { ...e, vsd: undefined }) },
+  { key: 'vsd_set_pressure_m', label: 'Variable-speed drive: set pressure', type: 'number', unit: 'm', help: 'Pressure held at the controlled node (needs vsd_node).', get: (e) => e.vsd?.setPressure ?? NaN, set: (e, v) => (e.vsd ? { ...e, vsd: { ...e.vsd, setPressure: n(v) } } : e) },
   { key: 'four_quadrant', label: 'Four-quadrant behaviour', type: 'enum', options: ['off', 'generic', 'suter'], help: 'Reverse flow and reverse rotation after a trip (pumps without a non-return valve). generic = derived from the curve; suter = manufacturer data.', get: (e) => e.fourQuadrant ?? 'off', set: (e, v) => ({ ...e, fourQuadrant: v === 'off' ? undefined : (v as 'generic' | 'suter') }) },
 ];
 

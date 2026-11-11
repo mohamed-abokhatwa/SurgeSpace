@@ -2,7 +2,7 @@
 // The same commands serve the AI copilot (as tools), scripting, and tests. Mutating commands go through
 // ctx.apply(), which the app maps to one undo step each, so every AI action can be inspected and undone.
 import type { Check, VesselSizing, AirValveSuggestion } from '../engine/analysis';
-import { designChecks, sizeVessel, suggestAirValves, turbineSpeeds } from '../engine/analysis';
+import { designChecks, pipeForces, sizeVessel, suggestAirValves, turbineSpeeds } from '../engine/analysis';
 import { EXAMPLES } from '../engine/cases';
 import { estimateInertia } from '../engine/hydraulics';
 import { solveSteady } from '../engine/steady';
@@ -521,13 +521,14 @@ export const COMMANDS: Command[] = [
   },
   {
     name: 'get_results', mutates: false,
-    description: 'Results of the last run: "summary", "nodes" (pressures at every node), "pipes" (flows and pressure envelopes), or a list of ids.',
-    params: obj({ what: str('What', ['summary', 'nodes', 'pipes']), ids: { type: 'array', items: { type: 'string' }, description: 'Limit to these ids' } }, ['what']),
+    description: 'Results of the last run: "summary", "nodes" (pressures at every node), "pipes" (flows and pressure envelopes), "forces" (largest unbalanced axial force per pipe for anchors and thrust blocks, kN), or a list of ids.',
+    params: obj({ what: str('What', ['summary', 'nodes', 'pipes', 'forces']), ids: { type: 'array', items: { type: 'string' }, description: 'Limit to these ids' } }, ['what']),
     run: async (ctx, a) => {
       const out = ctx.getRun() ?? fail('No results yet: call run_analysis first.');
       const net = ctx.getNet();
       if (a.what === 'nodes') return nodeResults(net, out, a.ids).slice(0, 400);
       if (a.what === 'pipes') return pipeResults(net, out, a.ids).slice(0, 400);
+      if (a.what === 'forces') return pipeForces(net, out.result).filter((f) => !a.ids || a.ids.includes(f.id)).sort((x, y) => Math.abs(y.maxForce) - Math.abs(x.maxForce)).slice(0, 200).map((f) => ({ pipe: f.id, max_force_kn: r2(f.maxForce, 1), at_s: r2(f.tMax, 2), steady_kn: r2(f.steadyForce, 1), surge_part_kn: r2(f.maxDelta, 1) }));
       return resultsSummary(net, out);
     },
   },

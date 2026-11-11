@@ -47,7 +47,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     ...net.pumps.map((p, k): L => ({ kind: 'pump', id: p.id, i: nIdx.get(p.from)!, j: nIdx.get(p.to)!, ref: k, Q: steady.flows.get(p.id) ?? 0, closed: !p.on || (steady.flows.get(p.id) ?? 0) <= 0 })),
     ...net.valves.map((v, k): L => ({ kind: 'valve', id: v.id, i: nIdx.get(v.from)!, j: nIdx.get(v.to)!, ref: k, Q: steady.flows.get(v.id) ?? 0, closed: false })),
   ];
-  const pumpS = net.pumps.map((p) => ({ alpha: p.on ? 1 : 0, alphaSet: p.on ? 1 : 0, on: p.on, tripped: false, curve: pumpCurve(p), tq: pumpTorqueQuadratic(p), fq: p.fourQuadrant ? fourQuadrant(p) as FourQ : undefined, w: omegaRated(p), T: 0 }));
+  const pumpS = net.pumps.map((p) => ({ alpha: p.on ? steady.speeds?.get(p.id) ?? 1 : 0, alphaSet: p.on ? steady.speeds?.get(p.id) ?? 1 : 0, on: p.on, tripped: false, curve: pumpCurve(p), tq: pumpTorqueQuadratic(p), fq: p.fourQuadrant ? fourQuadrant(p) as FourQ : undefined, w: omegaRated(p), T: 0 }));
   const head = (k: number, q: number, a: number) => { const s = pumpS[k]; return s.fq ? s.fq.head(q, a) : pumpHeadAt(s.curve, q, a); };
   const torque = (k: number, q: number, a: number) => { const s = pumpS[k]; return s.fq ? s.fq.torque(q, a) : s.tq.ta * a * a + s.tq.tb * a * q + s.tq.tc * q * q; };
   pumpS.forEach((s, k) => (s.T = torque(k, links[net.pipes.length + k].Q, s.alpha)));

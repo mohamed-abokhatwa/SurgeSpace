@@ -1,7 +1,7 @@
 // Design checks, uncertainty envelopes and automatic surge-protection sizing.
 import { solveSteady } from './steady';
 import { runTransient, type PipeEnvelope, type RunOptions, type TransientResult } from './transient';
-import { allEvents, type Network } from './types';
+import { G, RHO, allEvents, area, type Network } from './types';
 
 export type CheckLevel = 'fail' | 'warn' | 'pass' | 'info';
 export interface Check {
@@ -351,3 +351,39 @@ export function turbineSpeeds(net: Network, r: TransientResult): TurbineRun[] {
   }
   return out;
 }
+
+export interface PipeForce { id: string; maxForce: number; tMax: number; steadyForce: number; maxDelta: number; sections: number }
+/** Unbalanced axial forces for anchor and thrust-block design. For each straight section of a pipe (between bends
+ *  and ends, from the animation samples), the force along the section is F = ρ g A (h₁ − h₂), with h the pressure
+ *  head at its two ends: the part of the surge that pushes the section along its axis while a wave travels through
+ *  it (steady pressure is balanced by the bends and anchors, so maxDelta = the transient part is also given). kN. */
+export function pipeForces(net: Network, r: TransientResult): PipeForce[] {
+  const out: PipeForce[] = [];
+  const nf = r.times.length;
+  for (const p of net.pipes) {
+    const s = r.frameSamples[p.id], H = r.frameHeads[p.id];
+    if (!s || !H || s.length < 2) continue;
+    const ns = s.length;
+    const A = area(p.diameter);
+    const a = net.nodes.find((n) => n.id === p.from)!, b = net.nodes.find((n) => n.id === p.to)!;
+    const prof = [{ s: 0, z: a.elev }, ...(p.profile ?? []).filter((q) => q.s > 0 && q.s < p.length).sort((u, v) => u.s - v.s), { s: p.length, z: b.elev }];
+    const zAt = (x: number) => { for (let i = 1; i < prof.length; i++) if (x <= prof[i].s) return prof[i - 1].z + ((prof[i].z - prof[i - 1].z) * (x - prof[i - 1].s)) / (prof[i].s - prof[i - 1].s || 1); return prof[prof.length - 1].z; };
+    // sections: between profile break points and the pipe ends, at the nearest samples
+    const cuts = [...new Set([0, ...prof.slice(1, -1).map((q) => nearestIndex(s, q.s)), ns - 1])].sort((x, y) => x - y);
+    let best = { f: 0, t: 0, st: 0, d: 0 };
+    for (let c = 1; c < cuts.length; c++) {
+      const i = cuts[c - 1], j = cuts[c];
+      if (i === j) continue;
+      const zi = zAt(s[i]), zj = zAt(s[j]);
+      const f0 = (RHO * G * A * ((H[i] - zi) - (H[j] - zj))) / 1000;
+      for (let k = 0; k < nf; k++) {
+        const f = (RHO * G * A * ((H[k * ns + i] - zi) - (H[k * ns + j] - zj))) / 1000;
+        if (Math.abs(f) > Math.abs(best.f)) best = { ...best, f, t: r.times[k], st: f0 };
+        best.d = Math.max(best.d, Math.abs(f - f0));
+      }
+    }
+    out.push({ id: p.id, maxForce: best.f, tMax: best.t, steadyForce: best.st, maxDelta: best.d, sections: cuts.length - 1 });
+  }
+  return out;
+}
+const nearestIndex = (arr: ArrayLike<number>, x: number) => { let k = 0; for (let i = 1; i < arr.length; i++) if (Math.abs(arr[i] - x) < Math.abs(arr[k] - x)) k = i; return k; };

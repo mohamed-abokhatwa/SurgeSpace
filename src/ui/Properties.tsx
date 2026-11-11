@@ -306,6 +306,20 @@ function PumpProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
         <QNum label="Pump + motor inertia" q="inertia" value={p.inertia} digits={3} onChange={(v) => v !== undefined && set({ inertia: v })} />
         <p className="hint">Thorley estimate for this duty: <b>{fmtQ(est, 'inertia', 2, units)}</b> · <button className="linkbtn" onClick={() => set({ inertia: +est.toFixed(2) })}>use it</button></p>
       </Group>
+      <Group title="Variable-speed drive" open={!!p.vsd} right={p.vsd ? <span className="pill good">holds {p.vsd.setPressure} m</span> : undefined}>
+        <label className="row small"><input type="checkbox" checked={!!p.vsd} onChange={(e) => set({ vsd: e.target.checked ? { node: p.to, setPressure: 30 } : undefined })} /> Speed controlled to hold a pressure</label>
+        {p.vsd && (
+          <div className="grid2" style={{ marginTop: 6 }}>
+            <label className="field"><span>Controlled node</span><select value={p.vsd.node} onChange={(e) => set({ vsd: { ...p.vsd!, node: e.target.value } })}>{net.nodes.map((n) => <option key={n.id}>{n.id}</option>)}</select></label>
+            <QNum label="Set pressure" q="pressureHead" value={p.vsd.setPressure} onChange={(v) => v !== undefined && set({ vsd: { ...p.vsd!, setPressure: v } })} />
+            <label className="field"><span>Gain <em className="unit">speed per m</em></span><input type="number" step="0.005" value={p.vsd.kp ?? 0.02} onChange={(e) => set({ vsd: { ...p.vsd!, kp: num(e.target.value) } })} /></label>
+            <label className="field"><span>Integral time <em className="unit">s</em></span><input type="number" value={p.vsd.ti ?? 5} onChange={(e) => set({ vsd: { ...p.vsd!, ti: num(e.target.value) || 5 } })} /></label>
+            <label className="field"><span>Speed range <em className="unit">%</em></span><input value={`${Math.round((p.vsd.minSpeed ?? 0.3) * 100)}–${Math.round((p.vsd.maxSpeed ?? 1.05) * 100)}`} onChange={(e) => { const [a, b] = e.target.value.split(/[–-]/).map(Number); if (a > 0 && b > a) set({ vsd: { ...p.vsd!, minSpeed: a / 100, maxSpeed: b / 100 } }); }} /></label>
+            <label className="field"><span>Ramp 0→100 % <em className="unit">s</em></span><input type="number" value={p.vsd.rampTime ?? 10} onChange={(e) => set({ vsd: { ...p.vsd!, rampTime: num(e.target.value) || 10 } })} /></label>
+          </div>
+        )}
+        <p className="hint">The steady speed is found to meet the set pressure; in the surge run a PI controller keeps adjusting the speed until the pump trips or ramps by an operation.</p>
+      </Group>
       <Group title="Four-quadrant behaviour" open={!!p.fourQuadrant} right={p.fourQuadrant ? <span className="pill good">{p.fourQuadrant}</span> : undefined}>
         <label className="field"><span>Reverse flow and reverse rotation</span>
           <select value={p.fourQuadrant ?? ''} onChange={(e) => set({ fourQuadrant: (e.target.value || undefined) as typeof p.fourQuadrant })}>

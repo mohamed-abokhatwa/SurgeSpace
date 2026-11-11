@@ -173,7 +173,7 @@ interface CvState {
 }
 
 type Element =
-  | { kind: 'pump'; idx: number; ids: string[]; m: number; curve: PumpCurve; i: number; j: number; Q: number; alpha: number; alphaSet: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; cv?: CvState; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number; fq?: FourQ }
+  | { kind: 'pump'; idx: number; ids: string[]; m: number; curve: PumpCurve; i: number; j: number; Q: number; alpha: number; alphaSet: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; cv?: CvState; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number; fq?: FourQ; vsd?: { node: number; z: number; set: number; kp: number; ti: number; min: number; max: number; rate: number; I: number; s0: number } }
   | { kind: 'valve'; idx: number; i: number; j: number; Q: number; open: number; base: number; closed: boolean; check: boolean; cv?: CvState; kq: number }
   | { kind: 'rigid'; idx: number; i: number; j: number; Q: number; Qold: number; closed: boolean; check: false; inert: number; pipe: number };
 
@@ -409,15 +409,17 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   for (const ks of pumpGroups.values()) {
     const p = net.pumps[ks[0]];
     const m = ks.length;
+    const s0 = steady.speeds?.get(p.id) ?? 1;
     const { a, b, c } = pumpQuadratic(p);
     const tq = pumpTorqueQuadratic(p);
     const q = ks.reduce((sum, k) => sum + (steady.flows.get(net.pumps[k].id) ?? 0), 0);
     const e: Extract<Element, { kind: 'pump' }> = {
-      kind: 'pump', idx: ks[0], ids: ks.map((k) => net.pumps[k].id), m, curve: pumpCurve(p), i: nIdx.get(p.from)!, j: nIdx.get(p.to)!, Q: q, alpha: p.on ? 1 : 0, alphaSet: 1, tripped: false, on: p.on,
+      kind: 'pump', idx: ks[0], ids: ks.map((k) => net.pumps[k].id), m, curve: pumpCurve(p), i: nIdx.get(p.from)!, j: nIdx.get(p.to)!, Q: q, alpha: p.on ? s0 : 0, alphaSet: s0, tripped: false, on: p.on,
       closed: !p.on || q <= 0, check: p.checkValve && (!p.checkSpec || p.checkSpec.mode === 'ideal'),
       cv: p.checkValve ? makeCv(p.checkSpec, area(p.checkSpec?.diameter ?? net.pipes.find((x) => x.from === p.to || x.to === p.to)?.diameter ?? 0.3)) : undefined, T: 0, I: p.inertia * (opt.inertiaFactor ?? 1), w: omegaRated(p),
       a, b: b / m, c: c / (m * m), ta: tq.ta, tb: tq.tb / m, tc: tq.tc / (m * m),
       ...(p.fourQuadrant ? { fq: fourQuadrant(p) } : {}),
+      ...(p.vsd && p.vsd.active !== false && nIdx.has(p.vsd.node) ? { vsd: { node: nIdx.get(p.vsd.node)!, z: nodes[nIdx.get(p.vsd.node)!].elev, set: p.vsd.setPressure, kp: p.vsd.kp ?? 0.02, ti: Math.max(p.vsd.ti ?? 5, 1e-3), min: p.vsd.minSpeed ?? 0.3, max: p.vsd.maxSpeed ?? 1.05, rate: 1 / Math.max(p.vsd.rampTime ?? 10, 1e-3), I: 0, s0 } } : {}),
     };
     e.T = pTorque(e, e.alpha, e.Q);
     if (e.cv && e.closed) e.cv.state = 'closed';
@@ -975,6 +977,16 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         const T = Math.max((ev.duration ?? 0) * (opt.strokeFactor ?? 1), 1e-9);
         e.alphaSet = Math.min(1, (t - ev.start) / T);
         e.alpha = e.alphaSet;
+      } else if (e.kind === 'pump' && e.vsd && e.on && !e.tripped && !(ev && t >= ev.start)) {
+        // variable-speed drive: PI control of the pressure at its node, speed-rate limited
+        const v = e.vsd;
+        const err = v.set - (Hprev[v.node] - v.z);
+        v.I += err * dt;
+        const target = Math.min(Math.max(v.s0 + v.kp * (err + v.I / v.ti), v.min), v.max);
+        const step = Math.max(-v.rate * dt, Math.min(v.rate * dt, target - e.alphaSet));
+        e.alphaSet += step;
+        e.alpha = e.alphaSet;
+        if (target === v.min || target === v.max) v.I -= err * dt; // anti-windup
       } else if (e.kind === 'pump' && ev && t >= ev.start && e.on) {
         if (ev.pumpMode === 'ramp') {
           // controlled stop: speed forced linearly to zero over the ramp time

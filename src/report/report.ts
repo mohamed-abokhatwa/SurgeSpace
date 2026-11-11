@@ -1,7 +1,7 @@
 // Detailed transient analysis report: a self-contained HTML document (tables and SVG charts, no external files)
 // that prints to A4 / PDF. Sections follow the usual surge study layout: title page, summary of findings,
 // model and method, input data, steady state, transient results, protection devices, checks, time histories.
-import { turbineSpeeds, type Check } from '../engine/analysis';
+import { pipeForces, turbineSpeeds, type Check } from '../engine/analysis';
 import { valveArea } from '../engine/devices';
 import type { TransientResult } from '../engine/transient';
 import { G, HB, HV, area, type CheckValveSpec, type Network } from '../engine/types';
@@ -331,6 +331,9 @@ ${table(['Node', `Level (${uH})`, `Demand (${uQ})`, `Steady head (${uH})`, `Stea
 
 <h2>5. Results by pipe</h2>
 ${table(['Pipe', 'From', 'To', `Steady Q (${uQ})`, `V (${uV})`, `Max p (${uP})`, `at (${uL}) @ t`, `Min p (${uP})`, `at (${uL}) @ t`, 'Class (% used)', 'Cavity (L)', 'a adjusted'], pipeRows)}
+<h3>Unbalanced axial forces (anchors and thrust blocks)</h3>
+<p class="muted">Largest force along a straight section during the run, F = ρ g A (h₁ − h₂); the surge part excludes the steady force.</p>
+${table(['Pipe', 'Largest force (kN)', 'at (s)', 'Steady (kN)', 'Surge part (kN)'], pipeForces(net, r).sort((a, b) => Math.abs(b.maxForce) - Math.abs(a.maxForce)).slice(0, 60).map((x) => [x.id, f(x.maxForce, 1), f(x.tMax, 2), f(x.steadyForce, 1), f(x.maxDelta, 1)]))}
 
 ${resDev.length || slams.length ? `<h2 class="page">6. Protection devices and slams</h2>
 ${resDev.length ? table(['Where', 'Device', 'Result'], resDev) : ''}

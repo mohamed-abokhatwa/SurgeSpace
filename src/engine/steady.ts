@@ -15,6 +15,8 @@ export interface SteadyResult {
   openings: Map<string, number>;
   /** Control valve statuses (only from the internal control solve). */
   controlStatus?: Map<string, 'active' | 'open' | 'closed'>;
+  /** Relative speed of variable-speed pumps that hold a pressure (1 for the others). */
+  speeds?: Map<string, number>;
 }
 
 interface Link {
@@ -25,7 +27,43 @@ interface Link {
   ref: number;
 }
 
+/** Pump curve at a relative speed (affinity laws). */
+export const atSpeed = <P extends Network['pumps'][number]>(p: P, s: number): P => (s === 1 ? p : { ...p, curve: p.curve.map(([q, h]) => [q * s, h * s * s] as [number, number]), power: p.power ? p.power * s ** 3 : undefined });
+
 export function solveSteady(netIn: Network): SteadyResult {
+  const vsd = netIn.pumps.filter((p) => p.vsd && p.on);
+  if (!vsd.length) return solveSteadyBase(netIn);
+  // variable-speed pumps: find each speed that meets its pressure set point (secant, all pumps together)
+  const sp = new Map(vsd.map((p) => [p.id, 1]));
+  const solveAt = () => solveSteadyBase({ ...netIn, pumps: netIn.pumps.map((p) => (sp.has(p.id) ? atSpeed(p, sp.get(p.id)!) : p)) });
+  const errOf = (r: SteadyResult, p: Network['pumps'][number]) => (r.heads.get(p.vsd!.node) ?? NaN) - (netIn.nodes.find((n) => n.id === p.vsd!.node)?.elev ?? 0) - p.vsd!.setPressure;
+  let r = solveAt();
+  const prev = new Map(vsd.map((p) => [p.id, { s: 1, e: errOf(r, p) }]));
+  for (const p of vsd) sp.set(p.id, 0.95);
+  for (let it = 0; it < 40; it++) {
+    r = solveAt();
+    let worst = 0;
+    for (const p of vsd) {
+      const e = errOf(r, p), s = sp.get(p.id)!, pr = prev.get(p.id)!;
+      worst = Math.max(worst, Math.abs(e));
+      let ns = Math.abs(e - pr.e) > 1e-12 ? s - (e * (s - pr.s)) / (e - pr.e) : s - 0.01 * Math.sign(e);
+      ns = Math.min(Math.max(ns, p.vsd!.minSpeed ?? 0.3), p.vsd!.maxSpeed ?? 1.05);
+      if (!Number.isFinite(ns)) ns = s;
+      prev.set(p.id, { s, e });
+      sp.set(p.id, ns);
+    }
+    if (worst < 1e-4) break;
+  }
+  r = solveAt();
+  for (const p of vsd) {
+    const e = errOf(r, p);
+    if (Math.abs(e) > 0.05) r.warnings.push(`Variable-speed pump ${p.id} cannot hold ${p.vsd!.setPressure} m at ${p.vsd!.node} (${e > 0 ? 'too high even at its lowest speed' : 'too low even at its highest speed'}; speed ${(sp.get(p.id)! * 100).toFixed(0)} %).`);
+  }
+  r.speeds = new Map(netIn.pumps.map((p) => [p.id, sp.get(p.id) ?? 1]));
+  return r;
+}
+
+function solveSteadyBase(netIn: Network): SteadyResult {
   applyFluid(netIn.settings);
   const net = prepareNetwork(netIn);
   const areas = new Map(net.valves.map((v) => [v.id, valveArea(v, v.opening)] as [string, number]));

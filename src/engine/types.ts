@@ -375,6 +375,26 @@ export interface Pump {
   fourQuadrant?: 'generic' | 'suter';
   /** Suter characteristic: θ in degrees (0–360), WH = h/(α²+v²), WB = β/(α²+v²), normalised on the rated point. */
   suter?: { theta: number[]; wh: number[]; wb: number[] };
+  /** Variable-speed drive holding a pressure: the steady speed is found to meet the set point, and during the
+   *  surge run a PI controller keeps adjusting it (unless the pump trips). */
+  vsd?: VSDControl;
+}
+
+export interface VSDControl {
+  /** Node whose pressure is controlled. */
+  node: string;
+  /** Pressure set point at that node, m of head. */
+  setPressure: number;
+  /** Proportional gain, speed fraction per m (default 0.02). */
+  kp?: number;
+  /** Integral time, s (default 5). */
+  ti?: number;
+  minSpeed?: number;
+  maxSpeed?: number;
+  /** Fastest change from 0 to 100 % speed, s (default 10). */
+  rampTime?: number;
+  /** Keep controlling during the surge run (default true). */
+  active?: boolean;
 }
 
 export interface Valve {
