@@ -33,6 +33,7 @@ import { clock, networkAt, type EPSResult } from './engine/eps';
 import { skeletonise } from './engine/skeleton';
 import { fromGeoJSON, toDXF, toGeoJSON, type GeoJSON } from './app/exchange';
 import { xlsx } from './app/xlsx';
+import { applyDir, setLang, tr, useLang } from './app/i18n';
 import { resultsBook } from './app/resultsBook';
 import { applyDesign, type Design, type OptVar } from './engine/optimise';
 import { Explorer } from './ui/Explorer';
@@ -67,6 +68,8 @@ const writeLS = (k: string, v: string) => { try { localStorage.setItem(k, v); } 
 
 export default function App() {
   const units = useUnits();
+  const lang = useLang();
+  useEffect(() => { applyDir(); }, []);
   const [net, setNetRaw] = useState<Network>(() => EXAMPLES[0].make());
   const netRef = useRef(net);
   netRef.current = net;
@@ -509,6 +512,7 @@ export default function App() {
       { label: 'Properties panel', checked: showRight, action: () => setShowRight((v) => !v) },
       { label: 'Results dock', sub: [['normal', 'Normal'], ['max', 'Large'], ['min', 'Hidden']].map(([k, l]) => ({ label: l, checked: dock === k, action: () => setDock(k as typeof dock) })) },
       'sep',
+      { label: 'Language', sub: [{ label: 'English', checked: lang === 'en', action: () => setLang('en') }, { label: 'العربية', checked: lang === 'ar', action: () => setLang('ar') }] },
       { label: 'Theme', sub: [['auto', 'Follow system'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => ({ label: l, checked: theme === k, action: () => setTheme(k as typeof theme) })) },
     ] },
     { label: 'Model', items: [
@@ -639,7 +643,7 @@ export default function App() {
   const RB = ({ icon, el, label, on, onClick, disabled, title, accent }: { icon?: ActionIcon; el?: ElementKind; label: string; on?: boolean; onClick: () => void; disabled?: boolean; title?: string; accent?: boolean }) => (
     <button className={`rb ${on ? 'on' : ''} ${accent ? 'accent' : ''}`} onClick={onClick} disabled={disabled} title={title ?? label} aria-pressed={on}>
       {el ? <ElIcon kind={el} size={20} /> : <Ic name={icon!} size={20} />}
-      <span>{label}</span>
+      <span>{tr(label)}</span>
     </button>
   );
   const tb = (k: ElementKind) => <RB key={k} el={k} label={EL[k].short} on={tool === k} onClick={() => pickTool(tool === k ? 'select' : k)} title={`${EL[k].name}${EL[k].key ? ` (${EL[k].key})` : ''} — ${EL[k].description}`} />;
@@ -685,47 +689,47 @@ export default function App() {
           <RB icon="open" label="Open" onClick={openProject} />
           <RB icon="save" label="Save" onClick={saveProject} />
           <RB icon="import" label="Import" onClick={() => setDialog('import')} />
-        </div><div className="rcap">Project</div></div>
+        </div><div className="rcap">{tr('Project')}</div></div>
         <div className="rgroup"><div className="rrow">
           <RB icon="undo" label="Undo" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)" />
           <RB icon="redo" label="Redo" onClick={redo} disabled={!future.current.length} title="Redo (Ctrl+Y)" />
           <RB icon="delete" label="Delete" onClick={deleteSel} disabled={!selected.length} title="Delete selection (Del)" />
-        </div><div className="rcap">Edit</div></div>
+        </div><div className="rcap">{tr('Edit')}</div></div>
         <div className="rgroup"><div className="rrow">
           <RB icon="select" label="Select" on={tool === 'select'} onClick={() => pickTool('select')} title="Select and move (S)" />
           <RB icon="pan" label="Pan" on={tool === 'pan'} onClick={() => pickTool('pan')} title="Pan (H)" />
           <span className="rsep" />
           {(['reservoir', 'levelSource', 'junction'] as ElementKind[]).map(tb)}
-        </div><div className="rcap">Network</div></div>
+        </div><div className="rcap">{tr('Network')}</div></div>
         <div className="rgroup"><div className="rrow">
           {(['pipe', 'pump', 'turbine', 'lineValve', 'nrv', 'prv', 'psv', 'fcv', 'orifice'] as ElementKind[]).map(tb)}
-        </div><div className="rcap">Links</div></div>
+        </div><div className="rcap">{tr('Links')}</div></div>
         <div className="rgroup"><div className="rrow">
           {(['airVessel', 'airValve', 'standpipe', 'feedTank', 'anticipator', 'relief', 'blowoff', 'burstDisc'] as ElementKind[]).map(tb)}
-        </div><div className="rcap">Surge protection</div></div>
+        </div><div className="rcap">{tr('Surge protection')}</div></div>
         </div>
         <div className="rgroup pinned ai-group"><div className="rrow">
           <RB icon="ai" label="Copilot" on={showRight && right === 'ai'} onClick={() => (showRight && right === 'ai' ? setRight('props') : openCopilot())} title="AI copilot: build, review, protect, explain and report in plain words" />
           <RB icon="find" label="Review" onClick={() => aiTask(AI_TASKS.find((t) => t.id === 'review')!)} title="AI review of the model before running" />
           <RB icon="shield" label="Protect" onClick={() => aiTask(AI_TASKS.find((t) => t.id === 'protect')!)} title="AI designs the surge protection by running the options" />
           <RB icon="chat" label="Explain" onClick={() => aiTask(AI_TASKS.find((t) => t.id === 'explain')!)} disabled={!result} title="AI explains the results in plain language" />
-        </div><div className="rcap">AI</div></div>
+        </div><div className="rcap">{tr('AI')}</div></div>
         <div className="rgroup pinned"><div className="rrow">
           <RB icon="health" label="Check" onClick={() => setDialog('health')} title="Model Health Check" />
           <RB icon="setup" label="Setup" onClick={() => setDialog('setup')} title="Run Setup" />
           <RB icon="catalogue" label="Catalogues" onClick={() => setDialog('catalogues')} />
           <button className="rb run" onClick={() => run()} disabled={!!busy} title="Run (F5)"><Ic name="run" size={20} /><span>{busy ? 'Running' : stale && result ? 'Run*' : 'Run'}</span></button>
           <RB icon="report" label="Report" onClick={openReport} disabled={!result} />
-        </div><div className="rcap">Analysis</div></div>
+        </div><div className="rcap">{tr('Analysis')}</div></div>
       </div>
 
       <div className="body" style={{ gridTemplateColumns: bodyCols }}>
         <aside className="pane left" aria-hidden={!showLeft}>
           {showLeft && <>
             <div className="pane-tabs">
-              <button className={`ptab ${left === 'explorer' ? 'on' : ''}`} onClick={() => setLeft('explorer')}>Explorer</button>
-              <button className={`ptab ${left === 'operations' ? 'on' : ''}`} onClick={() => setLeft('operations')}>Operations{net.event.kind !== 'none' ? <span className="badge">{1 + (net.extraEvents?.length ?? 0)}</span> : null}</button>
-              <button className={`ptab ${left === 'library' ? 'on' : ''}`} onClick={() => setLeft('library')}>Library</button>
+              <button className={`ptab ${left === 'explorer' ? 'on' : ''}`} onClick={() => setLeft('explorer')}>{tr('Explorer')}</button>
+              <button className={`ptab ${left === 'operations' ? 'on' : ''}`} onClick={() => setLeft('operations')}>{tr('Operations')}{net.event.kind !== 'none' ? <span className="badge">{1 + (net.extraEvents?.length ?? 0)}</span> : null}</button>
+              <button className={`ptab ${left === 'library' ? 'on' : ''}`} onClick={() => setLeft('library')}>{tr('Library')}</button>
             </div>
             <div className="pane-body">
               {left === 'explorer' && <Explorer net={net} selected={selected} onSelect={select} />}
@@ -789,7 +793,7 @@ export default function App() {
           <div className="dock">
             <div className="dock-tabs">
               {([['profile', 'Profile'], ['graphs', 'Graphs'], ['checks', `Design checks${fails ? ` · ${fails}` : ''}`], ['tables', 'Data sheets'], ['cases', `Cases${net.cases?.length ? ` · ${net.cases.length}` : ''}`], ['protection', 'Protection sizing'], ['uncertainty', 'Uncertainty'], ['eps', 'Daily operation'], ['live', 'Live data'], ['log', 'Run log']] as [BottomTab, string][]).map(([k, l]) => (
-                <button key={k} className={`dtab ${bottom === k ? 'on' : ''} ${k === 'checks' && fails ? 'bad' : ''}`} onClick={() => { setBottom(k); if (dock === 'min') setDock('normal'); }}>{l}</button>
+                <button key={k} className={`dtab ${bottom === k ? 'on' : ''} ${k === 'checks' && fails ? 'bad' : ''}`} onClick={() => { setBottom(k); if (dock === 'min') setDock('normal'); }}>{tr(l)}</button>
               ))}
               <div style={{ flex: 1 }} />
               {bottom === 'profile' && dock !== 'min' && (
@@ -870,8 +874,8 @@ export default function App() {
         <aside className="pane right" aria-hidden={!showRight}>
           {showRight && <>
             <div className="pane-tabs">
-              <button className={`ptab ${right === 'props' ? 'on' : ''}`} onClick={() => setRight('props')}>Properties</button>
-              <button className={`ptab ${right === 'ai' ? 'on' : ''}`} onClick={() => setRight('ai')}><span className="ai-badge sm">AI</span> Copilot</button>
+              <button className={`ptab ${right === 'props' ? 'on' : ''}`} onClick={() => setRight('props')}>{tr('Properties')}</button>
+              <button className={`ptab ${right === 'ai' ? 'on' : ''}`} onClick={() => setRight('ai')}><span className="ai-badge sm">AI</span> {tr('Copilot')}</button>
             </div>
             <div className="pane-body" style={right === 'props' ? undefined : { display: 'none' }}><Properties net={net} setNet={setNet} selected={selected} result={result} onSelect={(r) => setSelected(r)} /></div>
             <div className="pane-body copilot-body" style={right === 'ai' ? undefined : { display: 'none' }}>

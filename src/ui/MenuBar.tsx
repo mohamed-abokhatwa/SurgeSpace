@@ -1,3 +1,4 @@
+import { tr } from '../app/i18n';
 // Menu bar (File, Edit, View, Model, Analysis, Results, Tools, Help) with keyboard shortcuts shown,
 // and the tool ribbon below it.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -24,7 +25,7 @@ export function MenuBar({ menus, right }: { menus: Menu[]; right?: ReactNode }) 
         <div key={m.label} className="menu-root">
           <button className={`menu-btn ${open === i ? 'on' : ''}`} role="menuitem" aria-haspopup="true" aria-expanded={open === i}
             onMouseDown={(e) => { e.preventDefault(); setOpen(open === i ? null : i); }}
-            onMouseEnter={() => open !== null && setOpen(i)}>{m.label}</button>
+            onMouseEnter={() => open !== null && setOpen(i)}>{tr(m.label)}</button>
           {open === i && <MenuList items={m.items} onDone={() => setOpen(null)} />}
         </div>
       ))}
@@ -43,7 +44,7 @@ function MenuList({ items, onDone }: { items: MenuItem[]; onDone: () => void }) 
           <button className="menu-item" role="menuitem" disabled={it.disabled} title={it.hint}
             onClick={() => { if (it.sub) { setSub(k); return; } it.action?.(); onDone(); }}>
             <span className="menu-check">{it.checked ? '✓' : ''}</span>
-            <span className="menu-label">{it.label}</span>
+            <span className="menu-label">{tr(it.label)}</span>
             <span className="menu-kbd">{it.sub ? '›' : it.shortcut ?? ''}</span>
           </button>
           {it.sub && sub === k && <div className="menu-sub"><MenuList items={it.sub} onDone={onDone} /></div>}

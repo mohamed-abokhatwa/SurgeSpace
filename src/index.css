@@ -410,3 +410,9 @@ table.grid td.num { text-align: right; font-family: var(--mono); }
 .copilot-input textarea { font: 13px var(--sans); margin-bottom: 6px; max-height: 200px; }
 .ribbon > .rgroup.pinned.ai-group .rb svg { color: #8b5cf6; }
 .ribbon > .rgroup.pinned + .rgroup.pinned { border-left: 1px solid var(--line); }
+
+/* ── right-to-left (Arabic interface) ── */
+[dir='rtl'] .menu-list { left: auto; right: 0; }
+[dir='rtl'] .menu-sub { left: auto; right: 100%; }
+[dir='rtl'] .mono, [dir='rtl'] .stat b, [dir='rtl'] .cell, [dir='rtl'] canvas, [dir='rtl'] svg, [dir='rtl'] pre, [dir='rtl'] textarea.mono, [dir='rtl'] .statusbar span { unicode-bidi: plaintext; }
+[dir='rtl'] .legend, [dir='rtl'] .player { direction: ltr; }
