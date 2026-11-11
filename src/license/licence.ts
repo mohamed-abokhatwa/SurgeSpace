@@ -8,7 +8,9 @@ import { CHECKIN_HOURS, CONTACT_EMAIL, LICENCE_API, PUBLIC_KEY } from './publicK
 import { adminRoute, appRoute, type Ctx } from './server/logic';
 import { emptyData, memoryStore, type MemoryData } from './server/memoryStore';
 
-export const DEMO = !PUBLIC_KEY;
+/** Demo mode: the licence server's rules run inside the app (preview pages and tests). Set by a missing key, or by
+ *  building with VITE_LICENCE_DEMO=1 — so a demo build never needs the key edited out of the source. */
+export const DEMO = !PUBLIC_KEY || (typeof import.meta.env !== 'undefined' && import.meta.env.VITE_LICENCE_DEMO === '1');
 export { CONTACT_EMAIL };
 export const APP_VERSION = '2.0.1';
 

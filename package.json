@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "node scripts/run-tests.mjs",
     "test:ui": "vite build && node tests/ui-smoke.mjs",
+    "build:demo": "vite build --mode demo --outDir dist-demo",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build"
