@@ -3,7 +3,7 @@
 # Units: SI (m, m3/s); chemical mg/L, age h, trace %. One row per report time.
 import json, os, sys, wntr
 here = os.path.dirname(os.path.abspath(__file__))
-for name in ['Net1', 'Net2', 'Net3']:
+for name in ['Net1', 'Net2', 'Net3', 'Net1rules']:
     for mode in ['file', 'AGE']:
         wn = wntr.network.WaterNetworkModel(os.path.join(here, f'{name}.inp'))
         if mode == 'AGE':

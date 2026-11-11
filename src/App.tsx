@@ -147,6 +147,7 @@ export default function App() {
   const [aiQueued, setAiQueued] = useState<{ prompt: string; label: string } | null>(null);
   const ai = useAI();
   useEffect(() => { void initAITransport(); }, []);
+  useEffect(() => { const f = (e: Event) => setToast((e as CustomEvent<string[]>).detail); window.addEventListener('surgespace-toast', f); return () => window.removeEventListener('surgespace-toast', f); }, []);
   // the last run and the model it was made for (the copilot only reads results that match the current model)
   const lastRun = useRef<{ out: RunOutput; net: Network } | null>(null);
 

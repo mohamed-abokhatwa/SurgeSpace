@@ -230,6 +230,21 @@ export interface SimpleControl {
   value?: number;
 }
 
+/** Rule-based control (EPANET [RULES]): IF … AND/OR … THEN … ELSE … PRIORITY. */
+export interface RuleCondition {
+  logic: 'if' | 'and' | 'or';
+  /** node, tank, junction, reservoir, link, pipe, pump, valve or system. */
+  object: string;
+  id?: string;
+  /** level, pressure, head, demand, flow, status, setting, time, clocktime, filltime, draintime. */
+  attribute: string;
+  op: '=' | '<>' | '<' | '>' | '<=' | '>=';
+  /** Number (m, m³/s, s for times) or a status word (open, closed, active). */
+  value: number | string;
+}
+export interface RuleAction { link: string; status?: 'open' | 'closed'; setting?: number }
+export interface ControlRule { id: string; conditions: RuleCondition[]; then: RuleAction[]; else?: RuleAction[]; priority?: number }
+
 export type QualityMode = 'none' | 'age' | 'trace' | 'chemical';
 
 /** Extended-period simulation settings. */
@@ -265,6 +280,8 @@ export interface EPSSettings {
   diffusivity?: number;
   /** Quality tolerance: water parcels closer than this in quality are merged (default 0.01, as EPANET). */
   tolerance?: number;
+  /** Rule step, s (default a tenth of the hydraulic step, as EPANET). */
+  ruleStep?: number;
 }
 
 export interface Pipe {
@@ -544,6 +561,8 @@ export interface Network {
   /** Extended-period simulation: patterns, controls and settings (daily operation, tank levels, water quality). */
   patterns?: TimePattern[];
   controls?: SimpleControl[];
+  /** Rule-based controls, checked every rule step of the extended-period run. */
+  rules?: ControlRule[];
   eps?: EPSSettings;
   /** Live and historian data: the source (no password is stored) and the tag-to-element mapping. */
   scada?: { source?: { kind: 'mqtt' | 'bridge'; url: string; topics?: string[]; username?: string }; tags: { tag: string; element: string; quantity: 'pressure' | 'head' | 'flow' | 'level' | 'status' | 'speed'; scale?: number; offset?: number }[] };

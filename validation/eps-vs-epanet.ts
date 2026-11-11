@@ -7,7 +7,7 @@ import { runEPS } from '../src/engine/eps';
 
 const dir = new URL('./data/', import.meta.url);
 type Ref = { times: number[]; head?: Record<string, number[]>; flow?: Record<string, number[]>; quality: Record<string, number[]> };
-const nets = process.argv[2] ? [process.argv[2]] : ['Net1', 'Net2', 'Net3'];
+const nets = process.argv[2] ? [process.argv[2]] : ['Net1', 'Net2', 'Net3', 'Net1rules'];
 
 export function compare(name: string, verbose = true) {
   const out: Record<string, number> = {};

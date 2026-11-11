@@ -4,7 +4,7 @@ import { runEPS, patternFactor, snapshot, tankVolume, networkAt } from '../src/e
 import { compare } from '../validation/eps-vs-epanet';
 import { defaultSettings, type Network } from '../src/engine/types';
 import { solveSteady } from '../src/engine/steady';
-import { parseInp, toInp } from '../src/engine/inp';
+import { parseInp, rulesFromText, rulesToText, toInp } from '../src/engine/inp';
 import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -112,7 +112,18 @@ const base = (): Network => ({
 
 // EPANET 2.2 on its example networks
 const lim = { head: 0.05, tankHead: 0.05, flowLps: 1 };
-for (const [name, qLim, ageLim] of [['Net1', 0.01, 0.01], ['Net2', 0.01, 0.01], ['Net3', 1, 0.5]] as const) {
+{
+  // rule-based controls: text round trip and EPANET export keep the rules
+  const net = parseInp(readFileSync(new URL('../validation/data/Net1rules.inp', import.meta.url), 'utf8')).network;
+  t('rules read from EPANET', net.rules?.length === 4 && net.rules[2].else?.[0].link === '31' && net.rules[1].conditions[1].logic === 'or');
+  const back = rulesFromText(rulesToText(net), net);
+  const norm = (x: unknown) => JSON.stringify(x, (_k, v) => (typeof v === 'number' ? +v.toFixed(4) : v));
+  t('rules text round trip', norm(back) === norm(net.rules), rulesToText(net).split('\n').slice(0, 4).join(' / '));
+  const a = runEPS(net), b = runEPS(parseInp(toInp(net)).network);
+  t('EPANET export keeps the rules', Math.max(...a.level['2'].map((x, i) => Math.abs(x - b.level['2'][i]))) < 1e-3);
+}
+
+for (const [name, qLim, ageLim] of [['Net1', 0.01, 0.01], ['Net2', 0.01, 0.01], ['Net3', 1, 0.5], ['Net1rules', 0.01, 0.01]] as const) {
   const o = compare(name, false);
   t(`${name}: heads and flows match EPANET`, o.head < lim.head && o.tankHead < lim.tankHead && o.flowLps < lim.flowLps, `head ${o.head.toFixed(3)} m, tanks ${o.tankHead.toFixed(3)} m, flow ${o.flowLps.toFixed(2)} L/s`);
   t(`${name}: quality matches EPANET (95 % of values)`, o.quality < qLim, `${o.quality.toFixed(3)}`);

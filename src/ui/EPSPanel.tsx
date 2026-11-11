@@ -3,6 +3,7 @@
 // the state at that hour.
 import { useMemo, useState } from 'react';
 import { clock, defaultEPS, type EPSResult } from '../engine/eps';
+import { rulesFromText, rulesToText } from '../engine/inp';
 import type { EPSSettings, Network, QualityMode, SimpleControl, StorageTank } from '../engine/types';
 import { Chart, type Series } from './Chart';
 import { fmtQ, uLabel, toShow, useUnits } from '../app/units';
@@ -11,6 +12,7 @@ import type { ElRef } from '../app/edit';
 type SetNet = (f: (n: Network) => Network, label?: string) => void;
 export type EPSColour = 'none' | 'pressure' | 'quality' | 'demand';
 const PAL = ['#2c7bb6', '#00a6ca', '#00ccbc', '#90eb9d', '#f9d057', '#f29e2e', '#e76818', '#d7191c'];
+const alertBox = (m: string) => window.dispatchEvent(new CustomEvent('surgespace-toast', { detail: [m] }));
 const CAT = ['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#be185d', '#65a30d'];
 
 /** Pipe colours for the map from EPS node values at report index k (average of the end nodes). */
@@ -171,6 +173,10 @@ export function EPSPanel({ net, setNet, result, busy, onRun, k, setK, colour, se
             </tbody>
           </table>
           <button className="btn small" style={{ marginTop: 6 }} disabled={!linkIds.length} onClick={() => setNet((m) => ({ ...m, controls: [...(m.controls ?? []), { link: m.pumps[0]?.id ?? linkIds[0], status: 'closed', node: tanks[0]?.id ?? m.nodes[0].id, op: 'above', value: tanks[0]?.storage ? tanks[0].storage.maxLevel - 0.5 : 30 }] }), 'Control')}>+ Control</button>
+          <div className="label">Rule-based controls{net.rules?.length ? ` · ${net.rules.length}` : ''}</div>
+          <p className="small muted" style={{ marginTop: 0 }}>EPANET rule syntax in SI (levels, heads and pressures in m, flows in L/s, times h:mm). Checked every {(e.ruleStep ?? e.hydStep / 10) / 60} min; the highest priority wins when rules disagree.</p>
+          <textarea rows={8} key={JSON.stringify(net.rules ?? [])} defaultValue={rulesToText(net)} placeholder={'RULE 1\nIF TANK T1 LEVEL BELOW 2.0\nAND SYSTEM CLOCKTIME >= 22:00\nTHEN PUMP PU1 STATUS IS OPEN\nELSE PUMP PU1 STATUS IS CLOSED\nPRIORITY 1'}
+            onBlur={(ev) => { try { const rules = rulesFromText(ev.target.value, net); const ids = new Set(linkIds); const bad = rules.flatMap((r) => [...r.then, ...(r.else ?? [])]).filter((a) => !ids.has(a.link)); if (bad.length) throw new Error(`Unknown element ${bad[0].link}`); setNet((m) => ({ ...m, rules: rules.length ? rules : undefined }), 'Rules'); } catch (err) { alertBox(`Rules not saved: ${(err as Error).message}`); } }} aria-label="Rule-based controls" />
         </div>
       )}
 

@@ -4,7 +4,7 @@
 // pressure. Water quality (age, source trace, a reacting chemical such as chlorine) is carried through the pipes
 // by Lagrangian segments with first-order bulk and wall reactions; tanks are completely mixed.
 import { solveSteady, type SteadyResult } from './steady';
-import { G, NU, area, type EPSSettings, type Network, type NetNode, type SimpleControl, type StorageTank } from './types';
+import { G, NU, area, type ControlRule, type EPSSettings, type Network, type NetNode, type RuleCondition, type SimpleControl, type StorageTank } from './types';
 
 export interface EPSResult {
   /** Report times, s. */
@@ -146,13 +146,96 @@ export function runEPS(net: Network, onProgress?: (frac: number) => void): EPSRe
     });
   };
 
+  // ── rule-based controls (EPANET semantics: premises left to right, OR only rescues a false result) ──
+  const rules = net.rules ?? [];
+  const ruleStep = e.ruleStep ?? e.hydStep / 10;
+  let lastFlows: Map<string, number> | null = null;
+  const condVal = (c: RuleCondition, heads: Map<string, number> | null): number | string => {
+    const o = c.object.toLowerCase(), a = c.attribute.toLowerCase();
+    if (o === 'system') {
+      if (a === 'time') return st.t;
+      if (a === 'clocktime') return ((((st.t + (e.startClock ?? 0)) % 86400) + 86400) % 86400);
+      if (a === 'demand') return net.nodes.reduce((s, n) => s + (n.kind === 'junction' ? (n.demand ?? 0) * patternFactor(net, n.pattern, st.t) : 0), 0);
+      return NaN;
+    }
+    const id = c.id ?? '';
+    const node = net.nodes.find((n) => n.id === id);
+    if (node) {
+      const h = st.levels.has(id) ? node.elev + st.levels.get(id)! : heads?.get(id) ?? NaN;
+      if (a === 'level') return st.levels.get(id) ?? h - node.elev;
+      if (a === 'head' || a === 'grade') return h;
+      if (a === 'pressure') return h - node.elev;
+      if (a === 'demand') return node.kind === 'junction' ? (node.demand ?? 0) * patternFactor(net, node.pattern, st.t) : 0;
+      return NaN;
+    }
+    if (a === 'flow') return lastFlows?.get(id) ?? 0;
+    if (a === 'status') {
+      const pump = net.pumps.find((p) => p.id === id), pipe = net.pipes.find((p) => p.id === id);
+      const open = st.linkOpen.get(id) ?? (pump ? pump.on : pipe ? !pipe.closed : true);
+      return open ? 'open' : 'closed';
+    }
+    if (a === 'setting') return st.setting.get(id) ?? 1;
+    return NaN;
+  };
+  const condTrue = (c: RuleCondition, heads: Map<string, number> | null) => {
+    const v = condVal(c, heads);
+    const a = c.attribute.toLowerCase();
+    if (typeof v === 'string' || typeof c.value === 'string') {
+      const x = String(c.value).toLowerCase(), y = String(v).toLowerCase();
+      const same = x === y || (x === 'active' && y === 'open');
+      return c.op === '<>' ? !same : same;
+    }
+    const x = c.value;
+    if (!Number.isFinite(v)) return false;
+    // time equality holds within the last rule step, as EPANET
+    if ((a === 'time' || a === 'clocktime') && (c.op === '=' || c.op === '<>')) {
+      const hit = x > v - ruleStep - 1e-6 && x <= v + 1e-6;
+      return c.op === '=' ? hit : !hit;
+    }
+    switch (c.op) { case '<': return v < x; case '>': return v > x; case '<=': return v <= x; case '>=': return v >= x; case '=': return Math.abs(v - x) < 1e-6; default: return Math.abs(v - x) >= 1e-6; }
+  };
+  const evalRule = (r: ControlRule, heads: Map<string, number> | null) => {
+    let result = true;
+    for (const c of r.conditions) {
+      if (c.logic === 'or') { if (!result) result = condTrue(c, heads); }
+      else { if (!result) return false; result = condTrue(c, heads); }
+    }
+    return result;
+  };
+  const applyRules = (heads: Map<string, number> | null) => {
+    if (!rules.length) return;
+    const chosen = new Map<string, { a: { link: string; status?: 'open' | 'closed'; setting?: number }; pr: number; rule: string }>();
+    for (const r of rules) {
+      const acts = evalRule(r, heads) ? r.then : r.else ?? [];
+      for (const a of acts) {
+        const pr = r.priority ?? 0;
+        const cur = chosen.get(a.link);
+        if (!cur || pr > cur.pr) chosen.set(a.link, { a, pr, rule: r.id });
+      }
+    }
+    for (const { a, rule } of chosen.values()) {
+      const before = `${st.linkOpen.get(a.link)}|${st.setting.get(a.link)}`;
+      if (a.status) st.linkOpen.set(a.link, a.status === 'open');
+      if (a.setting !== undefined) { st.setting.set(a.link, a.setting); if (!a.status && net.pumps.some((p) => p.id === a.link)) st.linkOpen.set(a.link, a.setting > 0); }
+      if (`${st.linkOpen.get(a.link)}|${st.setting.get(a.link)}` !== before) res.log.push({ t: st.t, text: `${a.link} ${a.status ?? `setting ${a.setting}`} (rule ${rule})` });
+    }
+  };
+
   let guard = 0;
-  while (st.t <= e.duration + 1e-6 && guard++ < 100000) {
+  let r!: SteadyResult;
+  let full = new Set<string>(), empty = new Set<string>();
+  let qp: { r: SteadyResult; t0: number; dt: number; tankQ: (id: string) => number; demand: Map<string, number> } | null = null;
+  let ruleOnly = false; // this step was started only to check the rules (EPANET keeps the flows unless a rule acts)
+  const stateKey = () => JSON.stringify([[...st.linkOpen], [...st.setting]]);
+  while (st.t <= e.duration + 1e-6 && guard++ < 200000) {
+    const key0 = stateKey();
     applyControls(prev?.heads ?? null);
+    if (rules.length && Math.abs(st.t / ruleStep - Math.round(st.t / ruleStep)) < 1e-6) applyRules(prev?.heads ?? null);
+    const reuse = ruleOnly && !!prev && stateKey() === key0;
+    if (wq && qp && (!reuse || st.t >= nextRep - 1e-6 || st.t >= e.duration - 1e-6)) { wq.advance(qp.r, qp.dt, qp.tankQ, qp.demand, qp.t0); qp = null; }
     // solve, closing full / empty tanks to the flow that would overfill or drain them
-    const full = new Set<string>(), empty = new Set<string>();
-    let r: SteadyResult;
-    for (let pass = 0; ; pass++) {
+    if (!reuse) full = new Set<string>(), empty = new Set<string>();
+    for (let pass = 0; !reuse; pass++) {
       r = solveSteady(snapshot(net, st, full, empty));
       res.solves++;
       let changed = false;
@@ -164,6 +247,7 @@ export function runEPS(net: Network, onProgress?: (frac: number) => void): EPSRe
       }
       if (!changed || pass > 4) break;
     }
+    lastFlows = r.flows;
     if (!r.converged) res.warnings.push(`Hydraulics did not fully converge at ${clock(st.t)}.`);
     for (const w of r.warnings) if (!res.warnings.includes(w)) res.warnings.push(w);
     prev = r;
@@ -199,6 +283,8 @@ export function runEPS(net: Network, onProgress?: (frac: number) => void): EPSRe
     const toPat = ps - ((st.t + (e.patternStart ?? 0)) % ps);
     if (toPat > 1e-6) dt = Math.min(dt, toPat);
     dt = Math.min(dt, nextRep - st.t > 1e-6 ? nextRep - st.t : rep, e.duration - st.t);
+    let nr = Infinity;
+    if (rules.length) { nr = (Math.floor(st.t / ruleStep + 1e-9) + 1) * ruleStep - st.t; if (nr <= 1e-6) nr = Infinity; }
     for (const c of controls) {
       if (c.at !== undefined && c.at > st.t + 1e-6) dt = Math.min(dt, c.at - st.t);
       if (c.clock !== undefined) { const day = (((st.t + (e.startClock ?? 0)) % 86400) + 86400) % 86400; const d = (c.clock - day + 86400) % 86400; if (d > 1e-6) dt = Math.min(dt, d); }
@@ -216,12 +302,14 @@ export function runEPS(net: Network, onProgress?: (frac: number) => void): EPSRe
       }
     }
     // pressure controls on junctions: EPANET checks them at each step only (no interpolation)
-    dt = Math.max(dt, 1e-3);
+    ruleOnly = nr < dt - 1e-6;
+    dt = Math.max(Math.min(dt, nr), 1e-3);
 
     // advance
     if (wq) {
-      const snap = snapshot(net, st);
-      wq.advance(r, dt, (id) => (full.has(id) || empty.has(id) ? 0 : netInflow(net, r, id)), new Map(snap.nodes.map((n) => [n.id, n.demand ?? 0])), st.t);
+      // water quality runs over whole hydraulic periods (as EPANET): rule checks that change nothing extend the period
+      if (!qp) { const snap = snapshot(net, st); const fu = full, em = empty, rr = r; qp = { r: rr, t0: st.t, dt: 0, tankQ: (id) => (fu.has(id) || em.has(id) ? 0 : netInflow(net, rr, id)), demand: new Map(snap.nodes.map((n) => [n.id, n.demand ?? 0])) }; }
+      qp.dt += dt;
     }
     for (const n of tanks) {
       const s = n.storage!;

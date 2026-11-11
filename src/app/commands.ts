@@ -11,6 +11,7 @@ import { allEvents, area, defaultSettings, type Network, type NetNode, type Simp
 import { defaultEPS, runEPS, type EPSResult } from '../engine/eps';
 import { applyDesign, candidates, optimiseProtection, type Design, type OptVar } from '../engine/optimise';
 import { skeletonise } from '../engine/skeleton';
+import { rulesFromText } from '../engine/inp';
 import { FLUIDS } from './catalogues';
 import { addLink, addPipe, deleteElements, insertOnPipe, renameElement, uniqueId, DEFAULTS, type ElRef } from './edit';
 import { deviceDefaults, nodeDevices, removeDevice, type ElementKind } from './elements';
@@ -462,6 +463,19 @@ export const COMMANDS: Command[] = [
       });
       ctx.apply({ ...net, controls: out }, 'AI: controls');
       return { controls: out.length };
+    },
+  },
+  {
+    name: 'set_rules', mutates: true,
+    description: 'Replace the rule-based controls of the extended-period run, written in EPANET rule syntax with SI values (levels, heads, pressures m; flows L/s; times h:mm). Example: "RULE 1\nIF TANK T1 LEVEL BELOW 2\nAND SYSTEM CLOCKTIME >= 22:00\nTHEN PUMP PU1 STATUS IS OPEN\nPRIORITY 1".',
+    params: obj({ text: str('Rules text') }, ['text']),
+    run: async (ctx, a) => {
+      const net = ctx.getNet();
+      const rules = rulesFromText(String(a.text), net);
+      const ids = new Set([...net.pipes.map((p) => p.id), ...net.pumps.map((p) => p.id), ...net.valves.map((v) => v.id)]);
+      for (const r of rules) for (const x of [...r.then, ...(r.else ?? [])]) if (!ids.has(x.link)) fail(`Rule ${r.id}: no pump, pipe or valve "${x.link}".`);
+      ctx.apply({ ...net, rules: rules.length ? rules : undefined }, 'AI: rules');
+      return { rules: rules.length };
     },
   },
   {

@@ -2,7 +2,7 @@
 // get sensible defaults the user reviews afterwards.
 import { valveArea } from './devices';
 import { estimateInertia } from './hydraulics';
-import { defaultSettings, type EPSSettings, type Network, type NetNode, type Pipe, type Pump, type SimpleControl, type TimePattern, type Valve } from './types';
+import { defaultSettings, type ControlRule, type RuleCondition, type EPSSettings, type Network, type NetNode, type Pipe, type Pump, type SimpleControl, type TimePattern, type Valve } from './types';
 
 /** EPANET time text ("24:00", "1:30:00", "0:05", "6", "5 MIN", "12 AM") → seconds. */
 export function inpTime(parts: string[]): number {
@@ -236,7 +236,12 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
     } else { notes.push(`Control "${r.join(' ')}" was not understood and was skipped.`); continue; }
     controls.push(c);
   }
-  if (sec('RULES').length) notes.push('Rule-based controls ([RULES]) are not supported yet; they were skipped.');
+  // rule-based controls
+  const rules = parseRuleRows(sec('RULES'), {
+    level: lf, pressure: us ? 0.70307 : 1, flow: qf,
+    setting: (id, v) => { const valve = valves.find((x) => x.id === id); return valve?.control ? (valve.control.type === 'FCV' ? v * qf : v * (us ? 0.70307 : 1)) : v; },
+  });
+  if (rules.length) notes.push(`${rules.length} rule-based control(s) read.`);
   const title = sec('TITLE').map((r) => r.join(' ')).join(' ').trim();
   return {
     network: {
@@ -247,6 +252,7 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
       settings: { ...defaultSettings(), friction },
       ...(patterns.length ? { patterns } : {}),
       ...(controls.length ? { controls } : {}),
+      ...(rules.length ? { rules } : {}),
       ...(eps.duration > 0 || eps.quality !== 'none' || patterns.length || nodes.some((n) => n.storage) ? { eps: { ...eps, duration: eps.duration || 86400 } } : {}),
     },
     notes,
@@ -289,6 +295,7 @@ export function toInp(net: Network): string {
       L.push(`LINK ${c.link} ${act} ${cond}`);
     }
   }
+  if (net.rules?.length) L.push('', '[RULES]', rulesToText(net));
   const e = net.eps;
   const hms = (t: number) => `${Math.floor(t / 3600)}:${String(Math.round((t % 3600) / 60)).padStart(2, '0')}`;
   if (e) {
@@ -307,4 +314,64 @@ export function toInp(net: Network): string {
   for (const n of net.nodes) L.push(`${n.id}  ${n.x}  ${n.y}`);
   L.push('', '[END]');
   return L.join('\n');
+}
+
+/** Parse EPANET rule lines (already split into words). `u` converts values to SI. */
+export function parseRuleRows(rows: string[][], u: { level: number; pressure: number; flow: number; setting: (id: string, v: number) => number }): ControlRule[] {
+  const rules: ControlRule[] = [];
+  let rl: ControlRule | null = null, part: 'if' | 'then' | 'else' = 'if';
+  const relop = (w: string): RuleCondition['op'] => ({ '=': '=', IS: '=', '<>': '<>', NOT: '<>', '<': '<', BELOW: '<', '>': '>', ABOVE: '>', '<=': '<=', '>=': '>=' } as Record<string, RuleCondition['op']>)[w.toUpperCase()] ?? '=';
+  for (const r of rows) {
+    const k0 = r[0].toUpperCase();
+    if (k0 === 'RULE') { rl = { id: r[1], conditions: [], then: [] }; rules.push(rl); part = 'if'; continue; }
+    if (!rl) continue;
+    if (k0 === 'PRIORITY') { rl.priority = Number(r[1]); continue; }
+    if (k0 === 'THEN' || k0 === 'ELSE') part = k0 === 'THEN' ? 'then' : 'else';
+    if (k0 === 'IF') part = 'if';
+    if (part === 'if' && (k0 === 'IF' || k0 === 'AND' || k0 === 'OR')) {
+      const obj = r[1].toUpperCase();
+      const sys = obj === 'SYSTEM';
+      const id = sys ? undefined : r[2];
+      const attr = (sys ? r[2] : r[3]).toLowerCase();
+      const op = relop(sys ? r[3] : r[4]);
+      const rest = sys ? r.slice(4) : r.slice(5);
+      let value: number | string;
+      if (attr === 'time' || attr === 'clocktime') value = inpTime(rest);
+      else if (attr === 'status') value = rest[0].toLowerCase();
+      else {
+        const v = Number(rest[0]);
+        value = attr === 'level' || attr === 'head' || attr === 'grade' ? v * u.level : attr === 'pressure' ? v * u.pressure : attr === 'demand' || attr === 'flow' ? v * u.flow : attr === 'setting' && id ? u.setting(id, v) : v;
+      }
+      rl.conditions.push({ logic: k0.toLowerCase() as 'if' | 'and' | 'or', object: obj.toLowerCase(), ...(id ? { id } : {}), attribute: attr, op, value });
+      continue;
+    }
+    if ((part === 'then' || part === 'else') && (k0 === 'THEN' || k0 === 'ELSE' || k0 === 'AND')) {
+      const id = r[2], attr = r[3].toUpperCase(), val = r[5] ?? r[4];
+      const a = attr === 'STATUS' ? { link: id, status: (val.toUpperCase() === 'OPEN' ? 'open' : 'closed') as 'open' | 'closed' } : { link: id, setting: u.setting(id, Number(val)) };
+      if (part === 'then') rl.then.push(a); else (rl.else ??= []).push(a);
+    }
+  }
+  return rules;
+}
+
+/** Rules as EPANET text in SI (levels, heads and pressures in m, flows in L/s, times as h:mm). */
+export function rulesToText(net: Network): string {
+  const hm = (t: number) => `${Math.floor(t / 3600)}:${String(Math.round((t % 3600) / 60)).padStart(2, '0')}`;
+  const opw: Record<string, string> = { '=': '=', '<>': '<>', '<': '<', '>': '>', '<=': '<=', '>=': '>=' };
+  const setOut = (id: string, v: number) => +(net.valves.find((x) => x.id === id)?.control?.type === 'FCV' ? v * 1000 : v).toFixed(6);
+  const kindOf = (id: string) => (net.pumps.some((p) => p.id === id) ? 'PUMP' : net.valves.some((v) => v.id === id) ? 'VALVE' : 'PIPE');
+  const val = (c: RuleCondition) => (typeof c.value === 'string' ? c.value.toUpperCase() : c.attribute === 'time' || c.attribute === 'clocktime' ? hm(c.value) : c.attribute === 'flow' || c.attribute === 'demand' ? +(c.value * 1000).toFixed(4) : +c.value.toFixed(4));
+  return (net.rules ?? []).map((r) => [
+    `RULE ${r.id}`,
+    ...r.conditions.map((c) => `${c.logic.toUpperCase()} ${c.object.toUpperCase()}${c.id ? ` ${c.id}` : ''} ${c.attribute.toUpperCase()} ${opw[c.op]} ${val(c)}`),
+    ...r.then.map((a, i) => `${i ? 'AND' : 'THEN'} ${kindOf(a.link)} ${a.link} ${a.status ? `STATUS IS ${a.status.toUpperCase()}` : `SETTING IS ${setOut(a.link, a.setting!)}`}`),
+    ...(r.else ?? []).map((a, i) => `${i ? 'AND' : 'ELSE'} ${kindOf(a.link)} ${a.link} ${a.status ? `STATUS IS ${a.status.toUpperCase()}` : `SETTING IS ${setOut(a.link, a.setting!)}`}`),
+    ...(r.priority !== undefined ? [`PRIORITY ${r.priority}`] : []),
+  ].join('\n')).join('\n\n');
+}
+
+/** Read rules typed in SI (as written by rulesToText). */
+export function rulesFromText(text: string, net: Network): ControlRule[] {
+  const rows = text.split(/\r?\n/).map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean).map((l) => l.split(/\s+/));
+  return parseRuleRows(rows, { level: 1, pressure: 1, flow: 1e-3, setting: (id, v) => (net.valves.find((x) => x.id === id)?.control?.type === 'FCV' ? v * 1e-3 : v) });
 }
