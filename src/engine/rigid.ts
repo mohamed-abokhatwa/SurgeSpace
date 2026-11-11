@@ -31,6 +31,8 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   let dt = opt.dtMax ?? 0.1;
   for (const e of evs) if (e.duration && e.duration > 0) dt = Math.min(dt, Math.max(e.duration / 50, 0.005));
   if (evs.some((e) => e.kind === 'pumpTrip' && (e.pumpMode ?? 'trip') === 'trip')) dt = Math.min(dt, 0.02);
+  // motor run-up takes a fraction of a second to a few seconds
+  if (evs.some((e) => e.pumpMode === 'start' && e.targets.some((id) => net.pumps.find((p) => p.id === id)?.motor))) dt = Math.min(dt, 0.01);
   const steps = Math.ceil(st.duration / dt);
   for (const n of nodes) {
     if (n.airValve && !n.airValve.treatAsJunction) warnings.push(`Air valve at ${n.id} is not modelled by the rigid-column engine (no column separation).`);
@@ -167,7 +169,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
       const ev = pumpEv.get(p.id), s = pumpS[k];
       if (!ev || t < ev.start) return;
       if (ev.pumpMode === 'start' && net.pumps[k].motor) {
-        if (!s.motorOn) { tNow = t - dt; s.motorOn = true; s.t0 = ev.start; s.on = true; s.tripped = true; s.T = torque(k, links[net.pipes.length + k].Q, s.alpha); links[net.pipes.length + k].closed = false; }
+        if (!s.motorOn && t - dt >= ev.start - 1e-9) { tNow = t - dt; s.motorOn = true; s.t0 = ev.start; s.on = true; s.tripped = true; s.T = torque(k, links[net.pipes.length + k].Q, s.alpha); links[net.pipes.length + k].closed = false; }
       } else if (ev.pumpMode === 'start') { s.on = true; s.alphaSet = Math.min(1, (t - ev.start) / Math.max(ev.duration ?? 0, 1e-9)); s.alpha = s.alphaSet; links[net.pipes.length + k].closed = false; }
       else if (ev.pumpMode === 'ramp') { s.alphaSet = Math.max(0, 1 - (t - ev.start) / Math.max(ev.duration ?? 0, 1e-9)); s.alpha = s.alphaSet; }
       else if (s.on && !s.tripped) s.tripped = true;

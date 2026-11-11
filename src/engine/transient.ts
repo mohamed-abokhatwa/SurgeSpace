@@ -1080,8 +1080,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     elements.forEach((e) => {
       const ev = e.kind === 'pump' ? pumpEv.get(e.ids[0]) : undefined;
       if (e.kind === 'pump' && ev && ev.pumpMode === 'start' && t >= ev.start && e.motor) {
-        // motor start: the speed comes from the torque balance (motor torque curve, pump torque, inertia)
-        if (!e.motor.on) {
+        // motor start: the speed comes from the torque balance (motor torque curve, pump torque, inertia); the motor is
+        // switched on at the start time, so the first step it drives is the one that begins there
+        if (!e.motor.on && t - dt >= ev.start - 1e-9) {
           e.motor.on = true;
           e.motor.t0 = ev.start;
           e.on = true;

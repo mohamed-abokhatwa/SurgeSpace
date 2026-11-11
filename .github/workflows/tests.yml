@@ -25,6 +25,7 @@ jobs:
       - run: npx tsx validation/control-valves-vs-epanet.ts
       - run: npx tsx validation/examples-baseline.ts
       - run: npx tsx validation/pda-vs-epanet.ts
+      - run: pip install scipy && npx tsx validation/ode-check.ts --assert
       - run: pip install ezdxf && npx tsx validation/dxf-check.ts /tmp/s.dxf && python3 validation/dxf-audit.py /tmp/s.dxf
 
   ui:
