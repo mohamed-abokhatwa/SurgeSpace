@@ -36,6 +36,7 @@ jobs:
       - run: npx tsx tests/geo.test.ts
       - run: npx tsx tests/governor.test.ts
       - run: npx tsx tests/cases.test.ts
+      - run: npx tsx tests/wizard.test.ts
       - run: npx playwright install --with-deps chromium
       - run: npm run build && node tests/ui-smoke.mjs
       - run: npx tsx validation/control-valves-vs-epanet.ts

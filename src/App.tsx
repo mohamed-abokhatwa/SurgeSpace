@@ -28,6 +28,7 @@ import { LivePanel } from './ui/LivePanel';
 import { MapDialog } from './ui/MapDialog';
 import { LibraryPanel } from './ui/LibraryPanel';
 import { ScriptDialog } from './ui/ScriptDialog';
+import { WizardDialog } from './ui/WizardDialog';
 import { EPSPanel, epsPipeColours, type EPSColour } from './ui/EPSPanel';
 import { clock, networkAt, type EPSResult } from './engine/eps';
 import { skeletonise } from './engine/skeleton';
@@ -50,7 +51,7 @@ import { AIAccountsDialog, CopilotPanel } from './ui/AIPanel';
 type LeftTab = 'explorer' | 'operations' | 'library';
 type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log' | 'eps' | 'live';
 interface UncertaintyOut { runs: { label: string; maxHead: number; minPressure: number }[]; envelopes: PipeEnvelope[]; spread: { maxHead: [number, number]; minPressure: [number, number] } }
-type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai' | 'map' | 'script';
+type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai' | 'map' | 'script' | 'wizard';
 
 const Logo = () => (
   <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
@@ -472,6 +473,7 @@ export default function App() {
     { label: 'File', items: [
       { label: 'New model', shortcut: 'Ctrl+N', action: newProject },
       { label: 'Open project…', shortcut: 'Ctrl+O', action: openProject },
+      { label: 'New model wizard…', action: () => setDialog('wizard') },
       { label: 'Open example', sub: exItems },
       { label: 'Recover autosaved model', action: recover },
       'sep',
@@ -797,6 +799,7 @@ export default function App() {
                 <div className="row" style={{ gap: 6, justifyContent: 'center' }}>
                   <button className="btn small primary" onClick={() => pickTool('reservoir')}>Place a source</button>
                   <button className="btn small" onClick={() => setDialog('import')}>Import…</button>
+                  <button className="btn small" onClick={() => setDialog('wizard')}>Wizard…</button>
                 </div>
               </div>
             )}
@@ -924,6 +927,18 @@ export default function App() {
         onSaveInfo={(info) => setNetRaw((n) => ({ ...n, report: info }))} onClose={() => setDialog(null)} onDraftAI={() => { setDialog(null); aiTask(AI_TASKS.find((t) => t.id === 'report')!); }} />}
       {dialog === 'ai' && <AIAccountsDialog onClose={() => setDialog(null)} />}
       {dialog === 'script' && <ScriptDialog ctx={aiCtx} onClose={() => setDialog(null)} />}
+      {dialog === 'wizard' && <WizardDialog onClose={() => setDialog(null)} onBuilt={(n, notes, go) => void (async () => {
+        setProject(n, 'New model wizard');
+        setRoute(defaultRoute(n)); setFitKey((k) => k + 1); setMode('plain'); setTool('select');
+        setToast(['Model built by the wizard (Undo removes it):', ...notes]);
+        if (!go) return;
+        await run(n);
+        if (n.pumps.length && n.nodes.some((x) => x.id === 'PS-D') && lic.features.protectionSizing) {
+          setBottom('protection'); if (dock === 'min') setDock('normal');
+          setBusy('Sizing air vessel…');
+          try { const o = await call<{ sizing: VesselSizing }>({ type: 'sizeVessel', net: n, node: 'PS-D' }, (m) => setBusy(`Sizing air vessel · ${m}`)); setSizing(o.sizing); } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
+        }
+      })()} />}
       {dialog === 'map' && <MapDialog net={net} setNet={setNet} onClose={() => setDialog(null)} onToast={setToast} />}
       {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} onImport={(n, notes) => { setDialog(null); load(n, notes); }} />}
       {dialog === 'setup' && <RunSetupDialog net={net} setNet={setNet} onClose={() => setDialog(null)} defaults={defaults} setDefaults={setDefaults} />}

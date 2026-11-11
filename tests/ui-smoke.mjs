@@ -39,6 +39,14 @@ try {
     await p.keyboard.press('Escape'); await p.waitForTimeout(100);
     t(`dialog ${item}`, open > 0);
   }
+  // new model wizard: four steps, then build (without the follow-up run)
+  await p.locator('.menu-btn', { hasText: /^File$/ }).click();
+  await p.locator('.menu-item', { hasText: 'New model wizard' }).click();
+  for (let k = 0; k < 3; k++) { await p.getByRole('button', { name: 'Next' }).click(); await p.waitForTimeout(80); }
+  await p.locator('.modal input[type=checkbox]').uncheck();
+  await p.getByRole('button', { name: 'Build the model' }).click();
+  await p.waitForTimeout(800);
+  t('wizard builds a model', (await p.locator('.modal').count()) === 0 && (await p.locator('text=Model built by the wizard').count()) > 0);
   // daily operation on the Town example
   await p.locator('.menu-btn', { hasText: /^File$/ }).click();
   await p.locator('.menu-item', { hasText: 'Open example' }).hover();
