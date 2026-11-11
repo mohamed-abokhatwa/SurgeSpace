@@ -29,3 +29,4 @@ echo "== Benchmark Tnet3"; npx tsx validation/vs-benchmark-tnet3.ts "$NETS/Tnet3
 echo "== EPANET steady"; npx tsx validation/steady-vs-epanet.ts "$REF/epanet_ref.json" | grep -E "head difference"
 echo "== EPANET control valves"; npx tsx validation/control-valves-vs-epanet.ts | grep -E "worst"
 echo "== TSNet Net3"; npx tsx validation/transient-vs-tsnet.ts "$REF/Net3_valve.inp" "$REF/Net3_tsnet.json" | grep -E "^(VU|VD|149|153) "
+if /usr/bin/python3.12 -c "import qgis.core" 2>/dev/null; then echo "== QGIS plug-in (inside QGIS)"; QT_QPA_PLATFORM=offscreen /usr/bin/python3.12 plugins/qgis/tests/test_plugin.py 2>/dev/null | grep -E "FAIL|passed"; fi

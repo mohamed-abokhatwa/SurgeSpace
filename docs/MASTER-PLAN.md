@@ -27,7 +27,7 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [x] S0.1 Command registry (typed commands with parameter schemas, used by UI, scripts and AI)
 - [x] S0.2 Element field schema (first version: used by AI tools and validation)
 - [x] S0.3 Project file versioning and upgrade of old files
-- [ ] S0.4 Central state store; properties and data sheets generated from the schema
+- [~] S0.4 Data sheets with every schema field and bulk edit of any schema field on a selection (done); the hand-built property groups stay (they carry previews and calculators); a separate central store was not needed — one project state with undo serves the canvas, panels, copilot and scripts
 - [x] S0.5 Automated tests in CI for every engine and a click-through UI smoke test (menus, panels, dialogs, runs, Arabic) with Playwright
 
 ### Phase 2 — AI release 1 (brought forward)
@@ -35,43 +35,43 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [x] S2.2 Copilot panel: builds and edits models through the command registry, runs the engines, reads results; every step listed and undoable
 - [x] S2.3 One-click AI tasks: explain results, review model, design protection, review daily operation, write the report narrative
 - [x] S2.4 Read my documents: attach PDF or image; values extracted into the model for confirmation
-- [~] S2.5 Voice input (where the system offers speech recognition) and conversation saved with the project (done); streaming replies (not yet)
+- [x] S2.5 Voice input, conversation saved with the project, streaming replies (Anthropic, OpenAI-compatible, Gemini; falls back to whole answers)
 
 ### Phase 1 — Engines to professional grade
 - [x] Engine choice: wave engine (method of characteristics, column separation) and rigid-column engine (mass oscillation, slow events) — checked against Jaeger's surge-tank formula and against each other
 - [x] S1.1 Four-quadrant pumps: generic characteristic from the pump curve, or the manufacturer's Suter data; reverse flow and reverse rotation
-- [~] S1.2 Variable-speed drives with PI pressure control (done); motor start-up torque curves (not yet)
+- [x] S1.2 Variable-speed drives with PI pressure control; motor start-up from torque–speed curves (direct on line, star–delta, soft starter) in both engines
 - [x] S1.3 Extended-period simulation: storage tanks, demand and head patterns, simple and rule-based controls, surge run from any hour — matches EPANET 2.2 on Net1/Net2/Net3 and a rules network (heads within 0.04 m)
-- [~] S1.4 Throttle, general-purpose and pressure-breaker valves (done, validated against EPANET); non-slam (three-stage) air valves; throttled tanks (in-/out-flow losses); variable-area surge tanks in both engines (done); differential surge tanks (not yet)
+- [x] S1.4 Throttle, general-purpose and pressure-breaker valves (done, validated against EPANET); non-slam (three-stage) air valves; throttled tanks (in-/out-flow losses); variable-area surge tanks in both engines (done); differential (Johnson) surge tanks in both engines (done)
 - [x] S1.5 Pipe forces for anchor and support design (checked against ρ·a·V·A)
-- [~] S1.6 Turbines: speed governor (PI on speed, rate-limited gates) on load rejection (done); turbine four-quadrant characteristics (not yet)
+- [x] S1.6 Turbines: speed governor (PI on speed, rate-limited gates); runner characteristics (Francis low/high specific speed, Kaplan, Pelton or a table) with the speed in the loop
 - [x] S1.7 Viscoelastic pipe model (PE, PVC): Kelvin–Voigt creep, stable implicit coupling; damping and period lengthening checked (indicative HDPE values; calibrate per pipe)
 - [x] S1.8 10,000-pipe networks (steady 2 s, surge in seconds at the default reach budget; `validation/large-network.ts`); cases run in parallel on spare cores
 - [x] S1.9 Validation: EPANET, TSNet, benchmark and textbook checks run in CI; summary in `docs/THEORY-AND-VALIDATION.md`
 
 ### Phase 3 — Professional workspace depth
-- [~] S3.1 Results of other cases overlaid on the profile (done); cases stored as differences from a parent (not yet: cases are full copies)
+- [x] S3.1 Results of other cases overlaid on the profile; child cases stored as differences from a parent (inherit later parent changes; detach; files keep only the differences)
 - [x] S3.2 Street / satellite / topographic basemaps from web tiles (UTM or Web Mercator, exact resampling); node elevations and long sections from terrain data
 - [x] S3.3 GIS import with field mapping (GeoJSON); export to GIS (GeoJSON), CAD (DXF) and Excel (.xlsx results workbook)
 - [x] S3.4 Queries and selection sets, colour-by themes, notes on the drawing, drawing to scale (SVG A3/A1 with title block)
 - [x] S3.5 Libraries: pumps, valves, air valves, vessels, pipe types (generic air valves and pipe types included; export/import to share)
-- [~] S3.6 Fix-it buttons and Fix all on health-check findings (done); guided wizards (the copilot covers guided building; dedicated wizards not yet)
+- [x] S3.6 Fix-it buttons and Fix all on health-check findings; New model wizard (pumped or gravity main from a long section, then run and size a vessel)
 
 ### Phase 5 — Integrations and utility features
 - [~] S5.1 AutoCAD / BricsCAD plug-in (AutoLISP: SSEXPORT, SSRESULTS) — written, not yet tested inside AutoCAD
 - [~] S5.2 MicroStation — through DXF (no plug-in needed); DXF export tested by reading it back
-- [~] S5.3 QGIS plug-in and ArcGIS Pro toolbox (Python) — written and syntax-checked, not yet tested inside QGIS / ArcGIS Pro
+- [~] S5.3 QGIS plug-in — tested inside QGIS 3.34 (headless, in CI): export, import by SurgeSpace, results as graduated layers (done); ArcGIS Pro toolbox — written and syntax-checked, needs ArcGIS Pro (arcpy) to test
 - [x] S5.4 Live SCADA: MQTT over WebSocket (tested against a real broker), OPC UA and Modbus TCP through the SurgeSpace data bridge (tested against local servers), historian CSV, tag mapping, set the model to the live state, compare the model with field data
 - [x] S5.5 Water quality: age, source trace, chlorine (bulk and wall) — matches EPANET 2.2 (chlorine within 0.003 mg/L on Net1)
 - [x] S5.6 Network skeletonisation (series merge with profile points kept; optional dead-end trimming)
-- [~] S5.7 Optimisation: least-cost protection (vessels, air valves) by genetic algorithm over full surge runs (done); pipe and class selection (not yet)
+- [x] S5.7 Optimisation: least-cost protection (vessels, air valves) with pipe pressure class or diameter selection, by genetic algorithm over full surge runs
 
 ### Phase 4 — AI release 2 and documentation
 - [x] S4.1 Calibration: model vs field data statistics and automatic calibration of roughness (all pipes or per material) and demand
 - [x] S4.2 Scenario scoping by AI (copilot task; creates the cases with create_case and set_operations)
 - [x] S4.3 Script console (JavaScript over every command) and the command API reference (`docs/API.md`)
 - [x] S4.4 User manual, theory and validation manual, tutorials (`docs/`); new sample Town supply
-- [~] S4.5 Arabic report (done), Arabic interface for menus, ribbon and tabs with right-to-left layout (done; panel contents mostly English); shared cloud projects (not yet)
+- [~] S4.5 Arabic report (done), Arabic interface for menus, ribbon and tabs with right-to-left layout and panel and dialog contents (done; long help sentences stay English); shared cloud projects (not yet: needs a hosted service and accounts)
 
 ## Slice log
 - **Slice 1 (branch `v3-program`, 11 Nov 2026): Phase 0 S0.1–S0.3 + AI release 1 S2.1–S2.4.**

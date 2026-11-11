@@ -41,6 +41,17 @@ jobs:
       - run: npm run build && node tests/ui-smoke.mjs
       - run: npx tsx validation/control-valves-vs-epanet.ts
 
+  qgis-plugin:
+    # the QGIS plug-in, run inside a real (headless) QGIS
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-qgis qgis-providers
+      - run: QT_QPA_PLATFORM=offscreen /usr/bin/python3 plugins/qgis/tests/test_plugin.py
+
   windows-store:
     needs: test
     runs-on: windows-latest
