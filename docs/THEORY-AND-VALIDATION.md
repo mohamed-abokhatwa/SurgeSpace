@@ -1,0 +1,53 @@
+# SurgeSpace theory and validation
+
+## 1. Steady state
+Global gradient algorithm (Todini–Pilati), as EPANET: Darcy–Weisbach (Swamee–Jain / laminar) or Hazen–Williams
+friction, minor losses, pump curves as EPANET interprets them (one point, three points, multi-point), control valves
+(PRV, PSV, FCV) by status iteration, pressure-breaker and general-purpose valves, non-return valves, variable-speed
+pumps whose speed is found (secant) to meet a pressure set point.
+
+## 2. Wave engine (method of characteristics)
+- Characteristic equations on a fixed grid; one time step for the whole network, pipe wave speeds adjusted within a
+  tolerance (default 0.5 %) and reported; very short pipes become rigid columns.
+- Column separation: discrete gas cavity model (free gas fraction 10⁻⁷ by default), solved in closed form at every
+  section, so vapour cavities form and collapse without spurious spikes.
+- Unsteady friction: Brunone–Vítkovský with Vardy's shear decay coefficient.
+- Viscoelastic pipe walls (PE, PVC): Kelvin–Voigt creep elements; the retarded strain is integrated exactly over the
+  step and implicitly in the new head inside the cavity model, so it stays stable at any compliance.
+- Boundary conditions solved implicitly with the connected characteristics: pumps (homologous head and torque,
+  inertia run-down, controlled ramps, starts, variable-speed PI control), four-quadrant pumps (generic odd/even form
+  fitted to the pump curve, or tabulated Suter WH/WB), valves (stroke laws, manufacturer curves, active control
+  valves with response time), check valves (ideal, delay, reverse velocity, dynamic characteristic), air vessels
+  (polytropic gas, shape, bladder, dip tube, bypass), air valves (isentropic air flow, three-stage, curves), open
+  and one-way tanks, anticipator, relief, outlets and burst discs, turbines (gate operation and speed).
+- Slams at check valves and air valves are detected and reported with the Joukowsky estimate and the computed rise.
+
+## 3. Rigid-column engine
+L/(gA)·dQ/dt = ΔH − losses for each pipe, continuity at the nodes, pump speed from the torque balance and storage
+devices (vessels, tanks) — solved together by Newton's method at each implicit step. No pressure waves.
+
+## 4. Extended period and water quality
+Sequence of steady states with tank level integration, pattern steps, simple controls (time, clock, level,
+pressure) with the step cut exactly at the level, rule-based controls with EPANET's rule step and premise logic,
+full/empty tank handling. Water quality by Lagrangian segments (EPANET's method): age, trace, first-order bulk and
+wall reactions with mass transfer (Sherwood number), completely mixed tanks, boosters and source concentrations.
+
+## 5. Validation (run in continuous integration unless a script is named)
+| Check | Reference | Result |
+|---|---|---|
+| Steady heads and flows | EPANET 2.2 | see `validation/steady-vs-epanet.ts` (needs the reference folder) |
+| PRV, PSV, FCV, PBV, GPV, TCV | EPANET 2.2 | heads within 0.003 m, flows within 0.01 L/s |
+| Extended period, Net1/Net2/Net3 | EPANET 2.2 | heads within 0.04 m |
+| Rule-based controls (Net1 with four rules) | EPANET 2.2 | heads within 0.008 m |
+| Chlorine, Net1 | EPANET 2.2 | within 0.003 mg/L |
+| Water age, Net1/Net2/Net3 | EPANET 2.2 | 95 % of values within 0.2 h |
+| Transient, Net3 valve closure | TSNet | see `validation/transient-vs-tsnet.ts` |
+| Transient benchmarks Tnet0, Tnet3 | published benchmark results | see `validation/README.md` |
+| Joukowsky rise, wave period, line packing | closed form | engine tests |
+| Surge tank mass oscillation | Jaeger's formula; wave engine | within 5 %; engines agree within 1 % |
+| Pipe force on a straight pipe | ρ·a·V·A | within 12 % (line packing) |
+| Variable-speed drive | set point | holds the pressure in steady state and after a demand step |
+| Calibration | synthetic field data | recovers roughness ×3 and demand ×1.2 |
+| UTM conversion | PROJ | within 0.2 mm |
+
+Reference data and generators: `validation/data/` (WNTR scripts and JSON results).
