@@ -21,53 +21,55 @@ Goal: a professional surge analysis product that matches the market-leading tool
 5. **Prove it.** Every engine feature ships with a benchmark.
 
 ## Phases and slices (status)
+Legend: [x] done and tested · [~] partly done, or written but not yet tested inside the host program · [ ] not started
 
 ### Phase 0 — Foundations
 - [x] S0.1 Command registry (typed commands with parameter schemas, used by UI, scripts and AI)
 - [x] S0.2 Element field schema (first version: used by AI tools and validation)
 - [x] S0.3 Project file versioning and upgrade of old files
 - [ ] S0.4 Central state store; properties and data sheets generated from the schema
-- [ ] S0.5 Automated click-through tests in CI; benchmark harness on every change
+- [~] S0.5 Automated tests in CI for every engine (done); click-through UI tests in CI (not yet; run by hand with Playwright)
 
 ### Phase 2 — AI release 1 (brought forward)
-- [x] S2.1 AI accounts: provider registry, encrypted keys, test connection, AI badge and connect card
-- [x] S2.2 Copilot panel: builds and edits models through the command registry, runs the engine, reads results; every step listed and undoable
-- [x] S2.3 One-click AI tasks: explain results, review model, design protection, write the report narrative
-- [x] S2.4 Read my documents: attach PDF or image (datasheet, long section, table); values extracted into the model for confirmation
+- [x] S2.1 AI accounts: 13 providers, encrypted keys, test connection, AI badge and connect card
+- [x] S2.2 Copilot panel: builds and edits models through the command registry, runs the engines, reads results; every step listed and undoable
+- [x] S2.3 One-click AI tasks: explain results, review model, design protection, review daily operation, write the report narrative
+- [x] S2.4 Read my documents: attach PDF or image; values extracted into the model for confirmation
 - [ ] S2.5 Voice input; streaming replies; conversation history saved with the project
 
-### Phase 1 — Engine to professional grade
-- [ ] S1.1 Four-quadrant pump characteristics (by specific speed and user data); reverse flow and rotation; pumps without check valves
-- [ ] S1.2 Motor start-up torque curves; variable-speed drives with PID control
-- [ ] S1.3 Storage tanks with real levels; demand patterns; controls; extended-period hydraulics; surge run from any time of day
+### Phase 1 — Engines to professional grade
+- [x] Engine choice: wave engine (method of characteristics, column separation) and rigid-column engine (mass oscillation, slow events) — checked against Jaeger's surge-tank formula and against each other
+- [x] S1.1 Four-quadrant pumps: generic characteristic from the pump curve, or the manufacturer's Suter data; reverse flow and reverse rotation
+- [~] S1.2 Variable-speed drives with PI pressure control (done); motor start-up torque curves (not yet)
+- [x] S1.3 Extended-period simulation: storage tanks, demand and head patterns, simple controls (time, clock, level, pressure), surge run from any hour — matches EPANET 2.2 on Net1/Net2/Net3 (heads within 0.04 m). Rule-based controls not yet.
 - [ ] S1.4 Throttle, general-purpose and pressure-breaker valves; slow-closing / non-slam air valves; throttled, differential and variable-area surge tanks
-- [ ] S1.5 Pipe forces for anchor and support design
-- [ ] S1.6 Turbines: four-quadrant characteristics, governor, load rejection/acceptance
+- [x] S1.5 Pipe forces for anchor and support design (checked against ρ·a·V·A)
+- [ ] S1.6 Turbines: four-quadrant characteristics, governor
 - [ ] S1.7 Viscoelastic pipe model (PE, PVC)
 - [ ] S1.8 10,000+ pipe networks in the background; parallel case runs
-- [ ] S1.9 Validation Book generated from the benchmarks
+- [~] S1.9 Validation: EPANET, TSNet, benchmark and textbook checks run in CI; the printed Validation Book is not written yet
 
 ### Phase 3 — Professional workspace depth
 - [ ] S3.1 Cases as differences from a parent; results overlaid between cases
-- [ ] S3.2 Underlays: CAD, GIS layers, street/satellite map; elevations from terrain data
-- [ ] S3.3 GIS / Excel import with field mapping; export to GIS, Excel, CAD
+- [ ] S3.2 Underlays: street/satellite map; elevations from terrain data
+- [~] S3.3 GIS import with field mapping (GeoJSON) and GIS/CAD export with results (GeoJSON, DXF) done; Excel export of results not yet
 - [ ] S3.4 Selection sets, queries, annotations, colour themes, printing to scale
 - [ ] S3.5 Libraries: pumps, valves, air valves, pipe classes (shareable)
 - [ ] S3.6 Guided mode and wizards; "fix it" buttons on warnings
 
 ### Phase 5 — Integrations and utility features
-- [ ] S5.1 AutoCAD plug-in (.NET): draw / sync the network, results back as layers
-- [ ] S5.2 MicroStation plug-in
-- [ ] S5.3 ArcGIS Pro add-in (and QGIS plug-in): sync network and results with the GIS
-- [ ] S5.4 Live SCADA: OPC UA, MQTT, Modbus TCP and historian CSV; live pressures on the drawing; boundary conditions from SCADA
-- [ ] S5.5 Water quality: age, source trace, chlorine decay (extended-period)
-- [ ] S5.6 Network skeletonisation
-- [ ] S5.7 Optimisation: protection device sizing and pipe/class selection by genetic algorithm
+- [~] S5.1 AutoCAD / BricsCAD plug-in (AutoLISP: SSEXPORT, SSRESULTS) — written, not yet tested inside AutoCAD
+- [~] S5.2 MicroStation — through DXF (no plug-in needed); DXF export tested by reading it back
+- [~] S5.3 QGIS plug-in and ArcGIS Pro toolbox (Python) — written and syntax-checked, not yet tested inside QGIS / ArcGIS Pro
+- [x] S5.4 Live SCADA: MQTT over WebSocket (tested against a real broker), OPC UA and Modbus TCP through the SurgeSpace data bridge (tested against local servers), historian CSV, tag mapping, set the model to the live state, compare the model with field data
+- [x] S5.5 Water quality: age, source trace, chlorine (bulk and wall) — matches EPANET 2.2 (chlorine within 0.003 mg/L on Net1)
+- [x] S5.6 Network skeletonisation (series merge with profile points kept; optional dead-end trimming)
+- [~] S5.7 Optimisation: least-cost protection (vessels, air valves) by genetic algorithm over full surge runs (done); pipe and class selection (not yet)
 
 ### Phase 4 — AI release 2 and documentation
-- [ ] S4.1 Calibration from field pressure-logger data
+- [~] S4.1 Calibration: model vs field data statistics (done); automatic calibration of roughness / demands (not yet)
 - [ ] S4.2 Scenario scoping by AI
-- [ ] S4.3 Scripting console and open API
+- [ ] S4.3 Scripting console and open API (the command registry is the base)
 - [ ] S4.4 User manual, theory manual, tutorials, samples
 - [ ] S4.5 Arabic interface and reports; shared cloud projects
 
@@ -83,6 +85,8 @@ Goal: a professional surge analysis product that matches the market-leading tool
   - Report: optional narrative (Markdown) before the summary, marked when drafted by AI; "Draft with AI" in the report dialog.
   - Desktop: AI requests use the native HTTP client (tauri-plugin-http) so providers without browser CORS and local servers work.
   - Tests: `tests/ai.test.ts` (41 checks: commands, file versions, all three wire formats with tool calls, error messages, agent loop, markdown, report narrative). All other suites pass; all examples identical to the baseline.
+
+- **Slice 2 (branch `v3-program`, 11 Nov 2026): engines and integrations.** Extended-period simulation and water quality (`src/engine/eps.ts`, validated against EPANET 2.2 with WNTR references in `validation/data`); rigid-column engine (`src/engine/rigid.ts`); four-quadrant pumps and variable-speed drives; pipe forces; skeletonisation (`src/engine/skeleton.ts`); protection optimisation (`src/engine/optimise.ts`); live data (`src/app/live.ts`, `src/app/scada.ts`, `bridge/`); GIS/CAD exchange (`src/app/exchange.ts`) and plug-ins (`plugins/`); Daily operation and Live data tabs; new commands for the copilot; new example "Town supply". Tests: eps 25, fourq 10, rigid 8, phase5 23, forces 2, vsd 4 (all in CI).
 
 ## Working method
 Each slice: one feature with tests and benchmarks, on a branch, with a preview. No Store release until a phase's done criteria are met.
