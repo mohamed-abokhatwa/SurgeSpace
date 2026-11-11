@@ -103,7 +103,7 @@ try {
   t('the reply streams in as it is written', !!partial, partial ? `seen part-way: “${partial.slice(0, 60)}”` : 'no partial text observed');
   // model from documents: a PDF is rendered by pdf.js (its worker under the CSP) and read by the AI server
   const pdf = readFileSync(new URL('./fixtures/long-section.pdf', import.meta.url)).toString('base64');
-  await js(`document.querySelector('.menu-btn') && [...document.querySelectorAll('.menu-btn')].find((b) => b.textContent.trim() === 'AI').click(); return true;`);
+  await js(`[...document.querySelectorAll('.menu-btn')].find((b) => b.textContent.trim() === 'AI').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); return true;`);
   await sleep(300);
   await js(`[...document.querySelectorAll('.menu-item')].find((b) => b.textContent.includes('Model from documents')).click(); return true;`);
   await wait(() => js('return !!document.querySelector(".intake .drop input")'), 20000);
