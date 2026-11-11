@@ -474,6 +474,12 @@ function TurbineGroup({ v, setValve, net, result }: { v: Valve; setValve: (f: (v
         <label className="field"><span>Efficiency <em className="unit">%</em></span><input type="number" value={Math.round(t.efficiency * 1000) / 10} onChange={(e) => setT({ efficiency: (num(e.target.value) || 90) / 100 })} /></label>
         <label className="field"><span>Synchronous speed <em className="unit">rpm</em></span><input type="number" value={t.speed} onChange={(e) => setT({ speed: num(e.target.value) || 750 })} /></label>
         <QNum label="Turbine + generator inertia" q="inertia" value={t.inertia} onChange={(x) => x && setT({ inertia: x })} />
+        <label className="field" style={{ gridColumn: '1 / -1' }}><span><input type="checkbox" checked={!!t.governor} onChange={(e) => setT({ governor: e.target.checked ? { kp: 3, ti: 5, closeTime: 8 } : undefined })} /> Speed governor on load rejection (gates follow a PI controller on the speed)</span></label>
+        {t.governor && <>
+          <label className="field"><span>Gain <em className="unit">gate per speed</em></span><input type="number" step="0.5" value={t.governor.kp ?? 3} onChange={(e) => setT({ governor: { ...t.governor!, kp: num(e.target.value) || 3 } })} /></label>
+          <label className="field"><span>Integral time <em className="unit">s</em></span><input type="number" value={t.governor.ti ?? 5} onChange={(e) => setT({ governor: { ...t.governor!, ti: num(e.target.value) || 5 } })} /></label>
+          <label className="field"><span>Fastest gate closure <em className="unit">s</em></span><input type="number" value={t.governor.closeTime} onChange={(e) => setT({ governor: { ...t.governor!, closeTime: num(e.target.value) || 8 } })} /></label>
+        </>}
         <QNum label="Gate bore" q="diameter" value={v.diameter} digits={1} onChange={(x) => x && setValve((y) => ({ ...y, diameter: x, k0: +turbineK(y.turbine!, x).toFixed(3) }))} />
       </div>
       <p className="hint">Rated output {fmtQ(P, 'power', 0, units)}. The gates are sized so the turbine passes the rated flow at the rated head (K = {v.k0}). Operate it in Operations → Turbine load rejection / acceptance.</p>

@@ -462,6 +462,9 @@ export interface TurbineSpec {
   speed: number;
   /** Turbine + generator inertia, kg·m². */
   inertia: number;
+  /** Speed governor: after a load rejection the gates follow a PI controller on the speed (instead of a set
+   *  closure), limited by the fastest closing time. */
+  governor?: { kp?: number; ti?: number; closeTime: number };
 }
 
 export type EventKind = 'pumpTrip' | 'valveClose' | 'valveOpen' | 'none';

@@ -58,7 +58,7 @@ export interface TransientResult {
   reliefs: Record<string, { flow: Float32Array; maxFlow: number; volume: number }>;
   pumps: Record<string, { speed: Float32Array; flow: Float32Array; reverseFlow: boolean }>;
   airValves: Record<string, { air: Float32Array; mass: Float32Array; maxAir: number }>;
-  valves: Record<string, { opening: Float32Array; flow: Float32Array }>;
+  valves: Record<string, { opening: Float32Array; flow: Float32Array; speed?: Float32Array }>;
   /** Check valves (on pumps, valves and pipes), keyed by the pump, valve or pipe id. */
   checkValves: Record<string, { where: 'pump' | 'valve' | 'pipe'; mode: CheckValveSpec['mode']; flow: Float32Array; opening: Float32Array; closures: number; maxReverseVelocity: number; reverseVelocityAtClosure: number }>;
   /** Discharges to atmosphere / rupture disks. */
@@ -553,6 +553,32 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const s = stroke > 0 ? Math.min((t - ev.start) / stroke, 1) : 1;
     return valveArea(v, tf + (s0 - tf) * (1 - s) ** (ev.exponent ?? 1));
   };
+  // turbine speed governors: after a load rejection the gate stroke follows a PI controller on the speed
+  const govern = new Map<number, { start: number; w: number; w0: number; I: number; stroke: number; kp: number; ti: number; rate: number; inertia: number; eff: number; ratedP: number }>();
+  elements.forEach((e) => {
+    if (e.kind !== 'valve') return;
+    const v = net.valves[e.idx], tb = v.turbine;
+    if (!tb?.governor) return;
+    const ev = valveEv.get(v.id);
+    if (!ev || (ev.turbineOp ?? (ev.kind === 'valveClose' ? 'rejection' : 'acceptance')) !== 'rejection') return;
+    const w0 = (2 * Math.PI * tb.speed) / 60;
+    govern.set(e.idx, { start: ev.start, w: w0, w0, I: 0, stroke: strokeOf(v, e.base), kp: tb.governor.kp ?? 3, ti: Math.max(tb.governor.ti ?? 5, 1e-3), rate: 1 / Math.max(tb.governor.closeTime, 1e-3), inertia: tb.inertia, eff: tb.efficiency, ratedP: RHO * G * tb.ratedFlow * tb.ratedHead * tb.efficiency });
+  });
+  const governorStep = (e: Extract<Element, { kind: 'valve' }>, g: NonNullable<ReturnType<typeof govern.get>>, _t: number) => {
+    // runner speed from the power balance (generator disconnected: only windage and friction load remain)
+    const ratio = g.w / g.w0;
+    const eta = Math.max(0, 1 - ((ratio - 1) / 0.8) ** 2);
+    const dH = Math.max(Hprev[e.i] - Hprev[e.j], 0);
+    const P = RHO * G * Math.max(e.Q, 0) * dH * g.eff * eta;
+    const Pw = 0.01 * g.ratedP * ratio ** 3;
+    g.w = Math.max(0, g.w + (dt * (P - Pw)) / Math.max(g.inertia * g.w, 1e-6));
+    // PI on the speed error closes the gates as the unit speeds up (rate limited)
+    const err = g.w / g.w0 - 1;
+    g.I += (err * dt) / g.ti;
+    const target = Math.min(1, Math.max(0, strokeOf(net.valves[e.idx], e.base) - g.kp * (err + g.I)));
+    g.stroke += Math.max(-g.rate * dt, Math.min(g.rate * dt, target - g.stroke));
+    return valveArea(net.valves[e.idx], g.stroke);
+  };
   /** Active control valve: the opening moves toward the one that meets the set point, with its response time
    *  and stroke-speed limit. */
   const controlStep = (e: Extract<Element, { kind: 'valve' }>) => {
@@ -958,6 +984,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         const o = valveOut[net.valves[e.idx].id];
         o.opening[frame] = e.open;
         o.flow[frame] = e.Q;
+        const gv = govern.get(e.idx);
+        if (gv) { o.speed ??= new Float32Array(nFrames); o.speed[frame] = gv.w / gv.w0; }
       } else if (e.kind === 'rigid') frameFlows[net.pipes[e.pipe].id][frame] = e.Q;
       if (e.kind !== 'rigid') for (const id of cvKey(e)) {
         const o = cvOut[id];
@@ -1011,7 +1039,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         } else if (!e.tripped) e.tripped = true;
       }
       if (e.kind === 'valve') {
-        if (isValveTarget(e)) e.open = valveOpening(e, t);
+        const gv = govern.get(e.idx);
+        if (gv && t >= gv.start) e.open = governorStep(e, gv, t);
+        else if (isValveTarget(e)) e.open = valveOpening(e, t);
         else if (net.valves[e.idx].control?.active) e.open = controlStep(e);
         if (e.open <= 0) e.closed = true;
         else if (e.closed && !e.check && e.cv?.state !== 'closed') e.closed = false;

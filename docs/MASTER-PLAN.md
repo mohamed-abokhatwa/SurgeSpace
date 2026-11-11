@@ -44,16 +44,16 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [x] S1.3 Extended-period simulation: storage tanks, demand and head patterns, simple and rule-based controls, surge run from any hour — matches EPANET 2.2 on Net1/Net2/Net3 and a rules network (heads within 0.04 m)
 - [~] S1.4 Throttle, general-purpose and pressure-breaker valves (done, validated against EPANET); non-slam (three-stage) air valves and throttled tanks (existing in-/out-flow losses); differential and variable-area surge tanks (not yet)
 - [x] S1.5 Pipe forces for anchor and support design (checked against ρ·a·V·A)
-- [ ] S1.6 Turbines: four-quadrant characteristics, governor
+- [~] S1.6 Turbines: speed governor (PI on speed, rate-limited gates) on load rejection (done); turbine four-quadrant characteristics (not yet)
 - [x] S1.7 Viscoelastic pipe model (PE, PVC): Kelvin–Voigt creep, stable implicit coupling; damping and period lengthening checked (indicative HDPE values; calibrate per pipe)
 - [x] S1.8 10,000-pipe networks (steady 2 s, surge in seconds at the default reach budget; `validation/large-network.ts`); cases run in parallel on spare cores
 - [~] S1.9 Validation: EPANET, TSNet, benchmark and textbook checks run in CI; the printed Validation Book is not written yet
 
 ### Phase 3 — Professional workspace depth
-- [ ] S3.1 Cases as differences from a parent; results overlaid between cases
+- [~] S3.1 Results of other cases overlaid on the profile (done); cases stored as differences from a parent (not yet: cases are full copies)
 - [x] S3.2 Street / satellite / topographic basemaps from web tiles (UTM or Web Mercator, exact resampling); node elevations and long sections from terrain data
 - [x] S3.3 GIS import with field mapping (GeoJSON); export to GIS (GeoJSON), CAD (DXF) and Excel (.xlsx results workbook)
-- [ ] S3.4 Selection sets, queries, annotations, colour themes, printing to scale
+- [~] S3.4 Queries and selection sets (done); colour themes by any field (existing colour-by); annotations and printing to scale (not yet)
 - [x] S3.5 Libraries: pumps, valves, air valves, vessels, pipe types (generic air valves and pipe types included; export/import to share)
 - [~] S3.6 Fix-it buttons and Fix all on health-check findings (done); guided wizards (the copilot covers guided building; dedicated wizards not yet)
 

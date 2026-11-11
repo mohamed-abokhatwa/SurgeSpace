@@ -333,6 +333,12 @@ export function turbineSpeeds(net: Network, r: TransientResult): TurbineRun[] {
     }
     let w = w0, maxW = w0, tMax = 0;
     speed[0] = 1;
+    if (vr.speed) {
+      // speed from the governor in the surge run
+      for (let k = 0; k < n; k++) { speed[k] = vr.speed[k] || 1; if (speed[k] * w0 > maxW) { maxW = speed[k] * w0; tMax = t[k]; } }
+      out.push({ id: v.id, speed, power, maxSpeed: maxW / w0, tMax, ratedPower: (rho * g * tb.ratedFlow * tb.ratedHead * tb.efficiency) / 1000, mode });
+      continue;
+    }
     for (let k = 1; k < n; k++) {
       const dt = t[k] - t[k - 1];
       const rejected = mode === 'rejection' && ev && t[k] >= ev.start;
