@@ -415,6 +415,23 @@ export interface Pump {
   /** Variable-speed drive holding a pressure: the steady speed is found to meet the set point, and during the
    *  surge run a PI controller keeps adjusting it (unless the pump trips). */
   vsd?: VSDControl;
+  /** Motor for a pump start: the speed then follows the motor torque curve and the inertia instead of a set ramp. */
+  motor?: MotorStart;
+}
+
+/** Induction motor start-up: torque–speed curve and the starter. */
+export interface MotorStart {
+  /** Direct on line, star–delta or soft starter (voltage ramp). Default direct on line. */
+  starter?: 'dol' | 'starDelta' | 'soft';
+  /** Torque–speed curve: [speed / rated speed, torque / full-load torque]. Default: a typical design-B motor. */
+  curve?: [number, number][];
+  /** Full-load torque, N·m (default: the pump torque at its rated duty). */
+  ratedTorque?: number;
+  /** Star–delta: speed fraction at which it switches to delta (default 0.8). */
+  switchSpeed?: number;
+  /** Soft starter: initial voltage fraction (default 0.35) and ramp time to full voltage, s (default 10). */
+  softInitial?: number;
+  softRamp?: number;
 }
 
 export interface VSDControl {

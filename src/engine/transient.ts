@@ -13,10 +13,10 @@
 //    tank with overflow; one-way (feed) tank; surge anticipation valve; pressure relief valve;
 //    pressure-dependent demands.
 import { runRigid } from './rigid';
-import { fourQuadrant, frictionF, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpQuadratic, pumpTorqueQuadratic, solveDense, type FourQ, type PumpCurve } from './hydraulics';
+import { fourQuadrant, frictionF, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpQuadratic, pumpRatedQ, pumpTorqueQuadratic, solveDense, type FourQ, type PumpCurve } from './hydraulics';
 import { solveSteady, type SteadyResult } from './steady';
 import { G, HB, HV, NU, RHO, allEvents, applyFluid, area, type CheckValveSpec, type Network, type NetNode, type TransientEvent } from './types';
-import { RAIR, TAIR, airValveMassRate, airValveModel, controlArea, dynamicReverseVelocity, interpTable, outletOpening, prechargeGas, reliefFlow, savOpening, solveDecreasing, valveArea, vesselGeometry, waterDepthOf, waterVolumeAt } from './devices';
+import { RAIR, TAIR, airValveMassRate, airValveModel, controlArea, dynamicReverseVelocity, interpTable, motorTorque, outletOpening, prechargeGas, reliefFlow, savOpening, solveDecreasing, valveArea, vesselGeometry, waterDepthOf, waterVolumeAt } from './devices';
 import { prepareNetwork } from './prepare';
 
 export interface PipeEnvelope {
@@ -176,7 +176,7 @@ interface CvState {
 }
 
 type Element =
-  | { kind: 'pump'; idx: number; ids: string[]; m: number; curve: PumpCurve; i: number; j: number; Q: number; alpha: number; alphaSet: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; cv?: CvState; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number; fq?: FourQ; vsd?: { node: number; z: number; set: number; kp: number; ti: number; min: number; max: number; rate: number; I: number; s0: number } }
+  | { kind: 'pump'; idx: number; ids: string[]; m: number; curve: PumpCurve; i: number; j: number; Q: number; alpha: number; alphaSet: number; tripped: boolean; on: boolean; closed: boolean; check: boolean; cv?: CvState; T: number; I: number; w: number; a: number; b: number; c: number; ta: number; tb: number; tc: number; fq?: FourQ; motor?: { Tr: number; t0: number; on: boolean; T0: number }; vsd?: { node: number; z: number; set: number; kp: number; ti: number; min: number; max: number; rate: number; I: number; s0: number } }
   | { kind: 'valve'; idx: number; i: number; j: number; Q: number; open: number; base: number; closed: boolean; check: boolean; cv?: CvState; kq: number }
   | { kind: 'rigid'; idx: number; i: number; j: number; Q: number; Qold: number; closed: boolean; check: false; inert: number; pipe: number };
 
@@ -413,6 +413,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   /** Pump head per unit (m) and hydraulic torque per unit (N·m) for the element flow Q (all units) and speed ratio. */
   const pHead = (e: Extract<Element, { kind: 'pump' }>, Q: number, alpha: number) => (e.fq ? e.fq.head(Q / e.m, alpha) : pumpHeadAt(e.curve, Q / e.m, alpha));
   const pTorque = (e: Extract<Element, { kind: 'pump' }>, alpha: number, Q: number) => (e.fq ? e.fq.torque(Q / e.m, alpha) : e.ta * alpha * alpha + e.tb * alpha * Q + e.tc * Q * Q);
+  /** Net retarding torque on the rotor: pump torque less the motor torque while a motor start is under way. */
+  let tNow = 0;
+  const dTorque = (e: Extract<Element, { kind: 'pump' }>, alpha: number, Q: number) => pTorque(e, alpha, Q) - (e.motor?.on ? e.m * motorTorque(net.pumps[e.idx].motor!, e.motor.Tr, alpha, tNow - e.motor.t0) : 0);
   const minAlpha = (e: Element) => (e.kind === 'pump' && e.fq ? -3 : 0);
   // identical pumps in parallel are merged into one exact equivalent element (m units)
   const pumpGroups = new Map<string, number[]>();
@@ -435,6 +438,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       cv: p.checkValve ? makeCv(p.checkSpec, area(p.checkSpec?.diameter ?? net.pipes.find((x) => x.from === p.to || x.to === p.to)?.diameter ?? 0.3)) : undefined, T: 0, I: p.inertia * (opt.inertiaFactor ?? 1), w: omegaRated(p),
       a, b: b / m, c: c / (m * m), ta: tq.ta, tb: tq.tb / m, tc: tq.tc / (m * m),
       ...(p.fourQuadrant ? { fq: fourQuadrant(p) } : {}),
+      ...(p.motor ? { motor: { Tr: tq.ta + tq.tb * pumpRatedQ(p) + tq.tc * pumpRatedQ(p) ** 2, t0: 0, on: false, T0: 0 } } : {}),
       ...(p.vsd && p.vsd.active !== false && nIdx.has(p.vsd.node) ? { vsd: { node: nIdx.get(p.vsd.node)!, z: nodes[nIdx.get(p.vsd.node)!].elev, set: p.vsd.setPressure, kp: p.vsd.kp ?? 0.02, ti: Math.max(p.vsd.ti ?? 5, 1e-3), min: p.vsd.minSpeed ?? 0.3, max: p.vsd.maxSpeed ?? 1.05, rate: 1 / Math.max(p.vsd.rampTime ?? 10, 1e-3), I: 0, s0 } } : {}),
     };
     e.T = pTorque(e, e.alpha, e.Q);
@@ -733,10 +737,10 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
       if (e.kind !== 'pump') return 0;
       if (!e.tripped) return e.on ? e.alphaSet : 0;
       const k = dt / (2 * e.I * e.w);
-      if (e.fq) {
+      if (e.fq || e.motor?.on) {
         // speed from the implicit torque balance α − α₀ + k (T(α) + T₀) = 0, by Newton with bisection safeguard
-        const f = (a: number) => a - e.alpha + k * (pTorque(e, a, Q) + e.T);
-        let lo = -3, hi = Math.max(1.5, e.alpha + 0.5), a = e.alpha;
+        const f = (a: number) => a - e.alpha + k * (dTorque(e, a, Q) + e.T);
+        let lo = minAlpha(e), hi = Math.max(1.5, e.alpha + 0.5), a = e.alpha;
         for (let it = 0; it < 60; it++) {
           const fa = f(a);
           if (Math.abs(fa) < 1e-12) break;
@@ -841,7 +845,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         speedVars.forEach((e, k) => {
           const a = v[free.length + els.length + k];
           const q = v[free.length + els.indexOf(e)];
-          const T = pTorque(e, a, q);
+          const T = dTorque(e, a, q);
           r[free.length + els.length + k] = a - e.alpha + (dt * (T + e.T)) / (2 * e.I * e.w);
         });
         return r;
@@ -892,7 +896,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
           });
           speedVars.forEach((e, k) => {
             const a2 = q[els.length + k], qq = q[els.indexOf(e)];
-            r.push(a2 - e.alpha + (dt * (pTorque(e, a2, qq) + e.T)) / (2 * e.I * e.w));
+            r.push(a2 - e.alpha + (dt * (dTorque(e, a2, qq) + e.T)) / (2 * e.I * e.w));
           });
           return { r, hv };
         };
@@ -1029,10 +1033,23 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   let huBuf = new Float64Array(16);
   for (let step = 1; step <= steps; step++) {
     const t = step * dt;
+    tNow = t;
     // events
     elements.forEach((e) => {
       const ev = e.kind === 'pump' ? pumpEv.get(e.ids[0]) : undefined;
-      if (e.kind === 'pump' && ev && ev.pumpMode === 'start' && t >= ev.start) {
+      if (e.kind === 'pump' && ev && ev.pumpMode === 'start' && t >= ev.start && e.motor) {
+        // motor start: the speed comes from the torque balance (motor torque curve, pump torque, inertia)
+        if (!e.motor.on) {
+          e.motor.on = true;
+          e.motor.t0 = ev.start;
+          e.on = true;
+          e.tripped = true;
+          if (!e.check && !e.cv) e.closed = false;
+          tNow = t - dt;
+          e.T = dTorque(e, e.alpha, e.Q);
+          tNow = t;
+        }
+      } else if (e.kind === 'pump' && ev && ev.pumpMode === 'start' && t >= ev.start) {
         // pump start: speed raised linearly to full over the ramp time
         if (!e.on) {
           e.on = true;
@@ -1313,7 +1330,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     elements.forEach((e) => {
       if (e.kind === 'rigid') e.Qold = e.Q;
       if (e.kind === 'pump') {
-        e.T = pTorque(e, e.alpha, e.Q);
+        e.T = dTorque(e, e.alpha, e.Q);
         if (e.Q < -1e-6) e.ids.forEach((id) => (pumpOut[id].reverseFlow = true));
       }
     });

@@ -1,5 +1,5 @@
 // Surge protection device physics, kept free of the time loop so each relation can be tested on its own.
-import { G, HB, RHO, type AirValve, type SurgeVessel } from './types';
+import { G, HB, RHO, type AirValve, type MotorStart, type SurgeVessel } from './types';
 
 export const RAIR = 287.1; // J/(kg·K)
 export const TAIR = 293.15; // K
@@ -255,4 +255,17 @@ export function outletOpening(openTime: number | undefined, tOpen: number, t: nu
   if (tOpen < 0 || t < tOpen) return 0;
   const T = openTime ?? 0;
   return T <= 0 ? 1 : Math.min(1, (t - tOpen) / T);
+}
+
+/** Typical design-B induction motor torque–speed curve (torque / full-load torque against speed / rated speed). */
+export const DEFAULT_MOTOR_CURVE: [number, number][] = [[0, 1.5], [0.2, 1.4], [0.4, 1.35], [0.6, 1.5], [0.75, 1.9], [0.85, 2.3], [0.92, 2.1], [0.97, 1.5], [1, 1], [1.03, 0]];
+
+/** Motor torque (N·m) at speed fraction α, t seconds after the start command. */
+export function motorTorque(m: MotorStart, ratedTorque: number, alpha: number, t: number): number {
+  const curve = m.curve && m.curve.length >= 2 ? m.curve : DEFAULT_MOTOR_CURVE;
+  const a = Math.max(alpha, 0);
+  let T = a > curve[curve.length - 1][0] ? curve[curve.length - 1][1] - (a - curve[curve.length - 1][0]) * 30 : interpTable(curve, a);
+  if (m.starter === 'starDelta' && a < (m.switchSpeed ?? 0.8)) T /= 3; // star: voltage / √3, torque / 3
+  if (m.starter === 'soft') { const v0 = m.softInitial ?? 0.35, Tr = Math.max(m.softRamp ?? 10, 1e-3); const v = Math.min(1, v0 + ((1 - v0) * Math.max(t, 0)) / Tr); T *= v * v; }
+  return T * (m.ratedTorque ?? ratedTorque);
 }

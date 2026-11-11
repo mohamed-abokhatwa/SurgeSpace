@@ -3,8 +3,8 @@
 // vessel mass oscillation, slow valve strokes, pump start-up and run-down over minutes, fast screening of
 // options. For fast events (pump trip with a long main, quick valve closure) use the wave engine.
 // Solved implicitly at each step (Newton on all heads, flows, pump speeds and device flows together).
-import { interpTable, valveArea } from './devices';
-import { fourQuadrant, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpTorqueQuadratic, solveDense, type FourQ } from './hydraulics';
+import { interpTable, motorTorque, valveArea } from './devices';
+import { fourQuadrant, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpRatedQ, pumpTorqueQuadratic, solveDense, type FourQ } from './hydraulics';
 import { prepareNetwork } from './prepare';
 import { solveSteady, type SteadyResult } from './steady';
 import type { PipeEnvelope, RunOptions, TransientResult } from './transient';
@@ -47,9 +47,16 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     ...net.pumps.map((p, k): L => ({ kind: 'pump', id: p.id, i: nIdx.get(p.from)!, j: nIdx.get(p.to)!, ref: k, Q: steady.flows.get(p.id) ?? 0, closed: !p.on || (steady.flows.get(p.id) ?? 0) <= 0 })),
     ...net.valves.map((v, k): L => ({ kind: 'valve', id: v.id, i: nIdx.get(v.from)!, j: nIdx.get(v.to)!, ref: k, Q: steady.flows.get(v.id) ?? 0, closed: false })),
   ];
-  const pumpS = net.pumps.map((p) => ({ alpha: p.on ? steady.speeds?.get(p.id) ?? 1 : 0, alphaSet: p.on ? steady.speeds?.get(p.id) ?? 1 : 0, on: p.on, tripped: false, curve: pumpCurve(p), tq: pumpTorqueQuadratic(p), fq: p.fourQuadrant ? fourQuadrant(p) as FourQ : undefined, w: omegaRated(p), T: 0 }));
+  const pumpS = net.pumps.map((p) => ({ alpha: p.on ? steady.speeds?.get(p.id) ?? 1 : 0, alphaSet: p.on ? steady.speeds?.get(p.id) ?? 1 : 0, on: p.on, tripped: false, curve: pumpCurve(p), tq: pumpTorqueQuadratic(p), fq: p.fourQuadrant ? fourQuadrant(p) as FourQ : undefined, w: omegaRated(p), T: 0, motorOn: false, t0: 0 }));
+  let tNow = 0;
   const head = (k: number, q: number, a: number) => { const s = pumpS[k]; return s.fq ? s.fq.head(q, a) : pumpHeadAt(s.curve, q, a); };
-  const torque = (k: number, q: number, a: number) => { const s = pumpS[k]; return s.fq ? s.fq.torque(q, a) : s.tq.ta * a * a + s.tq.tb * a * q + s.tq.tc * q * q; };
+  const torque = (k: number, q: number, a: number) => {
+    const s = pumpS[k], p = net.pumps[k];
+    const T = s.fq ? s.fq.torque(q, a) : s.tq.ta * a * a + s.tq.tb * a * q + s.tq.tc * q * q;
+    if (!s.motorOn || !p.motor) return T;
+    const qr = pumpRatedQ(p);
+    return T - motorTorque(p.motor, s.tq.ta + s.tq.tb * qr + s.tq.tc * qr * qr, a, tNow - s.t0);
+  };
   pumpS.forEach((s, k) => (s.T = torque(k, links[net.pipes.length + k].Q, s.alpha)));
   const valveBase = net.valves.map((v) => steady.openings?.get(v.id) ?? valveArea(v, v.opening));
   const valveOpen = valveBase.slice();
@@ -146,10 +153,13 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
     net.pumps.forEach((p, k) => {
       const ev = pumpEv.get(p.id), s = pumpS[k];
       if (!ev || t < ev.start) return;
-      if (ev.pumpMode === 'start') { s.on = true; s.alphaSet = Math.min(1, (t - ev.start) / Math.max(ev.duration ?? 0, 1e-9)); s.alpha = s.alphaSet; links[net.pipes.length + k].closed = false; }
+      if (ev.pumpMode === 'start' && net.pumps[k].motor) {
+        if (!s.motorOn) { tNow = t - dt; s.motorOn = true; s.t0 = ev.start; s.on = true; s.tripped = true; s.T = torque(k, links[net.pipes.length + k].Q, s.alpha); links[net.pipes.length + k].closed = false; }
+      } else if (ev.pumpMode === 'start') { s.on = true; s.alphaSet = Math.min(1, (t - ev.start) / Math.max(ev.duration ?? 0, 1e-9)); s.alpha = s.alphaSet; links[net.pipes.length + k].closed = false; }
       else if (ev.pumpMode === 'ramp') { s.alphaSet = Math.max(0, 1 - (t - ev.start) / Math.max(ev.duration ?? 0, 1e-9)); s.alpha = s.alphaSet; }
       else if (s.on && !s.tripped) s.tripped = true;
     });
+    tNow = t;
     net.valves.forEach((v, k) => {
       const ev = valveEv.get(v.id);
       if (!ev || t <= ev.start) return;

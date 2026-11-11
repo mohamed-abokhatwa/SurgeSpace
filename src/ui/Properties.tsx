@@ -348,6 +348,29 @@ function PumpProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
         )}
         <p className="hint">The steady speed is found to meet the set pressure; in the surge run a PI controller keeps adjusting the speed until the pump trips or ramps by an operation.</p>
       </Group>
+      <Group title="Motor start" open={!!p.motor} right={p.motor ? <span className="pill good">{p.motor.starter === 'starDelta' ? 'star–delta' : p.motor.starter === 'soft' ? 'soft starter' : 'direct on line'}</span> : undefined}>
+        <label className="field"><span>Starter (used by a pump start operation)</span>
+          <select value={p.motor?.starter ?? (p.motor ? 'dol' : '')} onChange={(e) => set({ motor: e.target.value ? { ...p.motor, starter: e.target.value as 'dol' | 'starDelta' | 'soft' } : undefined })}>
+            <option value="">Set ramp (speed rises linearly over the start time)</option>
+            <option value="dol">Direct on line (motor torque curve)</option>
+            <option value="starDelta">Star–delta</option>
+            <option value="soft">Soft starter (voltage ramp)</option>
+          </select>
+        </label>
+        {p.motor && (
+          <div className="grid2">
+            {p.motor.starter === 'starDelta' && <label className="field"><span>Switch to delta at <em className="unit">% speed</em></span><input type="number" value={Math.round((p.motor.switchSpeed ?? 0.8) * 100)} onChange={(e) => set({ motor: { ...p.motor!, switchSpeed: (num(e.target.value) || 80) / 100 } })} /></label>}
+            {p.motor.starter === 'soft' && <>
+              <label className="field"><span>Initial voltage <em className="unit">%</em></span><input type="number" value={Math.round((p.motor.softInitial ?? 0.35) * 100)} onChange={(e) => set({ motor: { ...p.motor!, softInitial: (num(e.target.value) || 35) / 100 } })} /></label>
+              <label className="field"><span>Voltage ramp <em className="unit">s</em></span><input type="number" value={p.motor.softRamp ?? 10} onChange={(e) => set({ motor: { ...p.motor!, softRamp: num(e.target.value) || 10 } })} /></label>
+            </>}
+            <label className="field" style={{ gridColumn: '1 / -1' }}><span>Torque–speed curve (speed %, torque % of full load; blank = typical design B)</span>
+              <textarea rows={3} defaultValue={(p.motor.curve ?? []).map(([a, b]) => `${a * 100}\t${b * 100}`).join('\n')} placeholder={'0\t150\n75\t190\n85\t230\n100\t100\n103\t0'} onBlur={(e) => { const rows = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 2 && r.every(Number.isFinite)).map(([a, b]) => [a / 100, b / 100] as [number, number]); set({ motor: { ...p.motor!, curve: rows.length >= 2 ? rows : undefined } }); }} />
+            </label>
+          </div>
+        )}
+        <p className="hint">With a starter, a pump start follows the motor torque, the pump torque and the inertia, so the run-up time is computed rather than set.</p>
+      </Group>
       <Group title="Four-quadrant behaviour" open={!!p.fourQuadrant} right={p.fourQuadrant ? <span className="pill good">{p.fourQuadrant}</span> : undefined}>
         <label className="field"><span>Reverse flow and reverse rotation</span>
           <select value={p.fourQuadrant ?? ''} onChange={(e) => set({ fourQuadrant: (e.target.value || undefined) as typeof p.fourQuadrant })}>

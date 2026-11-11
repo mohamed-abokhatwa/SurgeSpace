@@ -138,6 +138,30 @@ function pumpLine(cv: CheckValveSpec | undefined, opt: { ev?: Network['event']; 
   t('pump start: settles at the running duty point', rel(q[q.length - 1], qRun) < 0.01, `${(q[q.length - 1] * 1000).toFixed(1)} vs ${(qRun * 1000).toFixed(1)} L/s`);
   t('pump start: check valve opens only once the pump head exceeds the line', r.checkValves.PU.flow.every((v) => v >= -1e-12));
 }
+{
+  // motor start: speed from the motor torque curve and the inertia; star–delta and soft starters are slower
+  const run = (motor: import('../src/engine/types').MotorStart) => {
+    const net = pumpLine(undefined, { ev: { kind: 'pumpTrip', targets: ['PU'], start: 1, pumpMode: 'start', duration: 5 }, dur: 120 });
+    net.pumps[0] = { ...net.pumps[0], motor };
+    return runTransient(net, { frames: 1200 });
+  };
+  const net0 = pumpLine(undefined, { ev: { kind: 'pumpTrip', targets: ['PU'], start: 1, pumpMode: 'start', duration: 5 }, dur: 120 });
+  const qRun = solveSteady({ ...net0, event: { kind: 'none', targets: [], start: 0 } }).flows.get('PU')!;
+  const tTo = (r: ReturnType<typeof run>, f: number) => { const s = r.pumps.PU.speed; const k = Array.from(s).findIndex((v) => v >= f); return k < 0 ? Infinity : r.times[k]; };
+  const dol = run({ starter: 'dol' }), sd = run({ starter: 'starDelta' }), soft = run({ starter: 'soft', softRamp: 15 });
+  const sp = Array.from(dol.pumps.PU.speed);
+  t('motor start (DOL): runs up to about rated speed', Math.abs(sp[sp.length - 1] - 1) < 0.03, `${(sp[sp.length - 1] * 100).toFixed(1)} %`);
+  t('motor start (DOL): settles at the running duty', rel(dol.pumps.PU.flow[sp.length - 1], qRun) < 0.03);
+  t('motor start: run-up time follows the inertia (DOL faster than star–delta and soft start)', tTo(dol, 0.9) < tTo(sd, 0.9) && tTo(dol, 0.9) < tTo(soft, 0.9), `to 90 %: DOL ${(tTo(dol, 0.9) - 1).toFixed(2)} s, star–delta ${(tTo(sd, 0.9) - 1).toFixed(2)} s, soft ${(tTo(soft, 0.9) - 1).toFixed(2)} s`);
+  t('motor start: speed never exceeds synchronous', Math.max(...sp) < 1.03);
+  t('motor start: check valve never passes reverse flow', dol.checkValves.PU.flow.every((v) => v >= -1e-12));
+  const rigidNet = pumpLine(undefined, { ev: { kind: 'pumpTrip', targets: ['PU'], start: 1, pumpMode: 'start', duration: 5 }, dur: 120 });
+  rigidNet.pumps[0] = { ...rigidNet.pumps[0], motor: { starter: 'starDelta' } };
+  rigidNet.settings = { ...rigidNet.settings, engine: 'rigid' };
+  const rr = runTransient(rigidNet, { frames: 1200 });
+  const srr = Array.from(rr.pumps.PU.speed);
+  t('motor start in the rigid-column engine: same final speed and similar run-up', Math.abs(srr[srr.length - 1] - sp[sp.length - 1]) < 0.01 && Math.abs(tTo(rr as never, 0.9) - tTo(sd, 0.9)) < 0.5, `to 90 %: ${(tTo(rr as never, 0.9) - 1).toFixed(2)} s vs ${(tTo(sd, 0.9) - 1).toFixed(2)} s`);
+}
 
 // ── check valves ──
 {
