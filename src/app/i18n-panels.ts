@@ -111,6 +111,7 @@ export const AR_PANELS: Record<string, string> = {
   'Run 48 h': 'تشغيل 48 ساعة', 'Run 24 h': 'تشغيل 24 ساعة', Controls: 'التحكمات', Patterns: 'الأنماط', Tanks: 'الخزانات', Quality: 'الجودة', Rules: 'القواعد', Energy: 'الطاقة', Calibrate: 'معايرة',
   'Working…': 'جارٍ العمل…', 'Fix all': 'إصلاح الكل', Fix: 'إصلاح', Apply: 'تطبيق', Elevation: 'المنسوب', Length: 'الطول', Status: 'الحالة', Open: 'مفتوح', Closed: 'مغلق', Time: 'الزمن', Head: 'المنسوب الهيدروليكي',
   // model from documents
+  'Upstream reservoir water level': 'منسوب المياه في الخزان العلوي', 'Downstream reservoir water level': 'منسوب المياه في الخزان السفلي', 'Sump (suction) water level': 'منسوب المياه في البيارة (السحب)', 'Delivery tank water level': 'منسوب المياه في خزان التسليم',
   'High point in the long section': 'نقطة عالية في القطاع الطولي',
   'AI is reading': 'الذكاء الاصطناعي يقرأ', 'Accept': 'قبول', 'Accept all with confidence ≥ 70 %': 'قبول كل ما ثقته ≥ 70 %', 'Add an AI account': 'إضافة حساب ذكاء اصطناعي',
   'Add an item': 'إضافة بند', 'Add data sheet': 'إضافة صحيفة بيانات', 'Air valve on the drawings': 'محبس هواء على المخططات', 'Air valves from the plan not added': 'لم تُضف محابس الهواء من الخطة',

@@ -535,7 +535,7 @@ table.grid td.num { text-align: right; font-family: var(--mono); }
 .wf-ctl input { width: 140px; }
 
 /* ── model from documents ── */
-.intake { position: fixed; inset: 0; z-index: 48; display: grid; grid-template-rows: auto auto auto 1fr auto; background: var(--bg); animation: start-in 0.25s ease both; }
+.intake { position: fixed; inset: 0; z-index: 48; display: flex; flex-direction: column; background: var(--bg); animation: start-in 0.25s ease both; }
 .intake-head { display: flex; align-items: center; gap: 14px; padding: 10px 18px; background: var(--chrome); color: var(--chrome-text); }
 .intake-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .intake-title b { white-space: nowrap; }
@@ -554,7 +554,7 @@ table.grid td.num { text-align: right; font-family: var(--mono); }
 .intake-busy { background: var(--accent-soft); }
 .intake-err { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); color: var(--text); }
 .intake-err .btn { margin-left: auto; }
-.intake-body { overflow: auto; padding: 18px; min-height: 0; }
+.intake-body { overflow: auto; padding: 18px; min-height: 0; flex: 1; }
 .intake-foot { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-top: 1px solid var(--line); background: var(--panel); }
 .btn.big { padding: 9px 18px; font-size: 14px; }
 .btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
@@ -639,7 +639,7 @@ table.trace td:last-child { font-size: 11.5px; }
 .verify { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
 .vrow { display: grid; grid-template-columns: 22px 1fr; gap: 6px; align-items: start; }
 .vrow > span { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 12px; color: #fff; background: var(--good); }
-.vrow.bad > span { background: var(--warn); }
+.vrow.v-warn > span { background: var(--warn); }
 .vrow div { display: flex; flex-direction: column; }
 .intake-protect { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
 table.grid-table { width: 100%; border-collapse: collapse; }

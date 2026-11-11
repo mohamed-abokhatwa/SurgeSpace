@@ -341,7 +341,7 @@ function BuildStage({ S, basis, build, busy }: { S: IntakeSession; basis: BuildB
         {S.built && (
           <div className="verify card">
             <b>{tr('Checks against the documents')}</b>
-            {S.built.verify.map((v, i) => <div key={i} className={`vrow ${v.ok ? 'ok' : 'bad'}`}><span>{v.ok ? '✓' : '!'}</span><div><b>{tr(v.what)}</b><span className="small">{v.detail}</span></div></div>)}
+            {S.built.verify.map((v, i) => <div key={i} className={`vrow ${v.ok ? 'v-ok' : 'v-warn'}`}><span>{v.ok ? '✓' : '!'}</span><div><b>{tr(v.what)}</b><span className="small">{v.detail}</span></div></div>)}
             <div className="small muted" style={{ marginTop: 6 }}>{S.built.notes.join(' · ')}</div>
           </div>
         )}

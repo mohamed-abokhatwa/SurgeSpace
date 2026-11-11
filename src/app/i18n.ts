@@ -54,6 +54,8 @@ const AR: Record<string, string> = {
 export function tr(s: string): string {
   if (lang === 'en' || !s) return s;
   if (AR[s]) return AR[s];
+  // the panel dictionary too, once loaded (text built from several parts is not matched as a whole when drawn)
+  if (ALL_AR[s]) return ALL_AR[s];
   const m = /^(.*?)( · \d+)$/.exec(s);
   if (m && AR[m[1]]) return AR[m[1]] + m[2];
   const k = /^(.*?)( \(run first\))$/.exec(s);
