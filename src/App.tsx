@@ -152,6 +152,8 @@ export default function App() {
   const [epsRes, setEpsRes] = useState<{ r: EPSResult; net: Network } | null>(null);
   const [epsK, setEpsK] = useState(0);
   const [epsColour, setEpsColour] = useState<EPSColour>('none');
+  const [caseRes, setCaseRes] = useState<{ id: string; name: string; envelopes: PipeEnvelope[] }[]>([]);
+  const [overlayIds, setOverlayIds] = useState<string[]>([]);
   const [aiQueued, setAiQueued] = useState<{ prompt: string; label: string } | null>(null);
   const ai = useAI();
   useEffect(() => { void initAITransport(); }, []);
@@ -802,6 +804,10 @@ export default function App() {
                   <select className="cell boxed" style={{ width: 110 }} value={route[0]} onChange={(e) => setRoute([e.target.value, route[1]])}>{nodeOpts}</select>
                   <span>→</span>
                   <select className="cell boxed" style={{ width: 110 }} value={route[1]} onChange={(e) => setRoute([route[0], e.target.value])}>{nodeOpts}</select>
+                  {caseRes.length > 1 && <select className="cell boxed" style={{ width: 150 }} value="" onChange={(e) => { const id = e.target.value; if (id) setOverlayIds((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id])); }} aria-label="Overlay cases" title="Show the envelopes of other cases on the profile (after Run all cases)">
+                    <option value="">Overlay cases…</option>
+                    {caseRes.filter((c) => c.id !== net.activeCase).map((c) => <option key={c.id} value={c.id}>{overlayIds.includes(c.id) ? '✓ ' : ''}{c.name}</option>)}
+                  </select>}
                   <select className="cell boxed" style={{ width: 130 }} value="" onChange={(e) => {
                     const v = e.target.value;
                     if (v === '__save') { const name = `${route[0]} → ${route[1]}`; setNet((n) => ({ ...n, profiles: [...(n.profiles ?? []).filter((p) => p.name !== name), { name, path: [route[0], route[1]] }] }), 'Save profile'); }
@@ -821,13 +827,13 @@ export default function App() {
             {dock !== 'min' && (
               <div className="dock-body">
                 {bottom === 'tables' && <DataSheets net={net} setNet={setNet} result={result} onSelect={(r) => setSelected(r)} selected={selected} />}
-                {bottom === 'cases' && <CasesPanel net={net} setProject={setProject} busy={!!busy} setBusy={setBusy} />}
+                {bottom === 'cases' && <CasesPanel net={net} setProject={setProject} busy={!!busy} setBusy={setBusy} onResults={(r) => { setCaseRes(r); setOverlayIds(r.filter((c) => c.id !== net.activeCase).map((c) => c.id).slice(0, 3)); }} />}
                 {bottom === 'protection' && <div style={{ maxWidth: 620 }}><ProtectionPanel net={net} setNet={(f) => setNet(f, 'Apply sizing')} busy={!!busy} onSizeVessel={doSize} onAirValves={doAir} sizing={sizing} airSugg={airSugg} /></div>}
                 {bottom === 'eps' && <EPSPanel net={net} setNet={setNet} result={epsRes?.r ?? null} busy={!!busy} onRun={() => void doEPS()} k={Math.min(epsK, (epsRes?.r.times.length ?? 1) - 1)} setK={setEpsK} colour={epsColour} setColour={(c) => { setEpsColour(c); if (c !== 'none') setMode('plain'); }} onSurgeAt={surgeAt} selected={selected} />}
                 {bottom === 'live' && <LivePanel net={net} setNet={setNet} eps={epsRes?.r ?? null} onToast={setToast} />}
                 {!result && !['tables', 'cases', 'protection', 'eps', 'live'].includes(bottom) ? <div className="empty">Results appear here after a run. Press <b>Run</b> (F5).</div> : result && (
                   <>
-                    {bottom === 'profile' && <ProfileView net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} uEnv={unc?.envelopes} showNow={live} height={dock === 'max' ? 420 : 250} />}
+                    {bottom === 'profile' && <ProfileView net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} uEnv={unc?.envelopes} showNow={live} height={dock === 'max' ? 420 : 250} overlay={caseRes.filter((c) => overlayIds.includes(c.id) && c.id !== net.activeCase)} />}
                     {bottom === 'graphs' && <GraphsView net={net} result={result} items={graphs} setItems={setGraphs} selected={selected} tNow={tNow} />}
                     {bottom === 'checks' && <ChecksView checks={checks} onFocus={(c) => { if (c.where?.pipe) setSelected([{ type: 'pipe', id: c.where.pipe }]); else if (c.where?.node) setSelected([{ type: 'node', id: c.where.node }]); setMode(c.title.toLowerCase().includes('minimum') || c.title.toLowerCase().includes('column') ? 'min' : 'max'); }} />}
                     {bottom === 'uncertainty' && (

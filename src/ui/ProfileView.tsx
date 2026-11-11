@@ -57,7 +57,7 @@ export function buildProfile(net: Network, r: TransientResult, a: string, b: str
   return out;
 }
 
-export function ProfileView({ net, result, a, b, framePos, uEnv, showNow, height }: { net: Network; result: TransientResult; a: string; b: string; framePos: number; uEnv?: PipeEnvelope[]; showNow: boolean; height?: number }) {
+export function ProfileView({ net, result, a, b, framePos, uEnv, showNow, height, overlay }: { net: Network; result: TransientResult; a: string; b: string; framePos: number; uEnv?: PipeEnvelope[]; showNow: boolean; height?: number; overlay?: { name: string; envelopes: PipeEnvelope[] }[] }) {
   const units = useUnits();
   const prof = useMemo(() => buildProfile(net, result, a, b, uEnv), [net, result, a, b, uEnv]);
   // route samples for the live line: chainage and an index into each pipe's frame data
@@ -113,6 +113,29 @@ export function ProfileView({ net, result, a, b, framePos, uEnv, showNow, height
     { name: 'Maximum head', color: '#e11d48', x: prof.ch, y: prof.max, width: showNow ? 1 : 2, dash: showNow ? '3 3' : undefined },
     { name: 'Minimum head', color: '#2563eb', x: prof.ch, y: prof.min, width: showNow ? 1 : 2, dash: showNow ? '3 3' : undefined },
   ];
+  // other cases: their envelopes at the same chainages (interpolated along each pipe of the route)
+  (overlay ?? []).forEach((o, k) => {
+    const col = ['#f59e0b', '#10b981', '#8b5cf6', '#0ea5e9'][k % 4];
+    const mx: number[] = [], mn: number[] = [];
+    let ok = false;
+    for (const pc of prof.pieces) {
+      const e = o.envelopes.find((x) => x.id === pc.pipe);
+      prof.ch.forEach((c, i) => {
+        if (c < pc.c0 - 1e-9 || c > pc.c0 + pc.L + 1e-9 || mx[i] !== undefined) return;
+        if (!e) { mx[i] = NaN; mn[i] = NaN; return; }
+        const s0 = pc.reversed ? pc.L - (c - pc.c0) : c - pc.c0;
+        let j = 1;
+        while (j < e.s.length - 1 && e.s[j] < s0) j++;
+        const w = (s0 - e.s[j - 1]) / ((e.s[j] - e.s[j - 1]) || 1);
+        mx[i] = e.hMax[j - 1] + w * (e.hMax[j] - e.hMax[j - 1]);
+        mn[i] = e.hMin[j - 1] + w * (e.hMin[j] - e.hMin[j - 1]);
+        ok = true;
+      });
+    }
+    if (!ok) return;
+    series.push({ name: `${o.name} · max`, color: col, x: prof.ch, y: mx, width: 1.4, dash: '6 3' });
+    series.push({ name: `${o.name} · min`, color: col, x: prof.ch, y: mn, width: 1.4, dash: '2 3' });
+  });
   const bands: Band[] = [];
   if (prof.uMax && prof.uMin) {
     bands.push({ name: 'Uncertainty (worst case)', color: 'rgba(225,29,72,0.14)', x: prof.ch, lo: prof.max, hi: prof.uMax });

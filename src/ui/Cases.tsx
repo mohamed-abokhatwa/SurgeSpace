@@ -42,7 +42,7 @@ export function summarize(net: Model, r: TransientResult, checks: Check[]): Omit
   return { maxHead: maxH, maxP, minP, cavity: cav, slams: (r.slams ?? []).filter((s) => s.joukowsky >= 0.5).length, fails: checks.filter((c) => c.level === 'fail').length, warns: checks.filter((c) => c.level === 'warn').length, runtime: r.runtimeMs };
 }
 
-export function CasesPanel({ net, setProject, busy, setBusy }: { net: Network; setProject: (n: Network, label: string) => void; busy: boolean; setBusy: (b: string | null) => void }) {
+export function CasesPanel({ net, setProject, busy, setBusy, onResults }: { net: Network; setProject: (n: Network, label: string) => void; busy: boolean; setBusy: (b: string | null) => void; onResults?: (r: { id: string; name: string; envelopes: TransientResult['envelopes'] }[]) => void }) {
   const units = useUnits();
   const [rows, setRows] = useState<CaseSummary[] | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -61,6 +61,7 @@ export function CasesPanel({ net, setProject, busy, setBusy }: { net: Network; s
         : { id: c.id, name: c.name, ...summarize(c.model, o.result, o.checks) };
     });
     setRows(out);
+    onResults?.(list.map((c, k) => ({ id: c.id, name: c.name, envelopes: res[k] instanceof Error ? [] : (res[k] as { result: TransientResult }).result.envelopes })));
     setBusy(null);
   };
   const best = (f: (r: CaseSummary) => number, lo = true) => { if (!rows) return null; const ok = rows.filter((r) => Number.isFinite(f(r))); if (!ok.length) return null; return ok.reduce((a, b) => ((lo ? f(b) < f(a) : f(b) > f(a)) ? b : a)).id; };
