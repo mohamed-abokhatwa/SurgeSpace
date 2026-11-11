@@ -1,6 +1,6 @@
 import type { JobRequest } from '../jobs';
 
-type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; onProgress?: (m: string) => void; req: JobRequest };
+type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; onProgress?: (m: string, data?: any) => void; req: JobRequest };
 let worker: Worker | null = null;
 let workerOk = false; // set once the worker has answered at least once
 let useMainThread = false;
@@ -10,7 +10,7 @@ const pending = new Map<number, Pending>();
 function deliver(m: any) {
   const p = pending.get(m.id);
   if (!p) return;
-  if (m.type === 'progress') p.onProgress?.(m.message);
+  if (m.type === 'progress') p.onProgress?.(m.message, m.data);
   else if (m.type === 'error') { pending.delete(m.id); p.reject(new Error(m.message)); }
   else { pending.delete(m.id); p.resolve(m); }
 }
@@ -49,7 +49,7 @@ function getWorker(): Worker | null {
 
 type Req = JobRequest extends infer R ? (R extends { id: number } ? Omit<R, 'id'> : never) : never;
 
-export function call<T = any>(req: Req, onProgress?: (m: string) => void): Promise<T> {
+export function call<T = any>(req: Req, onProgress?: (m: string, data?: any) => void): Promise<T> {
   const id = ++seq;
   const full = { ...req, id } as JobRequest;
   return new Promise((resolve, reject) => {

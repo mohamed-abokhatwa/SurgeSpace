@@ -20,10 +20,12 @@ export type JobRequest =
 export function handleJob(req: JobRequest, post: (msg: Record<string, unknown>) => void) {
   try {
     if (req.type === 'run') {
-      post({ id: req.id, type: 'progress', message: 'Steady state…' });
+      const t0 = Date.now();
+      post({ id: req.id, type: 'progress', message: 'Steady state…', data: { stage: 'steady' } });
       const steady = solveSteady(req.net);
-      post({ id: req.id, type: 'progress', message: 'Transient…' });
-      const result = runTransient(req.net, { steady, frames: 600 });
+      post({ id: req.id, type: 'progress', message: 'Surge run…', data: { stage: 'surge', frac: 0, steadyMs: Date.now() - t0, iterations: steady.iterations, steadyHeads: Object.fromEntries(steady.heads) } });
+      const result = runTransient(req.net, { steady, frames: 600, onProgress: (p) => post({ id: req.id, type: 'progress', message: `Surge run… ${Math.round(p.frac * 100)} %`, data: { stage: 'surge', frac: p.frac, t: p.t, duration: p.duration, nodeMax: p.nodeMax, nodeMin: p.nodeMin } }) });
+      post({ id: req.id, type: 'progress', message: 'Design checks…', data: { stage: 'checks' } });
       post({ id: req.id, type: 'done', result, checks: designChecks(req.net, result) });
     } else if (req.type === 'uncertainty') {
       const base = runTransient(req.net, { frames: 600 });

@@ -35,6 +35,8 @@ try {
   await p.waitForSelector('.statusbar', { timeout: 20000 });
   await p.waitForTimeout(1500);
   const heap = () => p.evaluate(() => { globalThis.gc?.(); return (performance.memory?.usedJSHeapSize ?? 0) / 1048576; });
+  await p.locator('.start-go').click().catch(() => {});
+  await p.waitForTimeout(300);
   const h0 = await heap();
   let t0 = performance.now();
   await p.locator('.menu-btn', { hasText: /^File$/ }).click();

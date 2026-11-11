@@ -32,6 +32,12 @@ import { projectJson, upgradeProject } from './app/project';
 import { AI_TASKS } from './ai/tasks';
 import { initAITransport } from './ai/transport';
 import { useAI } from './ai/accounts';
+import { StartPage } from './ui/StartPage';
+import { RunScreen, type RunProg } from './ui/RunScreen';
+import { Tour, TourInvite } from './ui/Tour';
+import { Palette } from './ui/Palette';
+import { addRecent, type RecentEntry } from './app/recent';
+import { bootDone, bootStep } from './app/boot';
 
 type LeftTab = 'explorer' | 'operations' | 'library';
 type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log' | 'eps' | 'live';
@@ -149,7 +155,11 @@ export default function App() {
   const licRef = useRef(lic);
   licRef.current = lic;
   const [licReason, setLicReason] = useState<string | null | undefined>(undefined);
-  useEffect(() => { void initLicence(); }, []);
+  useEffect(() => {
+    // launch screen steps, then fade into the start page or the workspace
+    bootStep('Checking licence…');
+    void initLicence().finally(() => { bootStep('Opening workspace…'); requestAnimationFrame(() => requestAnimationFrame(bootDone)); });
+  }, []);
   const allowed = (ok: boolean, reason: string) => { if (!ok) setLicReason(reason); return ok; };
 
   const [checks, setChecks] = useState<Check[]>([]);
@@ -168,6 +178,12 @@ export default function App() {
   const [bottom, setBottom] = useState<BottomTab>('profile');
   const [dock, setDock] = useState<'normal' | 'max' | 'min'>('normal');
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [runProg, setRunProg] = useState<RunProg | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [home, setHome] = useState(() => readLS('surgespace.start') !== 'off');
+  const [showAtStart, setShowAtStartRaw] = useState(() => readLS('surgespace.start') !== 'off');
+  const setShowAtStart = (v: boolean) => { setShowAtStartRaw(v); writeLS('surgespace.start', v ? 'on' : 'off'); };
+  const lastSession = useMemo(() => { try { const s2 = readLS('surgespace.autosave'); return s2 ? upgradeProject(JSON.parse(s2)) : null; } catch { return null; } }, []);
   const [toast, setToast] = useState<string[] | null>(null);
   const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>(() => (readLS('surgespace.theme') as 'auto' | 'light' | 'dark') || 'auto');
   const [tool, setTool] = useState<Tool>('select');
@@ -201,7 +217,7 @@ export default function App() {
   // autosave (recover from File menu)
   useEffect(() => {
     if (isExample.current) return;
-    const t = setTimeout(() => writeLS('surgespace.autosave', projectJson({ ...net, copilot: copilotRef.current, cases: net.cases ? syncActive(net) : undefined })), 1500);
+    const t = setTimeout(() => { writeLS('surgespace.autosave', projectJson({ ...net, copilot: copilotRef.current, cases: net.cases ? syncActive(net) : undefined })); setSavedAt(Date.now()); }, 1500);
     return () => clearTimeout(t);
   }, [net]);
 
@@ -221,8 +237,20 @@ export default function App() {
     }
     setBusy('Running…');
     setPlaying(false);
+    const t0 = performance.now();
+    setRunProg({ stage: 'steady', t0 });
+    let lastP = 0;
     try {
-      const out = await call<{ result: TransientResult; checks: Check[] }>({ type: 'run', net: n }, (m) => setBusy(m));
+      const out = await call<{ result: TransientResult; checks: Check[] }>({ type: 'run', net: n }, (m, d) => {
+        setBusy(m);
+        if (!d) return;
+        const tNowP = performance.now();
+        if (d.stage === 'surge' && d.frac > 0 && d.frac < 1 && tNowP - lastP < 60) return; // at most ~16 updates a second
+        lastP = tNowP;
+        setRunProg((p) => ({ ...(p ?? { t0 }), ...d }));
+      });
+      setRunProg((p) => (p ? { ...p, stage: 'done', elapsed: (performance.now() - t0) / 1000 } : p));
+      setTimeout(() => setRunProg((p) => (p?.stage === 'done' ? null : p)), 1100);
       lastRun.current = { out, net: n };
       setResult(out.result);
       setChecks(out.checks);
@@ -240,6 +268,7 @@ export default function App() {
       if (out.result.warnings.length && !strict) setToast(out.result.warnings.slice(0, 6));
       return out;
     } catch (e) {
+      setRunProg(null);
       if (strict) throw e;
       setToast([(e as Error).message]);
     } finally {
@@ -263,8 +292,10 @@ export default function App() {
     return () => cancelAnimationFrame(raf);
   }, [playing, result, speed]);
 
-  const load = (n: Network, notes: string[] = [], example = false) => {
+  const load = (n: Network, notes: string[] = [], example = false, how: RecentEntry['how'] = 'opened') => {
     isExample.current = example;
+    setHome(false);
+    if (!example) void addRecent(n, how);
     past.current = []; future.current = [];
     netRef.current = n;
     setNetRaw(n);
@@ -395,7 +426,7 @@ export default function App() {
   const colorBy = epsCol ?? colorByBase;
 
   // ── file actions ──
-  const saveProject = () => download(`${safeName(net.name)}.surge.json`, projectJson({ ...net, copilot: copilotRef.current, cases: net.cases ? syncActive(net) : undefined }), 'application/json');
+  const saveProject = () => { void addRecent(netRef.current, 'saved'); download(`${safeName(net.name)}.surge.json`, projectJson({ ...net, copilot: copilotRef.current, cases: net.cases ? syncActive(net) : undefined }), 'application/json'); };
   const openProject = () => {
     const i = document.createElement('input');
     i.type = 'file'; i.accept = '.json';
@@ -407,6 +438,11 @@ export default function App() {
     i.click();
   };
   const newProject = () => { load(blankModel()); setTool('pipe'); setToast(['New model. Draw with the Pipe tool: click to place junctions, Shift+click for bends. Add a Fixed-Level Source first.']); };
+  const startFromDocuments = () => { openCopilot(); setToast(['Attach the drawings, long sections, data sheets or spreadsheets in the Copilot (paper clip), then ask it to build the model.']); };
+  const [tourOn, setTourOn] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const [tourInvite, setTourInvite] = useState(() => !readLS('surgespace.tour'));
+  const endTour = () => { setTourOn(false); setTourInvite(false); writeLS('surgespace.tour', 'seen'); };
   const recover = () => { const s = readLS('surgespace.autosave'); if (!s) { setToast(['Nothing autosaved on this device yet.']); return; } try { load(upgradeProject(JSON.parse(s))); setToast(['Recovered the last autosaved model.']); } catch { setToast(['The autosave could not be read.']); } };
   const exportInp = () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && void import('./engine/inp').then(({ toInp }) => download(`${safeName(net.name)}.inp`, toInp(net)));
   const exportEnv = () => {
@@ -470,6 +506,7 @@ export default function App() {
       if (mod && ((e.key.toLowerCase() === 'z' && e.shiftKey) || e.key.toLowerCase() === 'y')) { e.preventDefault(); redo(); return; }
       if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); return; }
       if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicate(); return; }
+      if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((v) => !v); return; }
       if (mod && e.key.toLowerCase() === 'f') { e.preventDefault(); setDialog('find'); return; }
       if (mod && e.key.toLowerCase() === 'n') { e.preventDefault(); newProject(); return; }
       if (mod) return;
@@ -501,6 +538,7 @@ export default function App() {
   const colorBys: [ColorBy, string][] = [['none', 'None'], ['diameter', 'Diameter'], ['material', 'Material'], ['class', 'Pressure class'], ['wavespeed', 'Wave speed'], ['elevation', 'Elevation'], ['velocity', 'Steady velocity']];
   const menus: Menu[] = [
     { label: 'File', items: [
+      { label: 'Start page', action: () => setHome(true) },
       { label: 'New model', shortcut: 'Ctrl+N', action: newProject },
       { label: 'Open project…', shortcut: 'Ctrl+O', action: openProject },
       { label: 'New model wizard…', action: () => setDialog('wizard') },
@@ -531,6 +569,7 @@ export default function App() {
       { label: 'Delete', shortcut: 'Del', action: deleteSel, disabled: !selected.length },
       'sep',
       { label: 'Find element…', shortcut: 'Ctrl+F', action: () => setDialog('find') },
+      { label: 'Command palette…', shortcut: 'Ctrl+K', action: () => setPalette(true) },
     ] },
     { label: 'View', items: [
       { label: 'Zoom to fit', shortcut: 'F', action: () => setFitKey((k) => k + 1) },
@@ -615,6 +654,8 @@ export default function App() {
     ] },
     { label: 'Help', items: [
       { label: 'Quick start', action: () => setDialog('help') },
+      { label: 'Take the tour', action: () => setTourOn(true) },
+      { label: 'Start page', action: () => setHome(true) },
       { label: 'Keyboard shortcuts', action: () => setDialog('keys') },
       { label: 'Questions and ideas…', action: () => setDialog('tellus') },
       { label: 'About SurgeSpace', action: () => setDialog('about') },
@@ -714,6 +755,20 @@ export default function App() {
 
   return (
     <div className="app2">
+      {home && <StartPage plan={planLabel(lic)} version={`v${__APP_VERSION__}`} showAtStart={showAtStart} setShowAtStart={setShowAtStart} autosave={lastSession}
+        act={{
+          blank: () => { setHome(false); newProject(); },
+          wizard: () => setDialog('wizard'),
+          aiDrawings: () => { setHome(false); startFromDocuments(); },
+          importFile: () => setDialog('import'),
+          open: openProject,
+          recent: (e) => { try { load(upgradeProject(e.net), [`Opened “${e.name}” from the copy kept on this device (${new Date(e.when).toLocaleString()}).`]); } catch (err) { setToast([(err as Error).message]); } },
+          example: (id) => { const ex = EXAMPLES.find((x) => x.id === id); if (ex) load(ex.make(), [], true); },
+          workspace: () => setHome(false),
+          lastSession: () => { setHome(false); recover(); },
+          help: () => setDialog('help'),
+          tour: () => { setHome(false); setTourOn(true); },
+        }} />}
       <MenuBar menus={menus} right={
         <div className="row" style={{ gap: 6, paddingRight: 8 }}>
           <div className="brand"><Logo /> SurgeSpace</div>
@@ -815,7 +870,8 @@ export default function App() {
                 </select>
               </div>
             )}
-            {busy && <div className="progress"><div className="card"><span className="spinner" />{busy}{(busy.includes('Sizing') || busy.includes('case') || busy.includes('Uncertainty')) && <button className="btn small" style={{ marginLeft: 10 }} onClick={() => { cancelAll(); setBusy(null); }}>Cancel</button>}</div></div>}
+            {runProg && <RunScreen net={net} route={route} prog={runProg} onCancel={() => { cancelAll(); setBusy(null); setRunProg(null); }} />}
+            {busy && !runProg && <div className="progress"><div className="card"><span className="spinner" />{busy}{(busy.includes('Sizing') || busy.includes('case') || busy.includes('Uncertainty')) && <button className="btn small" style={{ marginLeft: 10 }} onClick={() => { cancelAll(); setBusy(null); }}>Cancel</button>}</div></div>}
             {!net.nodes.length && !busy && (
               <div className="empty-canvas card">
                 <b>Start drawing</b>
@@ -940,11 +996,15 @@ export default function App() {
         <span className="sep" />
         <button className="sb-btn" onClick={() => setUnits({ system: units.system === 'SI' ? 'US' : 'SI' })} title="Switch units">{units.system} · {units.flow} · {units.pressure}</button>
         <span className="sep" />
+        {savedAt && <span className="muted saved-at" title="Every change is kept on this device; File → Recover autosaved model restores it">✓ {tr('Kept on this device')} {new Date(savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
         <span className={busy ? 'warn' : stale ? 'muted' : 'good'}>{busy ? 'Running…' : !result ? 'Not run' : stale ? 'Changed since run' : `Run OK · ${fails ? `${fails} check${fails > 1 ? 's' : ''} to fix` : 'all checks pass'}`}</span>
         <button className="sb-btn" onClick={() => setTheme(theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto')} title="Theme">{theme === 'auto' ? '◐' : theme === 'dark' ? '☾' : '☀'}</button>
       </footer>
 
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} items={ctxItems()} onClose={() => setCtx(null)} />}
+      {palette && <Palette menus={menus} net={net} onGo={(r) => { setHome(false); goTo(r); }} onClose={() => setPalette(false)} />}
+      {tourOn && <Tour onClose={endTour} />}
+      {!home && !tourOn && tourInvite && <TourInvite onStart={() => { setTourInvite(false); setTourOn(true); }} onDismiss={endTour} />}
       {dialog === 'tellus' && <TellUsDialog where={`${left} · ${bottom} · ${net.name}`} onClose={() => setDialog(null)} />}
       {licReason !== undefined && <LicenceDialog reason={licReason ?? undefined} onClose={() => setLicReason(undefined)} />}
       <Suspense fallback={null}>
@@ -954,6 +1014,7 @@ export default function App() {
       {dialog === 'script' && <ScriptDialog ctx={aiCtx} onClose={() => setDialog(null)} />}
       {dialog === 'wizard' && <WizardDialog onClose={() => setDialog(null)} onBuilt={(n, notes, go) => void (async () => {
         setProject(n, 'New model wizard');
+        setHome(false); void addRecent(n, 'built');
         setRoute(defaultRoute(n)); setFitKey((k) => k + 1); setMode('plain'); setTool('select');
         setToast(['Model built by the wizard (Undo removes it):', ...notes]);
         if (!go) return;
@@ -965,7 +1026,7 @@ export default function App() {
         }
       })()} />}
       {dialog === 'map' && <MapDialog net={net} setNet={setNet} onClose={() => setDialog(null)} onToast={setToast} />}
-      {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} onImport={(n, notes) => { setDialog(null); load(n, notes); }} />}
+      {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} onImport={(n, notes) => { setDialog(null); load(n, notes, false, 'imported'); }} />}
       {dialog === 'setup' && <RunSetupDialog net={net} setNet={setNet} onClose={() => setDialog(null)} defaults={defaults} setDefaults={setDefaults} />}
       {dialog === 'catalogues' && <CataloguesDialog net={net} onClose={() => setDialog(null)} onApplyWave={selected.some((r) => r.type === 'pipe') ? (a) => { const ids = new Set(selected.filter((r) => r.type === 'pipe').map((r) => r.id)); setNet((n) => ({ ...n, pipes: n.pipes.map((p) => (ids.has(p.id) ? { ...p, wavespeed: a } : p)) }), 'Wave speed'); setDialog(null); } : undefined} />}
       {dialog === 'health' && <HealthDialog net={net} onClose={() => setDialog(null)} onGo={goTo} setNet={setNet} />}

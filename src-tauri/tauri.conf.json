@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "title": "SurgeSpace", "width": 1440, "height": 900, "minWidth": 1024, "minHeight": 640, "center": true }
+      { "label": "main", "title": "SurgeSpace", "width": 1440, "height": 900, "minWidth": 1024, "minHeight": 640, "center": true, "backgroundColor": "#07111F" }
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost https://surgespace-licences.engspace.app https: wss: ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*"

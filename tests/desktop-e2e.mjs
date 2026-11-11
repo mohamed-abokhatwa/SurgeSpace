@@ -62,6 +62,7 @@ try {
   const el = async (css) => (await wd('POST', `${S}/element`, { using: 'css selector', value: css }))['element-6066-11e4-a52e-4f735466cecf'];
 
   t('desktop app starts inside Tauri', await wait(() => js('return !!window.__TAURI_INTERNALS__ && !!document.querySelector(".statusbar")')));
+  await js(`const b=document.querySelector('.start-go'); b && b.click(); return true;`);
   const ran = await wait(() => js('return (document.querySelector(".statusbar")||{}).textContent||""').then((s) => s.includes('Run OK') && s), 90000);
   t('the example runs in the engine worker under the app’s content security policy', !!ran, String(ran).slice(0, 80));
   const mid = await wd('POST', `${S}/execute/async`, { script: 'const done = arguments[arguments.length - 1]; window.__TAURI_INTERNALS__.invoke("device_id").then((v) => done(String(v))).catch((e) => done("ERR " + e));', args: [] });
@@ -71,6 +72,8 @@ try {
   await js(`localStorage.setItem('surgespace.ai', JSON.stringify({ accounts: [{ id: 'a1', provider: 'ollama', model: 'test-model', baseUrl: 'http://127.0.0.1:8765/v1' }], active: 'a1', consent: true })); location.reload(); return true;`);
   await wait(() => js('return !!document.querySelector(".statusbar")'));
   await sleep(1500);
+  await js(`const b=document.querySelector('.start-go'); b && b.click(); return true;`);
+  await sleep(400);
   await js(`[...document.querySelectorAll('.ptab')].find((b) => b.textContent.includes('Copilot')).click(); return true;`);
   await wait(() => js('return !!document.querySelector(".copilot-body textarea")'), 20000);
   const ta = await el('.copilot-body textarea');

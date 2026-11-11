@@ -18,6 +18,32 @@ try {
   await p.waitForSelector('.statusbar', { timeout: 20000 });
   await p.waitForFunction(() => document.querySelector('.statusbar')?.textContent?.includes('Run OK'), null, { timeout: 30000 });
   t('example runs on start', true);
+  // start page: start cards and examples, then into the workspace
+  t('start page opens with the examples', (await p.locator('.start .thumb-card').count()) >= 8 && (await p.locator('.start-card').count()) === 5);
+  await p.locator('.start-go').click();
+  await p.waitForTimeout(300);
+  t('start page closes into the workspace', (await p.locator('.start').count()) === 0);
+  // tour invitation and tour
+  await p.getByRole('button', { name: 'Take the tour' }).click();
+  let steps = 0;
+  for (; steps < 10 && (await p.locator('.tour').count()); steps++) { await p.locator('.tour-card .btn.primary').click(); await p.waitForTimeout(380); }
+  t('tour walks through every step', steps === 7, `${steps} steps`);
+  // command palette: type part of a command and press Enter
+  await p.keyboard.press('Control+k');
+  await p.locator('.pal-in').fill('health');
+  await p.keyboard.press('Enter');
+  const health = await p.waitForSelector('.modal', { timeout: 5000 }).then(() => 1, () => 0);
+  t('command palette finds and runs a command', health === 1);
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150);
+  await p.keyboard.press('Control+k');
+  await p.locator('.pal-in').fill('HP2600');
+  await p.keyboard.press('Enter'); await p.waitForTimeout(200);
+  t('command palette finds an element', (await p.evaluate(() => document.querySelector('.statusbar')?.textContent ?? '')).includes('1 selected'));
+  // run screen with stages
+  await p.locator('.rb.run').click();
+  const rs = await p.waitForSelector('.run-screen', { timeout: 5000 }).then(() => 1, () => 0);
+  await p.waitForFunction(() => !document.querySelector('.run-screen'), null, { timeout: 30000 });
+  t('run screen shows the stages, then clears', rs === 1);
   for (const m of ['File', 'Edit', 'View', 'Model', 'Analysis', 'Results', 'Tools', 'AI', 'Help']) {
     await p.locator('.menu-btn', { hasText: new RegExp(`^${m}$`) }).click();
     const n = await p.locator('.menu-item').count();
@@ -58,6 +84,8 @@ try {
   await p.evaluate(() => localStorage.setItem('surgespace.lang', 'ar'));
   await p.reload(); await p.waitForTimeout(2500);
   t('Arabic interface is right to left', (await p.evaluate(() => document.documentElement.dir)) === 'rtl');
+  t('start page in Arabic', (await p.evaluate(() => document.querySelector('.start')?.textContent ?? '')).includes('ابدأ مشروعًا'));
+  await p.locator('.start-go').click(); await p.waitForTimeout(300);
   await p.locator('.dtab').nth(4).click(); await p.waitForTimeout(300);
   const arPanel = await p.evaluate(() => document.body.innerText.includes('حالة جديدة من الحالية') || document.body.innerText.includes('تشغيل كل الحالات'));
   t('panel contents are in Arabic', arPanel);

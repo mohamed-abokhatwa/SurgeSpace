@@ -11,6 +11,9 @@ import '@fontsource/ibm-plex-mono/latin-600.css'
 import './index.css'
 import App from './App.tsx'
 import { startPanelTranslation } from './app/i18n'
+import { bootStep } from './app/boot'
+
+bootStep('Loading engines…')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

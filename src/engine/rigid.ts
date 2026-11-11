@@ -417,6 +417,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   };
   const nodeMax = nodes.map((_, i) => H[i]), nodeMin = nodes.map((_, i) => H[i]);
   record(0);
+  const prog = opt.onProgress ? { every: Math.max(1, Math.floor(steps / 50)), max: Float32Array.from(H), min: Float32Array.from(H) } : null;
   for (let k = 1; k <= steps; k++) {
     const t = k * dt;
     step(t);
@@ -430,6 +431,10 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
       }
     }
     if (k % every === 0 && frame < fr) record(t);
+    if (prog) {
+      for (let i = 0; i < H.length; i++) { if (H[i] > prog.max[i]) prog.max[i] = H[i]; if (H[i] < prog.min[i]) prog.min[i] = H[i]; }
+      if (k % prog.every === 0 || k === steps) opt.onProgress!({ frac: k / steps, t, duration: st.duration, nodeMax: prog.max.slice(), nodeMin: prog.min.slice() });
+    }
   }
   if (slow) warnings.push(`The rigid-column solve converged slowly at ${slow} step(s).`);
   for (const p of env) if (p.e.hMin.some((h, m) => h - p.e.z[m] < HV - HB)) { warnings.push(`Pressure falls to vapour pressure in pipe ${p.pipe.id}: the water column would separate. Use the wave engine for this case.`); break; }

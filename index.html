@@ -3,10 +3,53 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>SurgeSpace</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2307111F'/%3E%3Cpath d='M3 20 L9 20 L12 7 L16 25 L19 13 L22 20 L29 20' fill='none' stroke='%23FF7A1A' stroke-width='2.6' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <style>
+      /* Launch screen: drawn by the browser before any script loads, removed once the workspace is ready. */
+      html, body { background: #07111f; }
+      #boot { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; background: radial-gradient(1200px 600px at 50% 40%, #0e2440 0%, #07111f 60%); color: #e6edf6; font: 14px/1.4 'IBM Plex Sans', system-ui, sans-serif; transition: opacity 0.28s ease, visibility 0.28s; }
+      #boot.out { opacity: 0; visibility: hidden; }
+      #boot .bx { display: flex; flex-direction: column; align-items: center; gap: 18px; transform: translateY(-4vh); }
+      #boot .mark { width: 76px; height: 76px; }
+      #boot .mark path { stroke-dasharray: 64; stroke-dashoffset: 64; animation: bdraw 0.7s cubic-bezier(.6,.1,.2,1) 0.05s forwards; }
+      #boot .word { font-size: 26px; font-weight: 600; letter-spacing: 0.2px; opacity: 0; animation: bfade 0.4s ease 0.35s forwards; }
+      #boot .word b { color: #ff7a1a; font-weight: 600; }
+      #boot .pipe { position: relative; width: 280px; height: 6px; border-radius: 3px; background: linear-gradient(#1b3150, #12243d); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06); overflow: hidden; opacity: 0; animation: bfade 0.3s ease 0.45s forwards; }
+      #boot .pipe::before { content: ''; position: absolute; top: 0; bottom: 0; width: 70px; left: -70px; background: linear-gradient(90deg, transparent, rgba(255,122,26,0.15) 30%, #ff7a1a 50%, rgba(255,122,26,0.15) 70%, transparent); animation: bwave 1.15s cubic-bezier(.5,0,.5,1) 0.5s infinite; }
+      #boot .pipe::after { content: ''; position: absolute; top: 0; bottom: 0; width: 70px; left: 280px; background: linear-gradient(90deg, transparent, rgba(92,200,255,0.12) 30%, rgba(92,200,255,0.75) 50%, rgba(92,200,255,0.12) 70%, transparent); animation: bwaveback 1.15s cubic-bezier(.5,0,.5,1) 1.08s infinite; }
+      #boot .step { height: 18px; font: 12px/18px 'IBM Plex Mono', ui-monospace, monospace; color: #93a4ba; opacity: 0; animation: bfade 0.3s ease 0.5s forwards; }
+      #boot .foot { position: fixed; bottom: 22px; left: 0; right: 0; text-align: center; font: 11px 'IBM Plex Mono', ui-monospace, monospace; color: #5d6f86; letter-spacing: 0.4px; }
+      @keyframes bdraw { to { stroke-dashoffset: 0; } }
+      @keyframes bfade { to { opacity: 1; } }
+      @keyframes bwave { 0% { left: -70px; } 100% { left: 280px; } }
+      @keyframes bwaveback { 0% { left: 280px; } 100% { left: -70px; } }
+      @media (prefers-reduced-motion: reduce) { #boot * { animation-duration: 0.01s !important; animation-iteration-count: 1 !important; } }
+    </style>
   </head>
   <body>
+    <div id="boot" role="status" aria-live="polite">
+      <div class="bx">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0b1d33" stroke="rgba(120,170,230,0.18)" /><path d="M3 20 L9 20 L12 7 L16 25 L19 13 L22 20 L29 20" fill="none" stroke="#FF7A1A" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" /></svg>
+        <div class="word">Surge<b>Space</b></div>
+        <div class="pipe"></div>
+        <div class="step" id="boot-step">Starting…</div>
+      </div>
+      <div class="foot">Hydraulic transients · Daily operation · AI copilot</div>
+    </div>
+    <script>
+      // boot steps reported by the app; the screen stays at least 0.7 s so it never flickers
+      (function () {
+        var t0 = Date.now(), el = document.getElementById('boot'), st = document.getElementById('boot-step');
+        window.__boot = {
+          step: function (s) { if (st) st.textContent = s; },
+          done: function () { var w = Math.max(0, 700 - (Date.now() - t0)); setTimeout(function () { el.classList.add('out'); setTimeout(function () { el.remove(); }, 400); }, w); }
+        };
+        // never leave the screen up if something fails to start
+        setTimeout(function () { if (document.getElementById('boot')) window.__boot.done(); }, 12000);
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

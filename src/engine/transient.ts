@@ -92,7 +92,10 @@ export interface RunOptions {
   fixedDt?: number;
   /** Turn column separation off: heads may fall below vapour pressure (for comparison with codes without a cavity model). */
   noCavitation?: boolean;
+  /** Progress about 50 times per run: fraction done, simulated time and the node head envelopes so far. */
+  onProgress?: (p: RunProgress) => void;
 }
+export interface RunProgress { frac: number; t: number; duration: number; nodeMax: Float32Array; nodeMin: Float32Array }
 
 /** Pick the largest time step that keeps every pipe's wave-speed adjustment under the tolerance. */
 export function selectTimeStep(
@@ -1072,6 +1075,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   };
   record(0);
 
+  const prog = opt.onProgress ? { every: Math.max(1, Math.floor(steps / 50)), max: Float32Array.from(Hn), min: Float32Array.from(Hn) } : null;
   let huBuf = new Float64Array(16);
   for (let step = 1; step <= steps; step++) {
     const t = step * dt;
@@ -1416,6 +1420,10 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     }
     Hprev.set(Hn);
     if (frames && step % every === 0 && frame < nFrames) record(t);
+    if (prog) {
+      for (let i = 0; i < NN; i++) { if (Hn[i] > prog.max[i]) prog.max[i] = Hn[i]; if (Hn[i] < prog.min[i]) prog.min[i] = Hn[i]; }
+      if (step % prog.every === 0 || step === steps) opt.onProgress!({ frac: step / steps, t, duration: st.duration, nodeMax: prog.max.slice(), nodeMin: prog.min.slice() });
+    }
     if (!Number.isFinite(Hn[0]) || Hn.some((h) => !Number.isFinite(h))) {
       warnings.push(`The solution became unstable at t = ${t.toFixed(3)} s. Check device data (vessel size, pump curve, inertia).`);
       break;
