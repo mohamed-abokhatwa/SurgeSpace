@@ -20,6 +20,15 @@ pumps whose speed is found (secant) to meet a pressure set point.
   valves with response time), check valves (ideal, delay, reverse velocity, dynamic characteristic), air vessels
   (polytropic gas, shape, bladder, dip tube, bypass), air valves (isentropic air flow, three-stage, curves), open
   and one-way tanks, anticipator, relief, outlets and burst discs, turbines (gate operation and speed).
+- Differential (Johnson) surge tanks: the riser follows the pipe head (with its connection loss); the chamber fills
+  and empties through the ports (orifice law, implicit chamber level over the step); the riser overflows into the
+  chamber. Both engines.
+- Motor start-up: the speed comes from the torque balance I·dω/dt = T_motor(ω) − T_pump(ω, Q), with the motor
+  torque–speed curve (typical design B or a table), star–delta (torque / 3 below the switch speed) or a soft starter
+  (torque ∝ V², voltage ramp). Both engines.
+- Turbine runner characteristics: flow and efficiency follow the unit speed ν = (n/n_r)/√(H/H_r) (Francis low and
+  high specific speed, Kaplan, Pelton or a table; efficiency zero at runaway), with the runner speed integrated in
+  the time loop from the power balance and the governor acting on the gates.
 - Slams at check valves and air valves are detected and reported with the Joukowsky estimate and the computed rise.
 
 ## 3. Rigid-column engine
@@ -47,7 +56,13 @@ wall reactions with mass transfer (Sherwood number), completely mixed tanks, boo
 | Surge tank mass oscillation | Jaeger's formula; wave engine | within 5 %; engines agree within 1 % |
 | Pipe force on a straight pipe | ρ·a·V·A | within 12 % (line packing) |
 | Variable-speed drive | set point | holds the pressure in steady state and after a demand step |
+| Differential surge tank | limits: ports wide open = plain tank of full area; ports shut = riser alone | within 5 %; engines agree within 2 % |
+| Motor start | final speed and duty; run-up order DOL < star–delta < soft start | speed within 3 % of rated; engines agree |
+| Turbine runner characteristics | trends: Francis chokes (higher rise), Kaplan relieves (lower rise) vs a speed-independent runner | as expected; steady state unchanged |
+| Pipe class optimisation | rising main | feasible, cheaper than the highest classes, higher class near the pumps |
 | Calibration | synthetic field data | recovers roughness ×3 and demand ×1.2 |
 | UTM conversion | PROJ | within 0.2 mm |
+| DXF export | ezdxf (independent reader) | no audit errors |
+| QGIS plug-in | QGIS 3.34 (headless) | export, SurgeSpace import and results layers |
 
 Reference data and generators: `validation/data/` (WNTR scripts and JSON results).

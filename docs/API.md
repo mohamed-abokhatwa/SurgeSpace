@@ -2,7 +2,7 @@
 
 Every change to a model goes through these commands — the menus, the AI copilot and scripts (Tools → Script console: `await ss.<name>({…})`) use the same set, so every change is one undo step and every number comes from the engines. Units are SI as named in each parameter.
 
-Generated from `src/app/commands.ts`.
+Generated from `src/app/commands.ts` by `scripts/gen-api.ts`.
 
 ## get_model (read only)
 
@@ -71,7 +71,7 @@ Build a whole pipeline from a long section in one step: points by chainage and l
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `points` | array | yes | Long-section points in order |
+| `points` | array of object | yes | Long-section points in order |
 | `diameter_mm` | number | yes | Internal diameter, mm |
 | `wavespeed_mps` | number |  | Wave speed, m/s |
 | `roughness` | number |  | ε mm or C |
@@ -128,7 +128,7 @@ Change fields of one or more elements of the same type. Node fields: label, x, y
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `type` | string (node, pipe, pump, valve) | yes | Element type |
-| `ids` | array | yes | Element ids |
+| `ids` | array of string | yes | Element ids |
 | `values` | object | yes | Field → value |
 
 ## add_device
@@ -143,7 +143,7 @@ Put a protection device on a junction: vessel, airValve, standpipe, feedTank, an
 
 ## set_device
 
-Change a device on a junction. vessel: volume_m3, gas_volume_m3, connection_mm, k_in, k_out, polytropic_n, shape, bladder. airValve: type, inflow_mm, outflow_mm, small_mm. standpipe/feedTank: diameter_m, bottom_m, top_m, connection_mm. relief: set_head_m, diameter_mm. anticipator: low_set_m, diameter_mm, open_s, hold_s, close_s. blowoff/burstDisc: diameter_mm, opens_at_s, burst_head_m.
+Change a device on a junction. vessel: volume_m3, gas_volume_m3, connection_mm, k_in, k_out, polytropic_n, shape, bladder. airValve: type, inflow_mm, outflow_mm, small_mm. standpipe/feedTank: diameter_m, bottom_m, top_m, connection_mm, riser_diameter_m, port_area_m2, riser_top_m. relief: set_head_m, diameter_mm. anticipator: low_set_m, diameter_mm, open_s, hold_s, close_s. blowoff/burstDisc: diameter_mm, opens_at_s, burst_head_m.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -166,7 +166,7 @@ Delete elements. Deleting a node also deletes the pipes, pumps and valves connec
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `refs` | array | yes |  |
+| `refs` | array of object | yes | Items: type, id |
 
 ## rename_element
 
@@ -184,7 +184,7 @@ Replace the run's operations (what happens during the surge run). Kinds: pump_tr
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `operations` | array | yes |  |
+| `operations` | array of object | yes | Items: kind, targets, start_s, duration_s, final_opening, exponent, curve |
 
 ## set_run_settings
 
@@ -223,8 +223,8 @@ Create or replace time patterns (multipliers per pattern step, repeating), e.g. 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `patterns` | array |  |  |
-| `assign` | array |  | Assignments |
+| `patterns` | array of object |  | Items: id, factors |
+| `assign` | array of object |  | Assignments |
 
 ## set_storage
 
@@ -246,7 +246,7 @@ Replace the simple controls of the extended-period run. Each: link (pump, pipe o
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `controls` | array | yes |  |
+| `controls` | array of object | yes | Items: link, status, setting, at_h, clock_h, node, op, value |
 
 ## set_rules
 
@@ -266,11 +266,12 @@ Run the extended-period simulation (daily operation: tank levels, pump cycling, 
 
 ## optimise_protection
 
-Least-cost surge protection by a genetic algorithm: chooses sizes (or none) for candidate air vessels and air valves so the pressure limits are met, judging every design with a full surge run. Without candidates it uses vessels at pump discharges and air valves at high points. Applies the best design. Takes from seconds to a few minutes.
+Least-cost surge protection by a genetic algorithm: chooses sizes (or none) for candidate air vessels and air valves — and optionally the pressure class or diameter of the pipes — so the pressure limits are met, judging every design with a full surge run. Without candidates it uses vessels at pump discharges and air valves at high points. Applies the best design. Takes from seconds to a few minutes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `candidates` | array |  |  |
+| `candidates` | array of object |  | Items: node, kind, options |
+| `pipes` | string (none, class, diameter) |  | Also choose pipe pressure classes (class) or diameters (diameter) |
 
 ## skeletonise
 
@@ -278,12 +279,30 @@ Simplify the model: merge pipes in series through plain junctions (same diameter
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `keep` | array |  |  |
+| `keep` | array of string |  |  |
 | `trim_below_mm` | number |  | Trim dead ends below this diameter (0 = off) |
 
 ## health_check (read only)
 
 Check the model for errors and implausible inputs before running.
+
+## query_elements (read only)
+
+Find elements by data and results, e.g. "pipes where diameter_mm < 200 and material = PVC", "nodes where max_pressure_m > 120 or min_pressure_m < 0". Highlights them on the drawing and returns the ids.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | yes | Query text |
+
+## create_case
+
+Keep the current model as a case and continue in a new named copy (e.g. "Power failure, both pumps", "Valve V1 closes in 10 s"). Then change that copy (operations, devices). Cases are compared side by side in the Cases tab. With inherit, the new case is a child that keeps only its own changes, so later corrections to the current case flow into it (use it for variants of one design).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Name of the new case |
+| `notes` | string |  | What the case represents |
+| `inherit` | boolean |  | Child case that inherits from the current one |
 
 ## apply_health_fixes
 
@@ -304,7 +323,7 @@ Results of the last run: "summary", "nodes" (pressures at every node), "pipes" (
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `what` | string (summary, nodes, pipes, forces) | yes | What |
-| `ids` | array |  | Limit to these ids |
+| `ids` | array of string |  | Limit to these ids |
 
 ## size_air_vessel (read only)
 
@@ -324,5 +343,4 @@ Highlight elements on the drawing for the user (to show where something is).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `refs` | array | yes |  |
-
+| `refs` | array of object | yes | Items: type, id |
