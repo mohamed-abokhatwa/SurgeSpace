@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { TransientResult } from '../engine/transient';
 import { area, type Network, type NetNode, type Pipe, type Pump, type Valve } from '../engine/types';
 import { estimateInertia, pumpRatedQ } from '../engine/hydraulics';
-import { turbineK, turbineSpeeds } from '../engine/analysis';
+import { turbineK, turbineSpeeds } from '../engine/results';
 import { DeviceEditors, DeviceDatalists } from './DeviceEditors';
 import { CheckValveEditor, PairsField, ValveLinkEditor } from './ValveEditors';
 import { EL, nodeDevices, nodeKind, valveKind } from '../app/elements';

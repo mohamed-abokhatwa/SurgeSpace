@@ -2,7 +2,7 @@
 // export the series to CSV. The element-by-element device histories stay available under "All devices".
 import { useMemo, useState } from 'react';
 import type { TransientResult } from '../engine/transient';
-import { turbineSpeeds } from '../engine/analysis';
+import { turbineSpeeds } from '../engine/results';
 import { area, type Network } from '../engine/types';
 import { Chart, type Series } from './Chart';
 import { HistoryView } from './HistoryView';

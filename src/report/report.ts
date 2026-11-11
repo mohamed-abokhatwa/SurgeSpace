@@ -1,7 +1,7 @@
 // Detailed transient analysis report: a self-contained HTML document (tables and SVG charts, no external files)
 // that prints to A4 / PDF. Sections follow the usual surge study layout: title page, summary of findings,
 // model and method, input data, steady state, transient results, protection devices, checks, time histories.
-import { pipeForces, turbineSpeeds, type Check } from '../engine/analysis';
+import { pipeForces, turbineSpeeds, type Check } from '../engine/results';
 import { valveArea } from '../engine/devices';
 import type { TransientResult } from '../engine/transient';
 import { G, HB, HV, area, type CheckValveSpec, type Network } from '../engine/types';

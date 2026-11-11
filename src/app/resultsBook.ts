@@ -1,5 +1,5 @@
 // Results workbook: model data and surge / daily-operation results, one sheet per table.
-import { pipeForces, type Check } from '../engine/analysis';
+import { pipeForces, type Check } from '../engine/results';
 import type { EPSResult } from '../engine/eps';
 import type { TransientResult } from '../engine/transient';
 import { area, type Network } from '../engine/types';

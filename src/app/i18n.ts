@@ -1,7 +1,6 @@
 // Interface language (English / Arabic). Menus, ribbon, tabs and the contents of the panels and dialogs are translated; the layout turns
 // right-to-left in Arabic. Engineering terms that have no settled Arabic form keep their English name.
 import { useSyncExternalStore } from 'react';
-import { AR_PANELS } from './i18n-panels';
 
 export type Lang = 'en' | 'ar';
 let lang: Lang = (() => { try { return (localStorage.getItem('surgespace.lang') as Lang) || 'en'; } catch { return 'en'; } })();
@@ -63,7 +62,13 @@ export function tr(s: string): string {
 }
 
 // ── panel contents: translate the interface text as it is drawn ──
-const ALL_AR: Record<string, string> = { ...AR_PANELS, ...AR };
+let ALL_AR: Record<string, string> = { ...AR };
+let panelsLoaded: Promise<void> | null = null;
+/** The panel dictionary is loaded only when the interface is in Arabic. */
+function loadPanels(): Promise<void> {
+  panelsLoaded ??= import('./i18n-panels').then((m) => { ALL_AR = { ...m.AR_PANELS, ...AR }; });
+  return panelsLoaded;
+}
 const SKIP = 'TEXTAREA, INPUT, CODE, PRE, SCRIPT, STYLE, .md, .no-tr, [contenteditable]';
 const original = new WeakMap<Node, string>();
 const originalTitle = new WeakMap<Element, string>();
@@ -115,6 +120,7 @@ export function startPanelTranslation(root: HTMLElement) {
     }
   });
   observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['title'] });
-  translateNode(root);
-  subs.add(() => translateNode(root));
+  const run = () => { if (lang === 'ar') void loadPanels().then(() => translateNode(root)); else translateNode(root); };
+  run();
+  subs.add(run);
 }

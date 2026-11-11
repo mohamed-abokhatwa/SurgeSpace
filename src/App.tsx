@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import type { AirValveSuggestion, Check, VesselSizing } from './engine/analysis';
 import { EXAMPLES } from './engine/cases';
-import { toInp } from './engine/inp';
 import type { PipeEnvelope, TransientResult } from './engine/transient';
 import { defaultSettings, type Network } from './engine/types';
 import { call, cancelAll } from './ui/client';
-import { ImportDialog } from './ui/ImportDialog';
-import { ReportDialog } from './ui/ReportDialog';
 import { Canvas, colorByPipes, surgeScale, type ColorBy, type ContourBy, type ColorMode, type Tool, type ValueLabel, type ViewOpts } from './ui/Canvas';
 import { Timeline } from './ui/Timeline';
 import { ChecksView, ProtectionPanel } from './ui/panels';
@@ -21,36 +18,57 @@ import { DEFAULTS, deleteElements, duplicateNodes, insertOnPipe, lengthsFromDraw
 import { fmtQ, setUnits, uLabel, toShow, useUnits } from './app/units';
 import { Properties } from './ui/Properties';
 import { OperationsPanel } from './ui/Operations';
-import { BackgroundDialog, CataloguesDialog, FindDialog, HealthDialog, HelpDialog, ProjectDialog, RunSetupDialog } from './ui/Dialogs';
-import { DataSheets } from './ui/DataSheets';
 import { CasesPanel, addCase, syncActive } from './ui/Cases';
-import { LivePanel } from './ui/LivePanel';
-import { MapDialog } from './ui/MapDialog';
-import { LibraryPanel } from './ui/LibraryPanel';
-import { ScriptDialog } from './ui/ScriptDialog';
-import { WizardDialog } from './ui/WizardDialog';
-import { EPSPanel, epsPipeColours, type EPSColour } from './ui/EPSPanel';
+import { epsPipeColours, type EPSColour } from './ui/epsColours';
 import { clock, networkAt, type EPSResult } from './engine/eps';
-import { skeletonise } from './engine/skeleton';
-import { fromGeoJSON, toDXF, toGeoJSON, type GeoJSON } from './app/exchange';
-import { xlsx } from './app/xlsx';
-import { plotSVG } from './app/plot';
+import type { GeoJSON } from './app/exchange';
 import { applyDir, setLang, tr, useLang } from './app/i18n';
-import { resultsBook } from './app/resultsBook';
-import { applyDesign, type Design, type OptVar } from './engine/optimise';
+import type { Design, OptVar } from './engine/optimise';
 import { Explorer } from './ui/Explorer';
 import { GraphsView, type GraphItem } from './ui/GraphsView';
 import { healthCheck } from './app/health';
 import type { CommandContext, RunOutput } from './app/commands';
 import { projectJson, upgradeProject } from './app/project';
-import { AI_TASKS } from './ai/agent';
+import { AI_TASKS } from './ai/tasks';
 import { initAITransport } from './ai/transport';
 import { useAI } from './ai/accounts';
-import { AIAccountsDialog, CopilotPanel } from './ui/AIPanel';
 
 type LeftTab = 'explorer' | 'operations' | 'library';
 type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log' | 'eps' | 'live';
 interface UncertaintyOut { runs: { label: string; maxHead: number; minPressure: number }[]; envelopes: PipeEnvelope[]; spread: { maxHead: [number, number]; minPressure: [number, number] } }
+
+// panels and dialogs load when first opened, so the app starts quickly
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function lazyNamed<M extends Record<string, any>, K extends keyof M>(load: () => Promise<M>, name: K): M[K] {
+  return lazy(() => load().then((m) => ({ default: m[name] as ComponentType<unknown> }))) as unknown as M[K];
+}
+const ImportDialog = lazyNamed(() => import('./ui/ImportDialog'), 'ImportDialog');
+const ReportDialog = lazyNamed(() => import('./ui/ReportDialog'), 'ReportDialog');
+const DataSheets = lazyNamed(() => import('./ui/DataSheets'), 'DataSheets');
+const LivePanel = lazyNamed(() => import('./ui/LivePanel'), 'LivePanel');
+const MapDialog = lazyNamed(() => import('./ui/MapDialog'), 'MapDialog');
+const LibraryPanel = lazyNamed(() => import('./ui/LibraryPanel'), 'LibraryPanel');
+const ScriptDialog = lazyNamed(() => import('./ui/ScriptDialog'), 'ScriptDialog');
+const WizardDialog = lazyNamed(() => import('./ui/WizardDialog'), 'WizardDialog');
+const EPSPanel = lazyNamed(() => import('./ui/EPSPanel'), 'EPSPanel');
+const BackgroundDialog = lazyNamed(() => import('./ui/Dialogs'), 'BackgroundDialog');
+const CataloguesDialog = lazyNamed(() => import('./ui/Dialogs'), 'CataloguesDialog');
+const FindDialog = lazyNamed(() => import('./ui/Dialogs'), 'FindDialog');
+const HealthDialog = lazyNamed(() => import('./ui/Dialogs'), 'HealthDialog');
+const HelpDialog = lazyNamed(() => import('./ui/Dialogs'), 'HelpDialog');
+const ProjectDialog = lazyNamed(() => import('./ui/Dialogs'), 'ProjectDialog');
+const RunSetupDialog = lazyNamed(() => import('./ui/Dialogs'), 'RunSetupDialog');
+const AIAccountsDialog = lazyNamed(() => import('./ui/AIPanel'), 'AIAccountsDialog');
+const CopilotPanel = lazyNamed(() => import('./ui/AIPanel'), 'CopilotPanel');
+
+// after start-up, fetch the panel and dialog code in the background so they open at once
+if (typeof window !== 'undefined') {
+  const warm = () => { for (const f of [() => import('./ui/Dialogs'), () => import('./ui/AIPanel'), () => import('./ui/DataSheets'), () => import('./ui/EPSPanel'), () => import('./ui/ReportDialog'), () => import('./ui/ImportDialog'), () => import('./ui/LivePanel'), () => import('./ui/MapDialog'), () => import('./ui/WizardDialog'), () => import('./ui/ScriptDialog'), () => import('./ui/LibraryPanel')]) void f().catch(() => {}); };
+  const ric = (window as Window & { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
+  window.addEventListener('load', () => (ric ? ric(warm, { timeout: 4000 }) : setTimeout(warm, 1500)));
+}
+const LOADING = <div className="muted small" style={{ padding: 12 }}>Loading…</div>;
+
 type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai' | 'map' | 'script' | 'wizard';
 
 const Logo = () => (
@@ -315,8 +333,9 @@ export default function App() {
       return out.eps;
     } catch (e) { setToast([(e as Error).message]); } finally { setBusy(null); }
   };
-  const doSkeleton = () => {
+  const doSkeleton = async () => {
     const cur = netRef.current;
+    const { skeletonise } = await import('./engine/skeleton');
     const sk = skeletonise(cur, { keep: selected.filter((r) => r.type === 'node').map((r) => r.id) });
     if (!sk.changes.length) { setToast(['Nothing to simplify: every junction carries a demand, a device, a branch or a change of pipe.']); return; }
     const withCase = addCase(cur, 'Skeleton');
@@ -331,6 +350,7 @@ export default function App() {
       const { best, vars, evaluations } = out.optimise;
       const cur = netRef.current;
       const withCase = addCase(cur, 'Optimised protection');
+      const { applyDesign } = await import('./engine/optimise');
       setProject({ ...applyDesign(cur, vars, best.genes), cases: withCase.cases, activeCase: withCase.activeCase }, 'Optimise protection');
       const lines = vars.map((v, k) => { const x = v.options[best.genes[k]]; return v.kind === 'pipeClass' ? `Pipe ${v.node}: class ${x.toFixed(0)} m (PN${Math.round(x / 10.2)})` : v.kind === 'pipeDiameter' ? `Pipe ${v.node}: DN${Math.round(x * 1000)}` : `${v.kind === 'vessel' ? 'Air vessel' : 'Air valve'} at ${v.node}: ${x ? (v.kind === 'vessel' ? `${x} m³` : `DN${Math.round(x * 1000)}`) : 'none'}`; });
       setToast([best.feasible ? `Least-cost design meeting the limits (${evaluations} surge runs), applied as case “Optimised protection”:` : `No design met all limits; the best found (${evaluations} surge runs) is applied as case “Optimised protection”:`, ...lines, `Lowest pressure ${best.minP.toFixed(1)} m; highest ${(best.maxRatio * 100).toFixed(0)} % of the pipe class. Press Run to see it.`]);
@@ -378,7 +398,7 @@ export default function App() {
   };
   const newProject = () => { load(blankModel()); setTool('pipe'); setToast(['New model. Draw with the Pipe tool: click to place junctions, Shift+click for bends. Add a Fixed-Level Source first.']); };
   const recover = () => { const s = readLS('surgespace.autosave'); if (!s) { setToast(['Nothing autosaved on this device yet.']); return; } try { load(upgradeProject(JSON.parse(s))); setToast(['Recovered the last autosaved model.']); } catch { setToast(['The autosave could not be read.']); } };
-  const exportInp = () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.inp`, toInp(net));
+  const exportInp = () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && void import('./engine/inp').then(({ toInp }) => download(`${safeName(net.name)}.inp`, toInp(net)));
   const exportEnv = () => {
     if (!result || !allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.')) return;
     const fL = toShow(1, 'length'), fH = toShow(1, 'head'), fP = toShow(1, 'pressureHead');
@@ -480,13 +500,13 @@ export default function App() {
       { label: 'Save project', shortcut: 'Ctrl+S', action: saveProject },
       'sep',
       { label: 'Import (EPANET, spreadsheet, long section, DXF)…', action: () => setDialog('import') },
-      { label: 'Import GIS layer (GeoJSON)…', action: () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.geojson,.json'; i.onchange = () => i.files?.[0]?.text().then((t) => { try { const g = JSON.parse(t) as GeoJSON; if (g.type !== 'FeatureCollection') throw new Error('Not a GeoJSON FeatureCollection.'); const r = fromGeoJSON(g); load(r.network, [`${r.network.pipes.length} pipes and ${r.network.nodes.length} nodes from ${i.files![0].name}. Fields were matched by name (id, elevation, diameter, material…).`, ...r.notes]); } catch (e) { setToast([(e as Error).message]); } }); i.click(); } },
+      { label: 'Import GIS layer (GeoJSON)…', action: () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.geojson,.json'; i.onchange = () => i.files?.[0]?.text().then(async (t) => { try { const g = JSON.parse(t) as GeoJSON; if (g.type !== 'FeatureCollection') throw new Error('Not a GeoJSON FeatureCollection.'); const { fromGeoJSON } = await import('./app/exchange'); const r = fromGeoJSON(g); load(r.network, [`${r.network.pipes.length} pipes and ${r.network.nodes.length} nodes from ${i.files![0].name}. Fields were matched by name (id, elevation, diameter, material…).`, ...r.notes]); } catch (e) { setToast([(e as Error).message]); } }); i.click(); } },
       { label: 'Export EPANET .inp', action: exportInp },
-      { label: 'Export GIS (GeoJSON, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.geojson`, JSON.stringify(toGeoJSON(net, result, epsRes?.r ?? null)), 'application/geo+json') },
-      { label: 'Export CAD (DXF, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.dxf`, toDXF(net, result, Math.max(1, Math.round(Math.max(...net.nodes.map((n) => Math.abs(n.x)), 100) / 300))), 'application/dxf') },
+      { label: 'Export GIS (GeoJSON, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && void import('./app/exchange').then(({ toGeoJSON }) => download(`${safeName(net.name)}.geojson`, JSON.stringify(toGeoJSON(net, result, epsRes?.r ?? null)), 'application/geo+json')) },
+      { label: 'Export CAD (DXF, with results)', action: () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && void import('./app/exchange').then(({ toDXF }) => download(`${safeName(net.name)}.dxf`, toDXF(net, result, Math.max(1, Math.round(Math.max(...net.nodes.map((n) => Math.abs(n.x)), 100) / 300))), 'application/dxf')) },
       { label: 'Export envelopes .csv', action: exportEnv, disabled: !result },
-      { label: 'Export drawing to scale (SVG)', sub: (['A3', 'A1'] as const).map((sh) => ({ label: `${sh} sheet`, action: () => { const p = plotSVG(net, result, { sheet: sh }); download(`${safeName(net.name)}-${sh}-1to${p.scale}.svg`, p.svg, 'image/svg+xml'); setToast([`Drawing at 1:${p.scale} on ${sh}. Print at 100 % (actual size) to keep the scale.`]); } })) },
-      { label: 'Export results workbook (Excel .xlsx)', action: () => { if (!allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.')) return; const bytes = xlsx(resultsBook(net, result, checks, epsRes?.r ?? null)); const blob = new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${safeName(net.name)}-results.xlsx`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); } },
+      { label: 'Export drawing to scale (SVG)', sub: (['A3', 'A1'] as const).map((sh) => ({ label: `${sh} sheet`, action: async () => { const { plotSVG } = await import('./app/plot'); const p = plotSVG(net, result, { sheet: sh }); download(`${safeName(net.name)}-${sh}-1to${p.scale}.svg`, p.svg, 'image/svg+xml'); setToast([`Drawing at 1:${p.scale} on ${sh}. Print at 100 % (actual size) to keep the scale.`]); } })) },
+      { label: 'Export results workbook (Excel .xlsx)', action: async () => { if (!allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.')) return; const [{ xlsx }, { resultsBook }] = await Promise.all([import('./app/xlsx'), import('./app/resultsBook')]); const bytes = xlsx(resultsBook(net, result, checks, epsRes?.r ?? null)); const blob = new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${safeName(net.name)}-results.xlsx`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); } },
       'sep',
       { label: 'Project details…', action: () => setDialog('project') },
       { label: 'Detailed report…', action: openReport, disabled: !result },
@@ -748,7 +768,7 @@ export default function App() {
             <div className="pane-body">
               {left === 'explorer' && <Explorer net={net} selected={selected} onSelect={select} />}
               {left === 'operations' && <OperationsPanel net={net} setNet={setNet} />}
-              {left === 'library' && <LibraryPanel net={net} setNet={setNet} selected={selected} onToast={setToast} />}
+              {left === 'library' && <Suspense fallback={LOADING}><LibraryPanel net={net} setNet={setNet} selected={selected} onToast={setToast} /></Suspense>}
             </div>
           </>}
         </aside>
@@ -839,11 +859,11 @@ export default function App() {
             </div>
             {dock !== 'min' && (
               <div className="dock-body">
-                {bottom === 'tables' && <DataSheets net={net} setNet={setNet} result={result} onSelect={(r) => setSelected(r)} selected={selected} />}
+                {bottom === 'tables' && <Suspense fallback={LOADING}><DataSheets net={net} setNet={setNet} result={result} onSelect={(r) => setSelected(r)} selected={selected} /></Suspense>}
                 {bottom === 'cases' && <CasesPanel net={net} setProject={setProject} busy={!!busy} setBusy={setBusy} onResults={(r) => { setCaseRes(r); setOverlayIds(r.filter((c) => c.id !== net.activeCase).map((c) => c.id).slice(0, 3)); }} />}
                 {bottom === 'protection' && <div style={{ maxWidth: 620 }}><ProtectionPanel net={net} setNet={(f) => setNet(f, 'Apply sizing')} busy={!!busy} onSizeVessel={doSize} onAirValves={doAir} sizing={sizing} airSugg={airSugg} /></div>}
-                {bottom === 'eps' && <EPSPanel net={net} setNet={setNet} result={epsRes?.r ?? null} busy={!!busy} onRun={() => void doEPS()} k={Math.min(epsK, (epsRes?.r.times.length ?? 1) - 1)} setK={setEpsK} colour={epsColour} setColour={(c) => { setEpsColour(c); if (c !== 'none') setMode('plain'); }} onSurgeAt={surgeAt} selected={selected} />}
-                {bottom === 'live' && <LivePanel net={net} setNet={setNet} eps={epsRes?.r ?? null} onToast={setToast} />}
+                {bottom === 'eps' && <Suspense fallback={LOADING}><EPSPanel net={net} setNet={setNet} result={epsRes?.r ?? null} busy={!!busy} onRun={() => void doEPS()} k={Math.min(epsK, (epsRes?.r.times.length ?? 1) - 1)} setK={setEpsK} colour={epsColour} setColour={(c) => { setEpsColour(c); if (c !== 'none') setMode('plain'); }} onSurgeAt={surgeAt} selected={selected} /></Suspense>}
+                {bottom === 'live' && <Suspense fallback={LOADING}><LivePanel net={net} setNet={setNet} eps={epsRes?.r ?? null} onToast={setToast} /></Suspense>}
                 {!result && !['tables', 'cases', 'protection', 'eps', 'live'].includes(bottom) ? <div className="empty">Results appear here after a run. Press <b>Run</b> (F5).</div> : result && (
                   <>
                     {bottom === 'profile' && <ProfileView net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} uEnv={unc?.envelopes} showNow={live} height={dock === 'max' ? 420 : 250} overlay={caseRes.filter((c) => overlayIds.includes(c.id) && c.id !== net.activeCase)} />}
@@ -898,7 +918,7 @@ export default function App() {
             </div>
             <div className="pane-body" style={right === 'props' ? undefined : { display: 'none' }}><Properties net={net} setNet={setNet} selected={selected} result={result} onSelect={(r) => setSelected(r)} /></div>
             <div className="pane-body copilot-body" style={right === 'ai' ? undefined : { display: 'none' }}>
-              <CopilotPanel key={fitKey} ctx={aiCtx} hasResult={!!result} onAccounts={() => setDialog('ai')} onUseNarrative={applyNarrative} queued={aiQueued} done={() => setAiQueued(null)} saved={copilotRef.current} onSave={(c) => { copilotRef.current = c.length ? c : undefined; }} />
+              <Suspense fallback={LOADING}><CopilotPanel key={fitKey} ctx={aiCtx} hasResult={!!result} onAccounts={() => setDialog('ai')} onUseNarrative={applyNarrative} queued={aiQueued} done={() => setAiQueued(null)} saved={copilotRef.current} onSave={(c) => { copilotRef.current = c.length ? c : undefined; }} /></Suspense>
             </div>
           </>}
         </aside>
@@ -923,6 +943,7 @@ export default function App() {
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} items={ctxItems()} onClose={() => setCtx(null)} />}
       {dialog === 'tellus' && <TellUsDialog where={`${left} · ${bottom} · ${net.name}`} onClose={() => setDialog(null)} />}
       {licReason !== undefined && <LicenceDialog reason={licReason ?? undefined} onClose={() => setLicReason(undefined)} />}
+      <Suspense fallback={null}>
       {dialog === 'report' && result && <ReportDialog net={net} result={result} checks={checks} route={route} nodes={graphs.filter((g) => g.ref.type === 'node').map((g) => g.ref.id)} version={__APP_VERSION__}
         onSaveInfo={(info) => setNetRaw((n) => ({ ...n, report: info }))} onClose={() => setDialog(null)} onDraftAI={() => { setDialog(null); aiTask(AI_TASKS.find((t) => t.id === 'report')!); }} />}
       {dialog === 'ai' && <AIAccountsDialog onClose={() => setDialog(null)} />}
@@ -948,6 +969,7 @@ export default function App() {
       {(dialog === 'help' || dialog === 'keys' || dialog === 'about') && <HelpDialog onClose={() => setDialog(null)} initial={dialog === 'keys' ? 'keys' : dialog === 'about' ? 'about' : 'guide'} version={__APP_VERSION__} />}
       {dialog === 'background' && <BackgroundDialog net={net} setNet={setNet} onClose={() => setDialog(null)} />}
       {dialog === 'find' && <FindDialog net={net} onClose={() => setDialog(null)} onGo={goTo} onSelect={(r) => setSelected(r)} setNet={setNet} result={result} />}
+      </Suspense>
       {toast && (
         <div className="toast card small">
           <div className="row" style={{ justifyContent: 'space-between' }}><b>Notes</b><button className="btn ghost small" onClick={() => setToast(null)}>×</button></div>

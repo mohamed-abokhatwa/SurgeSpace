@@ -34,8 +34,7 @@ try {
   for (const [m, item] of dialogs) {
     await p.locator('.menu-btn', { hasText: new RegExp(`^${m}$`) }).click();
     await p.locator('.menu-item', { hasText: item }).first().click();
-    await p.waitForTimeout(200);
-    const open = await p.locator('.modal').count();
+    const open = await p.waitForSelector('.modal', { timeout: 5000 }).then(() => 1, () => 0);
     await p.keyboard.press('Escape'); await p.waitForTimeout(100);
     t(`dialog ${item}`, open > 0);
   }
