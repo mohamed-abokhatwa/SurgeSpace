@@ -24,6 +24,7 @@ jobs:
       - run: npx tsx tests/valves.test.ts
       - run: npx tsx tests/report.test.ts
       - run: npx tsx tests/workspace.test.ts
+      - run: npx tsx tests/ai.test.ts
       - run: npx tsx validation/control-valves-vs-epanet.ts
 
   windows-store:

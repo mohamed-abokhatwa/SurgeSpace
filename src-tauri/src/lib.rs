@@ -2,6 +2,8 @@
 //!  - a stable device id from the machine id (shown in the app as the Machine ID used for licences)
 //!  - a small licence file in the app's data folder, so the licence survives clearing the web view's storage
 //!  - opening the email app and web links (tauri-plugin-opener)
+//!  - HTTPS requests to the AI service the user connects (tauri-plugin-http), so every provider works without
+//!    browser CORS limits; local model servers on this computer are allowed too
 
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -66,6 +68,7 @@ fn kv_set(app: tauri::AppHandle, key: String, value: Option<String>) -> Result<(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![device_id, host_name, kv_get, kv_set])
         .run(tauri::generate_context!())
         .expect("error while running SurgeSpace");

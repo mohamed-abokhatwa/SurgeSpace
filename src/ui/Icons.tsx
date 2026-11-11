@@ -68,6 +68,9 @@ const ACTIONS = {
   close: <path d="M6 6l12 12M18 6L6 18" />,
   chevron: <path d="M9 6l6 6-6 6" />,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.01" /></>,
+  ai: <><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" /><path d="M18.5 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" /></>,
+  chat: <><path d="M4 5h16v11H9l-5 4z" /><path d="M8 9h8M8 12h5" /></>,
+  shield: <><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /><path d="M9 12l2 2 4-4" /></>,
 };
 export type ActionIcon = keyof typeof ACTIONS;
 export const Ic = ({ name, size, title }: { name: ActionIcon; size?: number; title?: string }) => <P size={size} title={title}>{ACTIONS[name]}</P>;

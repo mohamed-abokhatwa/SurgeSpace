@@ -8,6 +8,7 @@ import { G, HB, HV, area, type CheckValveSpec, type Network } from '../engine/ty
 import { buildProfile } from '../ui/ProfileView';
 import { defaultRoute } from '../ui/util';
 import { unitOf, type UnitPrefs } from '../app/units';
+import { mdToHtml } from '../ai/markdown';
 
 export interface ReportOptions {
   version: string;
@@ -300,6 +301,8 @@ export function buildReport(net: Network, r: TransientResult, checks: Check[], o
   </table>
   ${info.notes ? `<div><h3>Notes</h3><p>${esc(info.notes).replace(/\n/g, '<br>')}</p></div>` : '<div></div>'}
 </section>
+
+${info.narrative?.trim() ? `<section class="narrative"><h2>Report narrative</h2>${info.narrativeByAI ? '<p class="muted small">Drafted with the SurgeSpace AI copilot from the model and results below, then reviewed by the engineer.</p>' : ''}${mdToHtml(info.narrative, 3)}</section>` : ''}
 
 <h2>1. Summary of findings</h2>
 ${table(['Item', 'Result'], summaryRows, { cls: 'kv' })}

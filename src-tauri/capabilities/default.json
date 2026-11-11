@@ -5,6 +5,10 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    { "identifier": "opener:allow-open-url", "allow": [{ "url": "mailto:*" }, { "url": "https://*" }] }
+    { "identifier": "opener:allow-open-url", "allow": [{ "url": "mailto:*" }, { "url": "https://*" }] },
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://*" }, { "url": "http://localhost:*" }, { "url": "http://127.0.0.1:*" }]
+    }
   ]
 }

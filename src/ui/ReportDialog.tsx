@@ -7,16 +7,18 @@ import type { Network, ReportInfo } from '../engine/types';
 import { buildReport } from '../report/report';
 import { download } from './util';
 
-export function ReportDialog({ net, result, checks, route, nodes, version, onSaveInfo, onClose }: {
+export function ReportDialog({ net, result, checks, route, nodes, version, onSaveInfo, onClose, onDraftAI }: {
   net: Network; result: TransientResult; checks: Check[]; route: [string, string]; nodes: string[]; version: string;
   onSaveInfo: (info: ReportInfo) => void; onClose: () => void;
+  /** Ask the AI copilot to draft the narrative (closes the dialog). */
+  onDraftAI?: () => void;
 }) {
   const units = useUnits();
   const [info, setInfo] = useState<ReportInfo>(net.report ?? {});
   const [made, setMade] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const html = useMemo(() => (made ? buildReport({ ...net, report: info }, result, checks, { version, route, nodes, units }) : ''), [made, net, info, result, checks, version, route, nodes, units]);
-  const field = (k: keyof ReportInfo, label: string, area = false) => (
+  const field = (k: Exclude<keyof ReportInfo, 'narrativeByAI'>, label: string, area = false) => (
     <label className="field" style={area ? { gridColumn: '1 / -1' } : undefined}><span>{label}</span>
       {area ? <textarea rows={3} value={info[k] ?? ''} onChange={(e) => setInfo({ ...info, [k]: e.target.value })} />
         : <input value={info[k] ?? ''} onChange={(e) => setInfo({ ...info, [k]: e.target.value })} />}
@@ -40,6 +42,13 @@ export function ReportDialog({ net, result, checks, route, nodes, version, onSav
               {field('checkedBy', 'Checked by')}
               {field('revision', 'Revision')}
               {field('notes', 'Notes', true)}
+              <label className="field" style={{ gridColumn: '1 / -1' }}>
+                <span className="row" style={{ justifyContent: 'space-between' }}>
+                  <span>Narrative (Markdown, optional){info.narrativeByAI ? ' · drafted by AI' : ''}</span>
+                  {onDraftAI && <button className="btn small" type="button" onClick={() => { onSaveInfo(info); onDraftAI(); }} title="The AI copilot writes the introduction, method, results discussion and recommendations from your model and results">Draft with AI</button>}
+                </span>
+                <textarea rows={7} value={info.narrative ?? ''} placeholder="Introduction, method, discussion and recommendations. Appears before the summary of findings." onChange={(e) => setInfo({ ...info, narrative: e.target.value })} />
+              </label>
             </div>
             <div className="row" style={{ gap: 6, marginTop: 12 }}>
               <button className="btn primary" onClick={() => { onSaveInfo(info); setMade(true); }}>Create report</button>

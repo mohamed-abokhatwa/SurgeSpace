@@ -397,6 +397,9 @@ export interface ReportInfo {
   checkedBy?: string;
   revision?: string;
   notes?: string;
+  /** Report narrative in Markdown (may be drafted by the AI copilot and edited by the engineer). */
+  narrative?: string;
+  narrativeByAI?: boolean;
 }
 
 export interface Network {

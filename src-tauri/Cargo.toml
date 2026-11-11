@@ -20,6 +20,7 @@ machine-uid = "0.5"
 sha2 = "0.10"
 gethostname = "0.5"
 tauri-plugin-opener = "2"
+tauri-plugin-http = "~2.8.1"
 
 [profile.release]
 codegen-units = 1

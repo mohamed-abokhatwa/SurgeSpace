@@ -27,11 +27,17 @@ import { CasesPanel, syncActive } from './ui/Cases';
 import { Explorer } from './ui/Explorer';
 import { GraphsView, type GraphItem } from './ui/GraphsView';
 import { healthCheck } from './app/health';
+import type { CommandContext, RunOutput } from './app/commands';
+import { projectJson, upgradeProject } from './app/project';
+import { AI_TASKS } from './ai/agent';
+import { initAITransport } from './ai/transport';
+import { useAI } from './ai/accounts';
+import { AIAccountsDialog, CopilotPanel } from './ui/AIPanel';
 
 type LeftTab = 'explorer' | 'operations';
 type BottomTab = 'profile' | 'graphs' | 'checks' | 'tables' | 'cases' | 'protection' | 'uncertainty' | 'log';
 interface UncertaintyOut { runs: { label: string; maxHead: number; minPressure: number }[]; envelopes: PipeEnvelope[]; spread: { maxHead: [number, number]; minPressure: [number, number] } }
-type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus';
+type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai';
 
 const Logo = () => (
   <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
@@ -128,6 +134,12 @@ export default function App() {
   const [ctx, setCtx] = useState<{ x: number; y: number; ref: ElRef | null; world: { x: number; y: number }; u?: number } | null>(null);
   const [showLeft, setShowLeft] = useState(true);
   const [showRight, setShowRight] = useState(true);
+  const [right, setRight] = useState<'props' | 'ai'>('props');
+  const [aiQueued, setAiQueued] = useState<{ prompt: string; label: string } | null>(null);
+  const ai = useAI();
+  useEffect(() => { void initAITransport(); }, []);
+  // the last run and the model it was made for (the copilot only reads results that match the current model)
+  const lastRun = useRef<{ out: RunOutput; net: Network } | null>(null);
 
   useEffect(() => {
     if (theme === 'auto') document.documentElement.removeAttribute('data-theme');
@@ -137,22 +149,29 @@ export default function App() {
   // autosave (recover from File menu)
   useEffect(() => {
     if (isExample.current) return;
-    const t = setTimeout(() => writeLS('surgespace.autosave', JSON.stringify({ ...net, cases: net.cases ? syncActive(net) : undefined, savedAt: Date.now() })), 1500);
+    const t = setTimeout(() => writeLS('surgespace.autosave', projectJson({ ...net, cases: net.cases ? syncActive(net) : undefined })), 1500);
     return () => clearTimeout(t);
   }, [net]);
 
-  const run = useCallback(async (n: Network = netRef.current) => {
+  /** Run the model. With `strict` (the copilot), problems are thrown as errors instead of shown. */
+  const run = useCallback(async (n: Network = netRef.current, strict = false): Promise<RunOutput | undefined> => {
     const f = licRef.current.features;
     if (!isExample.current && n.pipes.length > f.maxPipes) {
-      setLicReason(`This model has ${n.pipes.length} pipes. The Free plan runs your own models up to ${f.maxPipes} pipes (built-in examples run at any size). Start a free trial or activate a licence to run it.`);
+      const msg = `This model has ${n.pipes.length} pipes. The Free plan runs your own models up to ${f.maxPipes} pipes (built-in examples run at any size). Start a free trial or activate a licence to run it.`;
+      if (strict) throw new Error(msg);
+      setLicReason(msg);
       return;
     }
     const errs = healthCheck(n).filter((i) => i.level === 'error');
-    if (errs.length) { setToast([`The model has ${errs.length} error${errs.length > 1 ? 's' : ''} to fix first:`, ...errs.slice(0, 5).map((e) => e.title), 'Open Analysis → Model Health Check for the full list.']); return; }
+    if (errs.length) {
+      if (strict) throw new Error(`The model has ${errs.length} error(s) to fix first: ${errs.slice(0, 8).map((e) => `${e.title}${e.detail ? ` (${e.detail})` : ''}`).join('; ')}`);
+      setToast([`The model has ${errs.length} error${errs.length > 1 ? 's' : ''} to fix first:`, ...errs.slice(0, 5).map((e) => e.title), 'Open Analysis → Model Health Check for the full list.']); return;
+    }
     setBusy('Running…');
     setPlaying(false);
     try {
       const out = await call<{ result: TransientResult; checks: Check[] }>({ type: 'run', net: n }, (m) => setBusy(m));
+      lastRun.current = { out, net: n };
       setResult(out.result);
       setChecks(out.checks);
       setUnc(null);
@@ -166,8 +185,10 @@ export default function App() {
         const ids = pick.length ? pick : n.nodes.filter((x) => x.kind === 'junction').slice(0, 2).map((x) => x.id);
         return ids.map((id) => ({ ref: { type: 'node', id }, v: 'p' }));
       });
-      if (out.result.warnings.length) setToast(out.result.warnings.slice(0, 6));
+      if (out.result.warnings.length && !strict) setToast(out.result.warnings.slice(0, 6));
+      return out;
     } catch (e) {
+      if (strict) throw e;
       setToast([(e as Error).message]);
     } finally {
       setBusy(null);
@@ -196,6 +217,7 @@ export default function App() {
     netRef.current = n;
     setNetRaw(n);
     setStale(true); setResult(null); setChecks([]); setUnc(null); setSizing(null); setAirSugg(null); setSelected([]); setGraphs([]);
+    lastRun.current = null;
     setRoute(defaultRoute(n));
     setFitKey((k) => k + 1);
     setMode('plain');
@@ -272,15 +294,19 @@ export default function App() {
   const colorBy = useMemo(() => colorByPipes(net, result, viewOpts.colorBy), [net, result, viewOpts.colorBy, units]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── file actions ──
-  const saveProject = () => download(`${safeName(net.name)}.surge.json`, JSON.stringify({ ...net, cases: net.cases ? syncActive(net) : undefined }, null, 1), 'application/json');
+  const saveProject = () => download(`${safeName(net.name)}.surge.json`, projectJson({ ...net, cases: net.cases ? syncActive(net) : undefined }), 'application/json');
   const openProject = () => {
     const i = document.createElement('input');
     i.type = 'file'; i.accept = '.json';
-    i.onchange = () => i.files?.[0]?.text().then((t) => { try { const n = JSON.parse(t) as Network; if (!Array.isArray(n.nodes) || !Array.isArray(n.pipes)) throw new Error(); load(n); } catch { setToast(['That file is not a SurgeSpace project.']); } });
+    i.onchange = () => i.files?.[0]?.text().then((t) => {
+      let raw: unknown;
+      try { raw = JSON.parse(t); } catch { setToast(['That file is not a SurgeSpace project (it is not JSON).']); return; }
+      try { load(upgradeProject(raw)); } catch (e) { setToast([(e as Error).message]); }
+    });
     i.click();
   };
   const newProject = () => { load(blankModel()); setTool('pipe'); setToast(['New model. Draw with the Pipe tool: click to place junctions, Shift+click for bends. Add a Fixed-Level Source first.']); };
-  const recover = () => { const s = readLS('surgespace.autosave'); if (!s) { setToast(['Nothing autosaved on this device yet.']); return; } try { load(JSON.parse(s)); setToast(['Recovered the last autosaved model.']); } catch { setToast(['The autosave could not be read.']); } };
+  const recover = () => { const s = readLS('surgespace.autosave'); if (!s) { setToast(['Nothing autosaved on this device yet.']); return; } try { load(upgradeProject(JSON.parse(s))); setToast(['Recovered the last autosaved model.']); } catch { setToast(['The autosave could not be read.']); } };
   const exportInp = () => allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.') && download(`${safeName(net.name)}.inp`, toInp(net));
   const exportEnv = () => {
     if (!result || !allowed(lic.features.exportFiles, 'Export is part of SurgeSpace Pro.')) return;
@@ -301,6 +327,28 @@ export default function App() {
     setTimeout(() => setSelected(out.map((id) => ({ type: 'node', id }))), 0);
   };
   const goTo = (r: ElRef) => { setSelected([r]); };
+
+  // ── AI copilot ──
+  const aiCtx = useMemo<CommandContext>(() => ({
+    getNet: () => netRef.current,
+    apply: (next, label) => setNet(() => next, label),
+    run: async () => { const out = await run(netRef.current, true); if (!out) throw new Error('The run did not finish.'); return out; },
+    getRun: () => (lastRun.current && lastRun.current.net === netRef.current ? lastRun.current.out : null),
+    sizeVessel: async (node) => {
+      if (!licRef.current.features.protectionSizing) throw new Error('Automatic air vessel sizing is part of SurgeSpace Pro; the user can start a free trial. Size the vessel by trial runs instead.');
+      setBusy('Sizing air vessel…');
+      try { const o = await call<{ sizing: VesselSizing }>({ type: 'sizeVessel', net: netRef.current, node }, (m) => setBusy(`Sizing air vessel · ${m}`)); setSizing(o.sizing); return o.sizing; } finally { setBusy(null); }
+    },
+    suggestAirValves: async () => {
+      if (!licRef.current.features.protectionSizing) throw new Error('Automatic air valve sizing is part of SurgeSpace Pro; the user can start a free trial. Place air valves at the high points by hand instead.');
+      setBusy('Sizing air valves…');
+      try { const o = await call<{ airValves: AirValveSuggestion[] }>({ type: 'airValves', net: netRef.current }, (m) => setBusy(m)); setAirSugg(o.airValves); return o.airValves; } finally { setBusy(null); }
+    },
+    select: (refs) => setSelected(refs),
+  }), [setNet, run]);
+  const openCopilot = () => { setShowRight(true); setRight('ai'); };
+  const aiTask = (t: { prompt: string; label: string }) => { openCopilot(); if (!ai.accounts.length) { setDialog('ai'); return; } setAiQueued({ prompt: t.prompt, label: t.label }); };
+  const applyNarrative = (md: string) => { setNetRaw((n) => ({ ...n, report: { ...(n.report ?? {}), narrative: md, narrativeByAI: true } })); setToast(['The text is now the report narrative. Review and edit it in File → Detailed report.']); };
 
   // keyboard shortcuts
   useEffect(() => {
@@ -432,6 +480,13 @@ export default function App() {
       'sep',
       { label: 'Licence…', action: () => setLicReason(null) },
     ] },
+    { label: 'AI', items: [
+      { label: 'Copilot', action: openCopilot },
+      'sep',
+      ...AI_TASKS.map((t): MenuItem => ({ label: `${t.label}${t.needsResults && !result ? ' (run first)' : ''}`, disabled: t.needsResults && !result, action: () => aiTask(t) })),
+      'sep',
+      { label: 'AI accounts…', action: () => setDialog('ai') },
+    ] },
     { label: 'Help', items: [
       { label: 'Quick start', action: () => setDialog('help') },
       { label: 'Keyboard shortcuts', action: () => setDialog('keys') },
@@ -529,7 +584,7 @@ export default function App() {
 
   const activeCase = net.cases?.find((c) => c.id === net.activeCase);
   const nodeOpts = useMemo(() => net.nodes.map((n) => <option key={n.id}>{n.id}</option>), [net.nodes]);
-  const bodyCols = `${showLeft ? '264px' : '0px'} minmax(0, 1fr) ${showRight ? '340px' : '0px'}`;
+  const bodyCols = `${showLeft ? '264px' : '0px'} minmax(0, 1fr) ${showRight ? (right === 'ai' ? '400px' : '340px') : '0px'}`;
 
   return (
     <div className="app2">
@@ -565,6 +620,12 @@ export default function App() {
           {(['airVessel', 'airValve', 'standpipe', 'feedTank', 'anticipator', 'relief', 'blowoff', 'burstDisc'] as ElementKind[]).map(tb)}
         </div><div className="rcap">Surge protection</div></div>
         </div>
+        <div className="rgroup pinned ai-group"><div className="rrow">
+          <RB icon="ai" label="Copilot" on={showRight && right === 'ai'} onClick={() => (showRight && right === 'ai' ? setRight('props') : openCopilot())} title="AI copilot: build, review, protect, explain and report in plain words" />
+          <RB icon="find" label="Review" onClick={() => aiTask(AI_TASKS.find((t) => t.id === 'review')!)} title="AI review of the model before running" />
+          <RB icon="shield" label="Protect" onClick={() => aiTask(AI_TASKS.find((t) => t.id === 'protect')!)} title="AI designs the surge protection by running the options" />
+          <RB icon="chat" label="Explain" onClick={() => aiTask(AI_TASKS.find((t) => t.id === 'explain')!)} disabled={!result} title="AI explains the results in plain language" />
+        </div><div className="rcap">AI</div></div>
         <div className="rgroup pinned"><div className="rrow">
           <RB icon="health" label="Check" onClick={() => setDialog('health')} title="Model Health Check" />
           <RB icon="setup" label="Setup" onClick={() => setDialog('setup')} title="Run Setup" />
@@ -720,8 +781,14 @@ export default function App() {
 
         <aside className="pane right" aria-hidden={!showRight}>
           {showRight && <>
-            <div className="pane-tabs"><span className="ptab on">Properties</span></div>
-            <div className="pane-body"><Properties net={net} setNet={setNet} selected={selected} result={result} onSelect={(r) => setSelected(r)} /></div>
+            <div className="pane-tabs">
+              <button className={`ptab ${right === 'props' ? 'on' : ''}`} onClick={() => setRight('props')}>Properties</button>
+              <button className={`ptab ${right === 'ai' ? 'on' : ''}`} onClick={() => setRight('ai')}><span className="ai-badge sm">AI</span> Copilot</button>
+            </div>
+            <div className="pane-body" style={right === 'props' ? undefined : { display: 'none' }}><Properties net={net} setNet={setNet} selected={selected} result={result} onSelect={(r) => setSelected(r)} /></div>
+            <div className="pane-body copilot-body" style={right === 'ai' ? undefined : { display: 'none' }}>
+              <CopilotPanel ctx={aiCtx} hasResult={!!result} onAccounts={() => setDialog('ai')} onUseNarrative={applyNarrative} queued={aiQueued} done={() => setAiQueued(null)} />
+            </div>
           </>}
         </aside>
       </div>
@@ -746,7 +813,8 @@ export default function App() {
       {dialog === 'tellus' && <TellUsDialog where={`${left} · ${bottom} · ${net.name}`} onClose={() => setDialog(null)} />}
       {licReason !== undefined && <LicenceDialog reason={licReason ?? undefined} onClose={() => setLicReason(undefined)} />}
       {dialog === 'report' && result && <ReportDialog net={net} result={result} checks={checks} route={route} nodes={graphs.filter((g) => g.ref.type === 'node').map((g) => g.ref.id)} version={__APP_VERSION__}
-        onSaveInfo={(info) => setNetRaw((n) => ({ ...n, report: info }))} onClose={() => setDialog(null)} />}
+        onSaveInfo={(info) => setNetRaw((n) => ({ ...n, report: info }))} onClose={() => setDialog(null)} onDraftAI={() => { setDialog(null); aiTask(AI_TASKS.find((t) => t.id === 'report')!); }} />}
+      {dialog === 'ai' && <AIAccountsDialog onClose={() => setDialog(null)} />}
       {dialog === 'import' && <ImportDialog onClose={() => setDialog(null)} onImport={(n, notes) => { setDialog(null); load(n, notes); }} />}
       {dialog === 'setup' && <RunSetupDialog net={net} setNet={setNet} onClose={() => setDialog(null)} defaults={defaults} setDefaults={setDefaults} />}
       {dialog === 'catalogues' && <CataloguesDialog net={net} onClose={() => setDialog(null)} onApplyWave={selected.some((r) => r.type === 'pipe') ? (a) => { const ids = new Set(selected.filter((r) => r.type === 'pipe').map((r) => r.id)); setNet((n) => ({ ...n, pipes: n.pipes.map((p) => (ids.has(p.id) ? { ...p, wavespeed: a } : p)) }), 'Wave speed'); setDialog(null); } : undefined} />}

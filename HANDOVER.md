@@ -48,6 +48,12 @@ values identical; Tnet0 benchmark exact).
 - Tests: `tests/workspace.test.ts` (33 tests: multi-operation runs, fluid/site, head schedule, editing operations,
   units, wave speed, health check).
 
+## 1b. Version 3 program (branch `v3-program`)
+Plan and status: `docs/MASTER-PLAN.md` (agreed 11 Nov 2026). Slice 1 delivered the command layer, field schema, project
+file versions and AI release 1 (bring-your-own AI account with 13 providers, copilot, one-click tasks, document reading,
+report narrative). AI keys never leave the device except to the provider the user chose. Next: Phase 1 engine (four-quadrant
+pumps first), then Phase 3, Phase 5 (CAD/GIS plug-ins, SCADA, water quality, skeletonisation, optimisation), Phase 4.
+
 ## 2. Features
 
 **Model and data**
