@@ -67,6 +67,16 @@ if (typeof window !== 'undefined') {
   const ric = (window as Window & { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
   window.addEventListener('load', () => (ric ? ric(warm, { timeout: 4000 }) : setTimeout(warm, 1500)));
 }
+/** Ribbon button (defined once, outside the app, so buttons keep their state between renders). */
+function RB({ icon, el, label, on, onClick, disabled, title, accent }: { icon?: ActionIcon; el?: ElementKind; label: string; on?: boolean; onClick: () => void; disabled?: boolean; title?: string; accent?: boolean }) {
+  return (
+    <button className={`rb ${on ? 'on' : ''} ${accent ? 'accent' : ''}`} onClick={onClick} disabled={disabled} title={title ?? label} aria-pressed={on}>
+      {el ? <ElIcon kind={el} size={20} /> : <Ic name={icon!} size={20} />}
+      <span>{tr(label)}</span>
+    </button>
+  );
+}
+
 const LOADING = <div className="muted small" style={{ padding: 12 }}>Loading…</div>;
 
 type Dialog = null | 'background' | 'import' | 'report' | 'setup' | 'catalogues' | 'health' | 'project' | 'help' | 'keys' | 'about' | 'find' | 'tellus' | 'ai' | 'map' | 'script' | 'wizard';
@@ -674,12 +684,6 @@ export default function App() {
   };
 
   // ── ribbon ──
-  const RB = ({ icon, el, label, on, onClick, disabled, title, accent }: { icon?: ActionIcon; el?: ElementKind; label: string; on?: boolean; onClick: () => void; disabled?: boolean; title?: string; accent?: boolean }) => (
-    <button className={`rb ${on ? 'on' : ''} ${accent ? 'accent' : ''}`} onClick={onClick} disabled={disabled} title={title ?? label} aria-pressed={on}>
-      {el ? <ElIcon kind={el} size={20} /> : <Ic name={icon!} size={20} />}
-      <span>{tr(label)}</span>
-    </button>
-  );
   const tb = (k: ElementKind) => <RB key={k} el={k} label={EL[k].short} on={tool === k} onClick={() => pickTool(tool === k ? 'select' : k)} title={`${EL[k].name}${EL[k].key ? ` (${EL[k].key})` : ''} — ${EL[k].description}`} />;
 
   const legend = (() => {

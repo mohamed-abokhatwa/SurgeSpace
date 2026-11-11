@@ -60,7 +60,6 @@ try {
   const js = (script, args = []) => wd('POST', `${S}/execute/sync`, { script, args });
   const wait = async (fn, ms = 60000) => { const t0 = Date.now(); for (;;) { const v = await fn().catch(() => false); if (v) return v; if (Date.now() - t0 > ms) return false; await sleep(250); } };
   const el = async (css) => (await wd('POST', `${S}/element`, { using: 'css selector', value: css }))['element-6066-11e4-a52e-4f735466cecf'];
-  const click = async (css) => wd('POST', `${S}/element/${await el(css)}/click`, {});
 
   t('desktop app starts inside Tauri', await wait(() => js('return !!window.__TAURI_INTERNALS__ && !!document.querySelector(".statusbar")')));
   const ran = await wait(() => js('return (document.querySelector(".statusbar")||{}).textContent||""').then((s) => s.includes('Run OK') && s), 90000);
