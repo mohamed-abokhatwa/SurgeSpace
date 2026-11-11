@@ -42,7 +42,7 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [x] S1.1 Four-quadrant pumps: generic characteristic from the pump curve, or the manufacturer's Suter data; reverse flow and reverse rotation
 - [~] S1.2 Variable-speed drives with PI pressure control (done); motor start-up torque curves (not yet)
 - [x] S1.3 Extended-period simulation: storage tanks, demand and head patterns, simple and rule-based controls, surge run from any hour — matches EPANET 2.2 on Net1/Net2/Net3 and a rules network (heads within 0.04 m)
-- [~] S1.4 Throttle, general-purpose and pressure-breaker valves (done, validated against EPANET); non-slam (three-stage) air valves and throttled tanks (existing in-/out-flow losses); differential and variable-area surge tanks (not yet)
+- [~] S1.4 Throttle, general-purpose and pressure-breaker valves (done, validated against EPANET); non-slam (three-stage) air valves; throttled tanks (in-/out-flow losses); variable-area surge tanks in both engines (done); differential surge tanks (not yet)
 - [x] S1.5 Pipe forces for anchor and support design (checked against ρ·a·V·A)
 - [~] S1.6 Turbines: speed governor (PI on speed, rate-limited gates) on load rejection (done); turbine four-quadrant characteristics (not yet)
 - [x] S1.7 Viscoelastic pipe model (PE, PVC): Kelvin–Voigt creep, stable implicit coupling; damping and period lengthening checked (indicative HDPE values; calibrate per pipe)
@@ -53,7 +53,7 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [~] S3.1 Results of other cases overlaid on the profile (done); cases stored as differences from a parent (not yet: cases are full copies)
 - [x] S3.2 Street / satellite / topographic basemaps from web tiles (UTM or Web Mercator, exact resampling); node elevations and long sections from terrain data
 - [x] S3.3 GIS import with field mapping (GeoJSON); export to GIS (GeoJSON), CAD (DXF) and Excel (.xlsx results workbook)
-- [~] S3.4 Queries and selection sets (done); colour themes by any field (existing colour-by); annotations and printing to scale (not yet)
+- [x] S3.4 Queries and selection sets, colour-by themes, notes on the drawing, drawing to scale (SVG A3/A1 with title block)
 - [x] S3.5 Libraries: pumps, valves, air valves, vessels, pipe types (generic air valves and pipe types included; export/import to share)
 - [~] S3.6 Fix-it buttons and Fix all on health-check findings (done); guided wizards (the copilot covers guided building; dedicated wizards not yet)
 
@@ -70,7 +70,7 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [x] S4.1 Calibration: model vs field data statistics and automatic calibration of roughness (all pipes or per material) and demand
 - [x] S4.2 Scenario scoping by AI (copilot task; creates the cases with create_case and set_operations)
 - [x] S4.3 Script console (JavaScript over every command) and the command API reference (`docs/API.md`)
-- [~] S4.4 User manual and theory/validation manual written (`docs/`); worked tutorials and more samples (Town supply added) still to do
+- [x] S4.4 User manual, theory and validation manual, tutorials (`docs/`); new sample Town supply
 - [~] S4.5 Arabic report (done), Arabic interface for menus, ribbon and tabs with right-to-left layout (done; panel contents mostly English); shared cloud projects (not yet)
 
 ## Slice log
@@ -89,6 +89,8 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - **Slice 2 (branch `v3-program`, 11 Nov 2026): engines and integrations.** Extended-period simulation and water quality (`src/engine/eps.ts`, validated against EPANET 2.2 with WNTR references in `validation/data`); rigid-column engine (`src/engine/rigid.ts`); four-quadrant pumps and variable-speed drives; pipe forces; skeletonisation (`src/engine/skeleton.ts`); protection optimisation (`src/engine/optimise.ts`); live data (`src/app/live.ts`, `src/app/scada.ts`, `bridge/`); GIS/CAD exchange (`src/app/exchange.ts`) and plug-ins (`plugins/`); Daily operation and Live data tabs; new commands for the copilot; new example "Town supply". Tests: eps 25, fourq 10, rigid 8, phase5 23, forces 2, vsd 4 (all in CI).
 
 - **Slice 3 (11 Nov 2026):** rule-based controls; PBV/GPV/TCV; viscoelastic pipes; parallel cases and a 10,000-pipe check; basemaps and terrain; Excel export; health fix-it buttons; element library; calibration; script console and API reference; AI scoping and create_case; voice input and saved conversation; Arabic report and interface; user and theory manuals.
+
+- **Slice 4 (11 Nov 2026):** queries and selection sets, case overlays on the profile, turbine speed governor, variable-area surge tanks, notes on the drawing, drawing to scale, tutorials.
 
 ## Working method
 Each slice: one feature with tests and benchmarks, on a branch, with a preview. No Store release until a phase's done criteria are met.
