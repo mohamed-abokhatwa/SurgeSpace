@@ -649,8 +649,28 @@ export interface ModelCase {
   id: string;
   name: string;
   notes?: string;
-  /** The model of this case (without its own cases list). */
+  /** The model of this case (without its own cases list). For a child case it is resolved from the parent. */
   model: Omit<Network, 'cases' | 'activeCase'>;
+  /** Parent case: this case inherits everything it does not change itself. */
+  parent?: string;
+  /** What this child case changes relative to its parent. */
+  diff?: CaseDiff;
+}
+
+/** Differences of a child case: element properties changed (null = property removed), elements added and removed,
+ *  and other model fields replaced. */
+export interface CaseDiff {
+  nodes?: CaseListDiff;
+  pipes?: CaseListDiff;
+  pumps?: CaseListDiff;
+  valves?: CaseListDiff;
+  fields?: Record<string, unknown>;
+}
+export interface CaseListDiff {
+  changed?: Record<string, Record<string, unknown>>;
+  added?: unknown[];
+  removed?: string[];
+  order?: string[];
 }
 
 /** All operations of a run: the main event plus the extra ones. */

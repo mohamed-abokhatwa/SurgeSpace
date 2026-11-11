@@ -1,5 +1,6 @@
 // Project file format: a version number and an upgrade path, so files from older versions always open.
 import { defaultSettings, type Network } from '../engine/types';
+import { casesForFile, resolveCases } from './cases';
 
 /** Version history: 1 = SurgeSpace 1.x (no version field); 2 = 2.0 (cases, operations list, units, turbines);
  *  3 = 2.1 (fileVersion field; report narrative). */
@@ -26,7 +27,13 @@ export function upgradeProject(raw: unknown): Network {
   p.name ??= 'Untitled model';
   for (const n of p.nodes) if (n.kind !== 'reservoir' && n.kind !== 'junction') n.kind = 'junction';
   // 2 → 3: nothing to convert; the version field is added on save
-  if (p.cases) for (const c of p.cases) c.model = upgradeProject({ ...c.model, fileVersion: v }) as typeof c.model;
+  if (p.cases) {
+    // child cases are stored as differences: resolve them from their parents after the roots are upgraded
+    for (const c of p.cases) if (c.model) c.model = upgradeProject({ ...c.model, fileVersion: v }) as typeof c.model;
+    for (const c of p.cases) if (!c.model && !c.parent) throw new Error(`Case "${c.name}" has no model.`);
+    p.cases = resolveCases(p.cases.map((c) => (c.model ? c : { ...c, model: undefined as never })));
+    for (const c of p.cases) if (!c.model) throw new Error(`Case "${c.name}": its parent case is missing.`);
+  }
   delete p.fileVersion;
   delete p.app;
   return p;
@@ -34,5 +41,5 @@ export function upgradeProject(raw: unknown): Network {
 
 /** Serialise a project for saving. */
 export function projectJson(net: Network): string {
-  return JSON.stringify({ app: 'SurgeSpace', fileVersion: FILE_VERSION, ...net }, null, 1);
+  return JSON.stringify({ app: 'SurgeSpace', fileVersion: FILE_VERSION, ...net, ...(net.cases ? { cases: casesForFile(net.cases) } : {}) }, null, 1);
 }

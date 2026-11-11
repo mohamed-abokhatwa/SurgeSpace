@@ -11,7 +11,7 @@ export interface CaseSummary { id: string; name: string; maxHead: number; maxP: 
 
 type Model = Omit<Network, 'cases' | 'activeCase'>;
 export { ensureCases, syncActive, switchCase, addCase } from '../app/cases';
-import { ensureCases, syncActive, switchCase, addCase } from '../app/cases';
+import { ensureCases, syncActive, switchCase, addCase, deleteCase, detachCase, diffSize } from '../app/cases';
 
 /** What differs between two models, in words (first few). */
 export function diffModels(a: Model, b: Model): string[] {
@@ -69,21 +69,23 @@ export function CasesPanel({ net, setProject, busy, setBusy, onResults }: { net:
     <div className="cases">
       <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         <button className="btn small primary" onClick={() => setProject(addCase(net, `Case ${cases.length + 1 || 2}`), 'New case')}>+ New case from current</button>
+        <button className="btn small" title="A child case keeps only its own changes; later changes to the current case flow into it" onClick={() => setProject(addCase(net, `${(net.cases ?? []).find((c) => c.id === net.activeCase)?.name ?? 'Base case'} › child`, true), 'New child case')}>+ Child case (inherits)</button>
         <button className="btn small" disabled={busy} onClick={runAll}>Run all cases and compare</button>
       </div>
-      {!cases.length && <p className="hint">You are editing a single model. “New case” keeps it as the <b>Base case</b> and starts a copy you can change — for example add an air vessel, slow the valve, or trip one pump instead of two. Every case is saved in the project file.</p>}
+      {!cases.length && <p className="hint">You are editing a single model. “New case” keeps it as the <b>Base case</b> and starts a copy you can change — for example add an air vessel, slow the valve, or trip one pump instead of two. A <b>child case</b> keeps only its own changes, so later corrections to its parent (a pipe length, a pump curve) flow into it. Every case is saved in the project file.</p>}
       {cases.length > 0 && (
         <table className="grid cases-table">
-          <thead><tr><th></th><th>Case</th><th>Differs from {base?.name ?? 'base'}</th><th>Notes</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Case</th><th>Inherits from</th><th>Differs from {base?.name ?? 'base'}</th><th>Notes</th><th></th></tr></thead>
           <tbody>{synced.map((c, k) => (
             <tr key={c.id} className={c.id === net.activeCase ? 'sel' : ''}>
               <td><input type="radio" checked={c.id === net.activeCase} onChange={() => setProject(switchCase(net, c.id), 'Switch case')} aria-label={`Edit ${c.name}`} /></td>
               <td>{editing === c.id ? <input className="cell" autoFocus defaultValue={c.name} onBlur={(e) => { setEditing(null); setProject({ ...net, cases: syncActive(net).map((x) => (x.id === c.id ? { ...x, name: e.target.value || x.name } : x)) }, 'Rename case'); }} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} /> : <button className="linkbtn" onDoubleClick={() => setEditing(c.id)} onClick={() => c.id !== net.activeCase && setProject(switchCase(net, c.id), 'Switch case')} title="Click to edit this case, double-click to rename"><b>{c.name}</b></button>}</td>
+              <td className="small">{c.parent ? <>{synced.find((x) => x.id === c.parent)?.name ?? '—'} <span className="muted">({diffSize(c.diff)} change{diffSize(c.diff) === 1 ? '' : 's'})</span> <button className="linkbtn small" title="Make it a complete, independent copy" onClick={() => setProject(detachCase(net, c.id), 'Detach case')}>detach</button></> : <span className="muted">—</span>}</td>
               <td className="small muted">{k === 0 ? 'reference' : diffModels(base.model, c.model).join(' · ') || 'identical'}</td>
               <td><input className="cell" defaultValue={c.notes ?? ''} placeholder="notes" onBlur={(e) => setProject({ ...net, cases: syncActive(net).map((x) => (x.id === c.id ? { ...x, notes: e.target.value || undefined } : x)) }, 'Case notes')} /></td>
               <td style={{ whiteSpace: 'nowrap' }}>
-                <button className="btn ghost small" title="Duplicate" onClick={() => { const cs = syncActive(net); const id = Math.random().toString(36).slice(2, 9); setProject({ ...net, cases: [...cs, { id, name: `${c.name} (copy)`, notes: c.notes, model: structuredClone(c.model) }] }, 'Duplicate case'); }}>⧉</button>
-                {k > 0 && <button className="btn ghost small" title="Delete" onClick={() => { const cs = syncActive(net).filter((x) => x.id !== c.id); if (c.id === net.activeCase) setProject({ ...structuredClone(cs[0].model), cases: cs, activeCase: cs[0].id } as Network, 'Delete case'); else setProject({ ...net, cases: cs }, 'Delete case'); }}>✕</button>}
+                <button className="btn ghost small" title="Duplicate" onClick={() => { const cs = syncActive(net); const id = Math.random().toString(36).slice(2, 9); setProject({ ...net, cases: [...cs, { id, name: `${c.name} (copy)`, notes: c.notes, model: structuredClone(c.model), ...(c.parent ? { parent: c.parent, diff: structuredClone(c.diff) } : {}) }] }, 'Duplicate case'); }}>⧉</button>
+                {k > 0 && <button className="btn ghost small" title="Delete" onClick={() => setProject(deleteCase(net, c.id), 'Delete case')}>✕</button>}
               </td>
             </tr>
           ))}</tbody>

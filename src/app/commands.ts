@@ -538,11 +538,11 @@ export const COMMANDS: Command[] = [
   },
   {
     name: 'create_case', mutates: true,
-    description: 'Keep the current model as a case and continue in a new named copy (e.g. "Power failure, both pumps", "Valve V1 closes in 10 s"). Then change that copy (operations, devices). Cases are compared side by side in the Cases tab.',
-    params: obj({ name: str('Name of the new case'), notes: str('What the case represents') }, ['name']),
+    description: 'Keep the current model as a case and continue in a new named copy (e.g. "Power failure, both pumps", "Valve V1 closes in 10 s"). Then change that copy (operations, devices). Cases are compared side by side in the Cases tab. With inherit, the new case is a child that keeps only its own changes, so later corrections to the current case flow into it (use it for variants of one design).',
+    params: obj({ name: str('Name of the new case'), notes: str('What the case represents'), inherit: bool('Child case that inherits from the current one') }, ['name']),
     run: async (ctx, a) => {
       const net = ctx.getNet();
-      const n2 = addCase(net, String(a.name));
+      const n2 = addCase(net, String(a.name), !!a.inherit);
       const c = n2.cases!.map((x) => (x.id === n2.activeCase && a.notes ? { ...x, notes: String(a.notes) } : x));
       ctx.apply({ ...n2, cases: c }, `AI: case ${a.name}`);
       return { cases: c.map((x) => x.name), active: a.name };
