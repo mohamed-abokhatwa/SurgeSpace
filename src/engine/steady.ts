@@ -165,6 +165,20 @@ function solveFixed(net: Network, areas: Map<string, number>, withControl = fals
         const dh = Math.max((net.settings.friction === 'HW' ? 1.852 : 2) * r * Math.abs(q), 1e-7);
         p[k] = 1 / dh;
         y[k] = p[k] * r * q * Math.abs(q);
+      } else if (l.kind === 'valve' && net.valves[l.ref].gpv?.length && areas.get(net.valves[l.ref].id)! > 0) {
+        // general-purpose valve: head loss from its curve (straight-line pieces, odd in the flow)
+        const c = net.valves[l.ref].gpv!, aq = Math.abs(q);
+        let i = 1;
+        while (i < c.length - 1 && aq > c[i][0]) i++;
+        const [q0, h0] = c[Math.max(i - 1, 0)], [q1, h1] = c[Math.min(i, c.length - 1)];
+        const slope = Math.max((h1 - h0) / (q1 - q0 || 1e-9), 1e-6);
+        const h = (h0 + slope * (aq - q0)) * Math.sign(q || 1);
+        p[k] = 1 / slope;
+        y[k] = p[k] * h;
+      } else if (l.kind === 'valve' && net.valves[l.ref].pbv !== undefined && areas.get(net.valves[l.ref].id)! > 0) {
+        // pressure-breaker valve: a fixed head drop in the direction of flow (EPANET: very large conductance)
+        p[k] = 1e8;
+        y[k] = p[k] * net.valves[l.ref].pbv! * (q < 0 ? -1 : 1);
       } else if (l.kind === 'valve') {
         const kv = valveKv(net.valves[l.ref], cst[k] === 'open' ? 1 : areas.get(net.valves[l.ref].id)!);
         const dh = Math.max(2 * kv * Math.abs(q), 1e-7);

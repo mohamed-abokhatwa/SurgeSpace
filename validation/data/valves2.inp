@@ -1,0 +1,38 @@
+[TITLE]
+Pressure-breaker, general-purpose and throttle control valves (SurgeSpace validation)
+
+[JUNCTIONS]
+ J1  50  0
+ J2  48  10
+ J3  45  0
+ J4  40  12
+ J5  42  0
+ J6  38  8
+ J7  35  6
+
+[RESERVOIRS]
+ R1  120
+
+[PIPES]
+ P1  R1  J1  800  300  0.1  0  Open
+ P2  J2  J3  600  250  0.1  0  Open
+ P3  J4  J5  500  200  0.1  0  Open
+ P4  J6  J7  700  150  0.1  0  Open
+ P7  J1  J3  900  150  0.1  0  Open
+
+[VALVES]
+ PB1  J1  J2  250  PBV  15  0
+ GP1  J3  J4  200  GPV  GC  0
+ TC1  J5  J6  200  TCV  20  0
+
+[CURVES]
+ GC  0   0
+ GC  10  2
+ GC  20  6
+ GC  40  20
+
+[OPTIONS]
+ Units  LPS
+ Headloss  D-W
+
+[END]

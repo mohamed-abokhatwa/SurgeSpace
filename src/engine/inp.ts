@@ -147,8 +147,10 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
     const ctl = (type === 'PRV' || type === 'PSV' || type === 'FCV') && Number.isFinite(setting)
       ? { type: type as 'PRV' | 'PSV' | 'FCV', set: type === 'FCV' ? setting * qf : setting * (us ? 0.70307 : 1), active: false }
       : undefined;
-    if (!ctl && type !== 'TCV' && type !== 'GPV') notes.push(`Valve ${r[0]} (${type}) is modelled as a fixed-opening valve.`);
-    valves.push({ id: r[0], from: r[1], to: r[2], diameter: Number(r[3]) * df, k0: type === 'TCV' ? Math.max(setting || 0.2, 0.05) : Math.max(Number(r[6] ?? 0.2) || 0.2, 0.05), opening: 1, ...(ctl ? { control: ctl } : {}) });
+    const extra = type === 'PBV' ? { pbv: setting * (us ? 0.70307 : 1) } : type === 'GPV' && curves.has(r[5]) ? { gpv: curves.get(r[5])!.map(([q, h]) => [q, h] as [number, number]).sort((a, b) => a[0] - b[0]) } : {};
+    if (type === 'GPV' && !curves.has(r[5])) notes.push(`Valve ${r[0]} (GPV) has no head loss curve; it is modelled as an open valve.`);
+    if (type === 'PBV' || type === 'GPV') notes.push(`Valve ${r[0]} (${type}) keeps its steady head loss as a fixed restriction during the surge run.`);
+    valves.push({ id: r[0], from: r[1], to: r[2], diameter: Number(r[3]) * df, k0: type === 'TCV' ? Math.max(setting || 0.2, 0.05) : Math.max(Number(r[6] ?? 0.2) || 0.2, 0.05), opening: 1, ...(ctl ? { control: ctl } : {}), ...extra });
     if (ctl) notes.push(`Valve ${r[0]} is a ${type} (set ${ctl.type === 'FCV' ? `${(ctl.set * 1000).toFixed(1)} L/s` : `${ctl.set.toFixed(1)} m`}); it is locked at its steady opening during the transient unless you make it active.`);
   }
   // pipes with a check valve become a non-return valve followed by the pipe

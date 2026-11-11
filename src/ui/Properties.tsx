@@ -175,6 +175,24 @@ export function Properties({ net, setNet, selected, result, onSelect }: { net: N
         <DeviceDatalists />
         <ValveLinkEditor v={v} result={result} setValve={setValve} />
       </Group>
+      {!v.turbine && !v.control && (
+        <Group title="Fixed-loss valve types" open={v.pbv !== undefined || !!v.gpv}>
+          <label className="field"><span>Behaviour in the steady state</span>
+            <select value={v.pbv !== undefined ? 'pbv' : v.gpv ? 'gpv' : ''} onChange={(e) => setValve((x) => { const y = { ...x }; delete y.pbv; delete y.gpv; if (e.target.value === 'pbv') y.pbv = 10; if (e.target.value === 'gpv') y.gpv = [[0, 0], [0.05, 2], [0.1, 8]]; return y; })}>
+              <option value="">Loss from K and opening</option>
+              <option value="pbv">Pressure breaker: fixed head drop</option>
+              <option value="gpv">General purpose: head loss curve</option>
+            </select>
+          </label>
+          {v.pbv !== undefined && <QNum label="Head drop" q="head" value={v.pbv} onChange={(x) => x !== undefined && setValve((y) => ({ ...y, pbv: x }))} />}
+          {v.gpv && (
+            <label className="field" style={{ marginTop: 6 }}><span>Head loss curve: flow L/s, loss m (one point per line)</span>
+              <textarea rows={4} defaultValue={v.gpv.map(([q, h]) => `${+(q * 1000).toFixed(3)}\t${h}`).join('\n')} onBlur={(e) => { const pts = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 2 && r.every(Number.isFinite)).map(([q, h]) => [q / 1000, h] as [number, number]).sort((a, b) => a[0] - b[0]); if (pts.length >= 2) setValve((y) => ({ ...y, gpv: pts })); }} />
+            </label>
+          )}
+          <p className="hint">As in EPANET. In the surge run the valve keeps its steady head loss as a fixed restriction (and still follows any operation).</p>
+        </Group>
+      )}
       {result?.valves[v.id] && (
         <Group title="Results">
           <div className="stats">

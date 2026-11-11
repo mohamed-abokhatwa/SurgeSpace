@@ -16,6 +16,7 @@ echo "== rigid-column engine"; npx tsx tests/rigid.test.ts | grep -E "FAIL|passe
 echo "== skeleton, optimisation, SCADA"; npx tsx tests/phase5.test.ts | grep -E "FAIL|passed"
 echo "== pipe forces"; npx tsx tests/forces.test.ts | grep -E "FAIL|passed"
 echo "== variable-speed drives"; npx tsx tests/vsd.test.ts | grep -E "FAIL|passed"
+echo "== PBV, GPV, TCV vs EPANET"; npx tsx tests/valves2.test.ts | grep -E "FAIL|passed"
 echo "== licence tests"; npx tsx tests/license.test.ts 2>/dev/null | tail -1
 echo "== examples vs baseline"; npx tsx validation/baseline.ts compare "$BASE"
 echo "== Benchmark Tnet0"; npx tsx validation/vs-benchmark-tnet0.ts | tail -2

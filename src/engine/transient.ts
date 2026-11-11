@@ -430,6 +430,11 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const a0 = steady.openings?.get(v.id) ?? valveArea(v, v.opening);
     const q = steady.flows.get(v.id) ?? 0;
     const e: Extract<Element, { kind: 'valve' }> = { kind: 'valve', idx: k, i: nIdx.get(v.from)!, j: nIdx.get(v.to)!, Q: q, open: a0, base: a0, closed: a0 <= 0, check: !!v.check && (!v.checkSpec || v.checkSpec.mode === 'ideal'), cv: v.check ? makeCv(v.checkSpec, area(v.checkSpec?.diameter ?? v.diameter)) : undefined, kq: v.k0 / (2 * G * A * A) };
+    if ((v.pbv !== undefined || v.gpv?.length) && Math.abs(q) > 1e-9 && a0 > 0) {
+      // pressure-breaker / general-purpose valve: its steady head loss becomes a fixed restriction for the surge run
+      const dh = Math.abs((steady.heads.get(v.from) ?? 0) - (steady.heads.get(v.to) ?? 0));
+      e.kq = Math.max((a0 * a0 * dh) / (q * q), 1e-9);
+    }
     if (e.cv && (e.closed || q <= 0)) { e.cv.state = 'closed'; e.closed = true; }
     elements.push(e);
   });

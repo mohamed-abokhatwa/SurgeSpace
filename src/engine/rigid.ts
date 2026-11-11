@@ -53,6 +53,13 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
   pumpS.forEach((s, k) => (s.T = torque(k, links[net.pipes.length + k].Q, s.alpha)));
   const valveBase = net.valves.map((v) => steady.openings?.get(v.id) ?? valveArea(v, v.opening));
   const valveOpen = valveBase.slice();
+  // pressure-breaker and general-purpose valves keep their steady head loss as a fixed restriction
+  const valveKq = net.valves.map((v, k) => {
+    const q = steady.flows.get(v.id) ?? 0;
+    if ((v.pbv === undefined && !v.gpv?.length) || Math.abs(q) < 1e-9 || valveBase[k] <= 0) return undefined;
+    const dh = Math.abs((steady.heads.get(v.from) ?? 0) - (steady.heads.get(v.to) ?? 0));
+    return (valveBase[k] ** 2 * dh) / (q * q);
+  });
   // storage devices at nodes
   type Dev = { node: number; kind: 'vessel' | 'tank'; Qs: number; Vg: number; C: number; n: number; bottom: number; area: number; total: number; kIn: number; kOut: number; z: number; oneWay: boolean; top: number; minGas: number; maxGas: number; spilled: number; emptied: boolean; minLevel: number; maxLevel: number };
   const devs: Dev[] = [];
@@ -167,7 +174,7 @@ export function runRigid(netIn: Network, opt: RunOptions = {}): TransientResult 
           e = h(l.j) - h(l.i) - head(l.ref, q, a);
         } else {
           const vv = net.valves[l.ref], A = area(vv.diameter), o = valveOpen[l.ref];
-          e = o <= 0 ? q : (vv.k0 / (2 * G * A * A)) * q * Math.abs(q) - o * o * (h(l.i) - h(l.j));
+          e = o <= 0 ? q : (valveKq[l.ref] ?? vv.k0 / (2 * G * A * A)) * q * Math.abs(q) - o * o * (h(l.i) - h(l.j));
         }
         r[nf + k] = e;
       });

@@ -438,6 +438,10 @@ export interface Valve {
   owner?: string;
   /** Fixed restriction (inline orifice): drawn and listed as an orifice; it is a valve that is never operated. */
   orifice?: boolean;
+  /** Pressure-breaker valve: a fixed head drop (m) whatever the flow (EPANET PBV). */
+  pbv?: number;
+  /** General-purpose valve: head loss curve [flow m³/s, head loss m] (EPANET GPV). */
+  gpv?: [number, number][];
   /** Hydro turbine: modelled through its wicket gates (a valve whose fully open loss passes the rated flow at the
    *  rated head); the runner speed is found from the power balance after a load change. */
   turbine?: TurbineSpec;
