@@ -42,7 +42,16 @@ US customary; the model is always stored in SI). Every change can be undone (Ctr
      ≥ 70 % for a quick pass.
   3. *Missing data*: what the documents do not give is asked for (critical items first). Answer, use the typical
      value (then listed as an assumption), or add the data sheet and the AI reads it.
-  4. *Build and check*: the basis of the model is shown with the source of every value (green from a document, blue
+     A pump curve on a data sheet — a table, or a graph the AI reads point by point — is fitted and used in the
+     model, and checked against the stated duty point.
+  4. *Build and check*: choose **Single main from the long section** or, when a plan drawing (DXF) is among the
+     documents, **Network from the plan drawing**. For a plan: tick the pipe layers (guessed from the layer names,
+     or given by the AI), say what each symbol block is (air valve, line valve, check valve, pump, reservoir, tank,
+     washout, hydrant — guessed from the block names, or given by the AI), and Read the plan. Lines become pipes
+     (lines ending on another line are joined there), symbols become devices where they sit, texts next to the
+     lines give levels (IL, CL, RL; GL less 1.2 m cover) and sizes (DN…), and missing levels are filled in from the
+     neighbours. Then set each open end as a source (with its water level), a demand or a closed end, and build.
+     For a single main: the basis of the model is shown with the source of every value (green from a document, blue
      entered by you, orange assumed). Build the model, then the checks compare it with the documents: flow against
      the design flow, steady pressure along the line (a high point above the grade line is flagged), pressure class
      and velocity. Air valves shown on the drawings are placed at their chainage.
@@ -50,8 +59,9 @@ US customary; the model is always stored in SI). Every change can be undone (Ctr
      increases in downward slope, long runs (600 m spacing), the pump discharge and points above the steady grade
      line — each sized so the inflow at 35 kPa vacuum passes the gravity draining flow and the outflow at 14 kPa
      the filling flow. Test the plan in surge runs: before and after (lowest pressure, largest vapour cavity, air
-     valve slams); valves that slam become anti-slam (three-stage). Open the model with the plan; for a pumped main
-     an air vessel is sized at the pump discharge.
+     valve slams); valves that slam become anti-slam (three-stage). For a pumped system, Size the air vessel finds
+     the smallest vessel at the pump discharge that keeps every point above the minimum pressure and within class,
+     with the plan in place. Open the model with the plan and the vessel.
   The documents session stays while the app is open. The basis of the model appears in the report (section 3.6).
 - **Draw:** place a Fixed-Level Source (R), pick Pipe (P) and click from point to point; Shift+click adds bends.
   Click a pipe with a pump, valve or device tool to insert it there.

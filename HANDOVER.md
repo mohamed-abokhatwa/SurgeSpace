@@ -82,8 +82,14 @@ and a local server, not live accounts; the v3 Store release has not been made (`
 - Tests: `tests/intake.test.ts`, `tests/avplan.test.ts`, `tests/ui-intake.mjs` (interface end to end with a stand-in
   AI server; fixture `tests/fixtures/long-section.pdf` from `make-long-section.py`), desktop end to end extended
   (launch screen under the CSP, PDF through pdf.js in the desktop app, page read by the AI through the native client).
-- Next ideas: multi-line networks from plan drawings (DXF geometry plus symbols), pump curves read from graphs,
-  vessel optimisation inside the documents workflow.
+- **Networks from plan drawings**: `src/app/planNetwork.ts` (`planToNetwork`: DXF pipe layers to pipes, tees
+  joined, symbol blocks to devices, level and DN texts, levels filled from neighbours; `finishPlanNetwork`: ends as
+  sources, demands or closed, operation and run length; `verifyNetwork`). Symbols and pipe layers come from the AI
+  (note items with `block`/`layer` and `kind`) or from name guesses. Pump curves from data sheets: `fitPumpCurve`.
+  The protection step sizes an air vessel (worker job `sizeVessel`) with the air valve plan in place.
+- Open: the document reading has been tested with a stand-in AI server, not yet with live providers on real project
+  drawings; pump direction on a plan follows the drawn line direction (check it); scanned (raster) plans are read
+  by the AI as a single main, not yet as a network.
 
 ## 2. Features
 

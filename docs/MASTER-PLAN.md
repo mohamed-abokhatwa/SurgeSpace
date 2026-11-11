@@ -42,7 +42,7 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [x] S6.2 Visuals: results sweep in after a run, vapour cavities on the drawing, drawing and long section linked by a probe, waterfall (3D) view, surge animation exported as a video, daily operation played on the drawing with tank levels
 - [x] S6.3 Model from documents: drawings (PDF, images), spreadsheets and DXF read into an evidence register (AI with page boxes and the PDF text layer; spreadsheets by their headers without AI), review against the page, missing data asked for, model built from accepted evidence with a traced basis (report section 3.6), checks against the documents
 - [x] S6.4 Air valve plan (AWWA M51 locations; sizes for draining and filling) tested in surge runs, anti-slam where valves slam; copilot command plan_air_valves and task "Plan the air valves"
-- [ ] S6.5 Next: multi-line networks from plan drawings (DXF geometry plus symbols into a network, not only a single main); vessel optimisation inside the documents workflow; reading pump curves drawn as graphs
+- [x] S6.5 Networks from plan drawings (DXF pipe layers, symbols to devices, texts to levels and sizes, ends as sources or demands); pump curves from data sheets (tables or graphs, fitted and checked against the duty point); air vessel sized inside the documents workflow with the air valve plan in place
 
 ### Phase 1 — Engines to professional grade
 - [x] Engine choice: wave engine (method of characteristics, column separation) and rigid-column engine (mass oscillation, slow events) — checked against Jaeger's surge-tank formula and against each other
@@ -113,6 +113,9 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
   `src/ai/intakeAI.ts`, `src/ui/IntakeWorkspace.tsx`, pdf.js loaded only when a PDF is opened); air valve plan
   (`src/app/airValvePlan.ts`, worker job `avPlan`). Tests: `tests/intake.test.ts` (19), `tests/avplan.test.ts` (14),
   `tests/ui-intake.mjs` (18, interface end to end with a stand-in AI server), smoke test 33, desktop end to end.
+  Then networks from plan drawings (`src/app/planNetwork.ts`, `tests/plan.test.ts` 15, `tests/ui-plan.mjs` 13 with
+  the fixture `tests/fixtures/plan.dxf`), pump curves from data sheets (`fitPumpCurve`), vessel sizing in the
+  protection step.
 
 ## Working method
 Each slice: one feature with tests and benchmarks, on a branch, with a preview. No Store release until a phase's done criteria are met.

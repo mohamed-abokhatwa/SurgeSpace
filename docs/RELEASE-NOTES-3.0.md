@@ -7,7 +7,8 @@ AI account, live plant data, GIS and CAD links, and an Arabic interface.
 
 - Model from documents: drop drawings, long sections, data sheets, spreadsheets or DXF; your AI reads them into
   items you check against the page, SurgeSpace asks for what is missing, builds the model, checks it against the
-  documents, plans the air valves (AWWA M51 practice) and tests the plan in surge runs.
+  documents, plans the air valves (AWWA M51 practice), tests the plan in surge runs and sizes the air vessel.
+  Plan drawings (DXF) become networks; pump curves are read from data sheets, tables or graphs.
 - A new start page with recent projects, a staged run screen with the envelope growing live, a one-minute tour, a
   command palette (Ctrl+K), results that sweep in, vapour cavities on the drawing, a waterfall (3D) view, and the
   surge animation exported as a video.
