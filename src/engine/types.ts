@@ -499,6 +499,19 @@ export interface TurbineSpec {
   /** Speed governor: after a load rejection the gates follow a PI controller on the speed (instead of a set
    *  closure), limited by the fastest closing time. */
   governor?: { kp?: number; ti?: number; closeTime: number };
+  /** Runner characteristic in the surge run: flow and efficiency change with the unit speed ν = (n/n_r)/√(H/H_r),
+   *  so the flow falls (Francis) or rises (Kaplan) as the unit speeds up after a load rejection, and the
+   *  efficiency falls to zero at runaway. Without it the turbine passes flow like a valve (gate opening only). */
+  characteristic?: TurbineCharacteristic;
+}
+
+export interface TurbineCharacteristic {
+  /** Typical forms by machine type, or a table. */
+  kind: 'francisLow' | 'francisHigh' | 'kaplan' | 'pelton' | 'table';
+  /** Runaway unit speed at full gate, ×rated (default by type). */
+  runaway?: number;
+  /** table: [ν, flow factor, efficiency factor] (factors relative to the rated point). */
+  table?: [number, number, number][];
 }
 
 export type EventKind = 'pumpTrip' | 'valveClose' | 'valveOpen' | 'none';

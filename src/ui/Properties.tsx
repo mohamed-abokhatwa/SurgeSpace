@@ -503,6 +503,16 @@ function TurbineGroup({ v, setValve, net, result }: { v: Valve; setValve: (f: (v
           <label className="field"><span>Integral time <em className="unit">s</em></span><input type="number" value={t.governor.ti ?? 5} onChange={(e) => setT({ governor: { ...t.governor!, ti: num(e.target.value) || 5 } })} /></label>
           <label className="field"><span>Fastest gate closure <em className="unit">s</em></span><input type="number" value={t.governor.closeTime} onChange={(e) => setT({ governor: { ...t.governor!, closeTime: num(e.target.value) || 8 } })} /></label>
         </>}
+        <label className="field" style={{ gridColumn: '1 / -1' }}><span>Runner characteristic (flow and efficiency change with speed)</span>
+          <select value={t.characteristic?.kind ?? ''} onChange={(e) => setT({ characteristic: e.target.value ? { ...t.characteristic, kind: e.target.value as 'francisLow' } : undefined })}>
+            <option value="">None — passes flow like a valve (gate only)</option>
+            <option value="francisLow">Francis, low specific speed (flow falls towards runaway)</option>
+            <option value="francisHigh">Francis, high specific speed</option>
+            <option value="kaplan">Kaplan / propeller (flow rises with speed)</option>
+            <option value="pelton">Pelton (jet flow independent of speed)</option>
+          </select>
+        </label>
+        {t.characteristic && <label className="field"><span>Runaway speed <em className="unit">× rated</em></span><input type="number" step="0.05" placeholder="by type" value={t.characteristic.runaway ?? ''} onChange={(e) => setT({ characteristic: { ...t.characteristic!, runaway: num(e.target.value) || undefined } })} /></label>}
         <QNum label="Gate bore" q="diameter" value={v.diameter} digits={1} onChange={(x) => x && setValve((y) => ({ ...y, diameter: x, k0: +turbineK(y.turbine!, x).toFixed(3) }))} />
       </div>
       <p className="hint">Rated output {fmtQ(P, 'power', 0, units)}. The gates are sized so the turbine passes the rated flow at the rated head (K = {v.k0}). Operate it in Operations → Turbine load rejection / acceptance.</p>

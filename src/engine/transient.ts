@@ -16,7 +16,7 @@ import { runRigid } from './rigid';
 import { fourQuadrant, frictionF, omegaRated, pipeR, pumpCurve, pumpHeadAt, pumpQuadratic, pumpRatedQ, pumpTorqueQuadratic, solveDense, type FourQ, type PumpCurve } from './hydraulics';
 import { solveSteady, type SteadyResult } from './steady';
 import { G, HB, HV, NU, RHO, allEvents, applyFluid, area, type CheckValveSpec, type Network, type NetNode, type TransientEvent } from './types';
-import { RAIR, TAIR, airValveMassRate, airValveModel, controlArea, dynamicReverseVelocity, interpTable, motorTorque, outletOpening, prechargeGas, reliefFlow, savOpening, solveDecreasing, valveArea, vesselGeometry, waterDepthOf, waterVolumeAt } from './devices';
+import { RAIR, TAIR, airValveMassRate, airValveModel, controlArea, dynamicReverseVelocity, interpTable, motorTorque, outletOpening, turbineFactors, prechargeGas, reliefFlow, savOpening, solveDecreasing, valveArea, vesselGeometry, waterDepthOf, waterVolumeAt } from './devices';
 import { prepareNetwork } from './prepare';
 
 export interface PipeEnvelope {
@@ -568,7 +568,7 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
   elements.forEach((e) => {
     if (e.kind !== 'valve') return;
     const v = net.valves[e.idx], tb = v.turbine;
-    if (!tb?.governor) return;
+    if (!tb?.governor || tb.characteristic) return;
     const ev = valveEv.get(v.id);
     if (!ev || (ev.turbineOp ?? (ev.kind === 'valveClose' ? 'rejection' : 'acceptance')) !== 'rejection') return;
     const w0 = (2 * Math.PI * tb.speed) / 60;
@@ -588,6 +588,41 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const target = Math.min(1, Math.max(0, strokeOf(net.valves[e.idx], e.base) - g.kp * (err + g.I)));
     g.stroke += Math.max(-g.rate * dt, Math.min(g.rate * dt, target - g.stroke));
     return valveArea(net.valves[e.idx], g.stroke);
+  };
+  // turbines with a runner characteristic: speed tracked in the loop, flow and efficiency from the unit speed
+  const turbs = new Map<number, { start: number; rejected: boolean; w: number; w0: number; Hr: number; I: number; stroke: number; inertia: number; eff: number; ratedP: number; f0: number; gov?: { kp: number; ti: number; rate: number } }>();
+  elements.forEach((e) => {
+    if (e.kind !== 'valve') return;
+    const v = net.valves[e.idx], tb = v.turbine;
+    if (!tb?.characteristic) return;
+    const ev = valveEv.get(v.id);
+    const rejected = !!ev && (ev.turbineOp ?? (ev.kind === 'valveClose' ? 'rejection' : 'acceptance')) === 'rejection';
+    const w0 = (2 * Math.PI * tb.speed) / 60;
+    const dH0 = Math.max(Hprev[e.i] - Hprev[e.j], 1e-3);
+    const f0 = turbineFactors(tb.characteristic, 1 / Math.sqrt(dH0 / tb.ratedHead)).flow;
+    turbs.set(e.idx, { start: ev?.start ?? Infinity, rejected, w: w0, w0, Hr: tb.ratedHead, I: 0, stroke: strokeOf(v, e.base), inertia: tb.inertia, eff: tb.efficiency, ratedP: RHO * G * tb.ratedFlow * tb.ratedHead * tb.efficiency, f0,
+      ...(tb.governor && rejected ? { gov: { kp: tb.governor.kp ?? 3, ti: Math.max(tb.governor.ti ?? 5, 1e-3), rate: 1 / Math.max(tb.governor.closeTime, 1e-3) } } : {}) });
+  });
+  const turbineStep = (e: Extract<Element, { kind: 'valve' }>, u: NonNullable<ReturnType<typeof turbs.get>>, t: number) => {
+    const tb = net.valves[e.idx].turbine!;
+    const dH = Math.max(Hprev[e.i] - Hprev[e.j], 1e-3);
+    const ratio = u.w / u.w0;
+    const fac = turbineFactors(tb.characteristic!, ratio / Math.sqrt(dH / u.Hr));
+    if (u.rejected && t >= u.start) {
+      // generator off the grid: the runner accelerates on the hydraulic power less windage and friction
+      const P = RHO * G * Math.max(e.Q, 0) * dH * u.eff * fac.eff;
+      const Pw = 0.01 * u.ratedP * ratio ** 3;
+      u.w = Math.max(0, u.w + (dt * (P - Pw)) / Math.max(u.inertia * u.w, 1e-6));
+    }
+    let gate: number;
+    if (u.gov && t >= u.start) {
+      const err = u.w / u.w0 - 1;
+      u.I += (err * dt) / u.gov.ti;
+      const target = Math.min(1, Math.max(0, strokeOf(net.valves[e.idx], e.base) - u.gov.kp * (err + u.I)));
+      u.stroke += Math.max(-u.gov.rate * dt, Math.min(u.gov.rate * dt, target - u.stroke));
+      gate = valveArea(net.valves[e.idx], u.stroke);
+    } else gate = isValveTarget(e) ? valveOpening(e, t) : e.base;
+    return Math.max(0, (gate * fac.flow) / u.f0);
   };
   /** Active control valve: the opening moves toward the one that meets the set point, with its response time
    *  and stroke-speed limit. */
@@ -1011,6 +1046,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         o.flow[frame] = e.Q;
         const gv = govern.get(e.idx);
         if (gv) { o.speed ??= new Float32Array(nFrames); o.speed[frame] = gv.w / gv.w0; }
+        const tu = turbs.get(e.idx);
+        if (tu) { o.speed ??= new Float32Array(nFrames); o.speed[frame] = tu.w / tu.w0; }
       } else if (e.kind === 'rigid') frameFlows[net.pipes[e.pipe].id][frame] = e.Q;
       if (e.kind !== 'rigid') for (const id of cvKey(e)) {
         const o = cvOut[id];
@@ -1077,8 +1114,9 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
         } else if (!e.tripped) e.tripped = true;
       }
       if (e.kind === 'valve') {
-        const gv = govern.get(e.idx);
-        if (gv && t >= gv.start) e.open = governorStep(e, gv, t);
+        const gv = govern.get(e.idx), tu = turbs.get(e.idx);
+        if (tu) e.open = turbineStep(e, tu, t);
+        else if (gv && t >= gv.start) e.open = governorStep(e, gv, t);
         else if (isValveTarget(e)) e.open = valveOpening(e, t);
         else if (net.valves[e.idx].control?.active) e.open = controlStep(e);
         if (e.open <= 0) e.closed = true;

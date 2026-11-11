@@ -1,5 +1,5 @@
 // Surge protection device physics, kept free of the time loop so each relation can be tested on its own.
-import { G, HB, RHO, type AirValve, type MotorStart, type SurgeVessel } from './types';
+import { G, HB, RHO, type AirValve, type MotorStart, type SurgeVessel, type TurbineCharacteristic } from './types';
 
 export const RAIR = 287.1; // J/(kg·K)
 export const TAIR = 293.15; // K
@@ -268,4 +268,19 @@ export function motorTorque(m: MotorStart, ratedTorque: number, alpha: number, t
   if (m.starter === 'starDelta' && a < (m.switchSpeed ?? 0.8)) T /= 3; // star: voltage / √3, torque / 3
   if (m.starter === 'soft') { const v0 = m.softInitial ?? 0.35, Tr = Math.max(m.softRamp ?? 10, 1e-3); const v = Math.min(1, v0 + ((1 - v0) * Math.max(t, 0)) / Tr); T *= v * v; }
   return T * (m.ratedTorque ?? ratedTorque);
+}
+
+/** Turbine runner at unit speed ν (×rated): flow factor (Q/Q_r at rated gate and head) and efficiency factor
+ *  (η/η_r). Typical shapes: low specific speed Francis — the flow falls as the speed rises (it chokes towards
+ *  runaway); high specific speed Francis — almost constant; Kaplan — the flow rises; Pelton — the jet flow does not
+ *  depend on the speed. The efficiency is parabolic, zero at runaway. */
+export function turbineFactors(c: TurbineCharacteristic, nu: number): { flow: number; eff: number } {
+  if (c.kind === 'table' && c.table && c.table.length >= 2) {
+    const t = [...c.table].sort((a, b) => a[0] - b[0]);
+    return { flow: Math.max(interpTable(t.map((r) => [r[0], r[1]]), nu), 0.02), eff: Math.max(interpTable(t.map((r) => [r[0], r[2]]), nu), 0) };
+  }
+  const slope = { francisLow: -0.45, francisHigh: -0.1, kaplan: 0.35, pelton: 0, table: 0 }[c.kind];
+  const run = c.runaway ?? { francisLow: 1.75, francisHigh: 1.9, kaplan: 2.5, pelton: 1.85, table: 1.8 }[c.kind];
+  const x = (nu - 1) / Math.max(run - 1, 0.05);
+  return { flow: Math.max(1 + slope * (nu - 1), 0.05), eff: Math.max(1 - x * x, nu > run ? -0.5 * (nu - run) : 0) };
 }
