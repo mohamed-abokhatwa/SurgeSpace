@@ -5,10 +5,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAI, activeConfig } from '../ai/accounts';
 import { buildBasis, buildFromBasis, chainageAt, findGaps, lineChainage, newId, readDocument, sheetEvidence, verifyModel, EV_TYPES, type BuildBasis, type Evidence, type EvType, type Gap, type IntakeDoc, type VerifyItem } from '../app/intake';
 import type { AirValvePlanItem } from '../app/airValvePlan';
-import { finishPlanNetwork, guessPipeLayers, guessSymbol, planToNetwork, verifyNetwork, SYMBOL_KINDS, type EndRole, type SymbolKind } from '../app/planNetwork';
+import { finishPlanNetwork, guessPipeLayers, guessSymbol, guessUnits, networkFromItems, planToNetwork, verifyNetwork, SYMBOL_KINDS, type EndRole, type SymbolKind } from '../app/planNetwork';
 import type { VesselSizing } from '../engine/analysis';
 import { materialId } from '../app/intake';
 import { NetThumb } from './Thumb';
+import { CurveDigitizer } from './CurveDigitizer';
 import type { Network } from '../engine/types';
 import { call } from './client';
 import { Ic } from './Icons';
@@ -21,11 +22,13 @@ export interface IntakeSession {
   summaries: Record<string, string>;
   read: Record<string, boolean>;
   name: string;
-  built?: { net: Network; notes: string[]; verify: VerifyItem[]; basis: BuildBasis; mode?: 'line' | 'network' };
-  /** Single main from the long section, or a network from a plan drawing (DXF). */
-  mode?: 'line' | 'network';
-  netPlan?: { doc: string; layers: string[]; units: 'm' | 'mm'; symbols: Record<string, SymbolKind>; draft?: { net: Network; notes: string[]; ends: string[] }; roles: Record<string, EndRole> };
+  built?: { net: Network; notes: string[]; verify: VerifyItem[]; basis: BuildBasis; mode?: 'line' | 'network' | 'items' };
+  /** Single main from the long section, a network from a plan drawing (DXF), or from schedules / a scanned plan. */
+  mode?: 'line' | 'network' | 'items';
+  netPlan?: { doc: string; layers: string[]; units: 'm' | 'mm' | 'ft'; symbols: Record<string, SymbolKind>; draft?: { net: Network; notes: string[]; ends: string[] }; roles: Record<string, EndRole>; totalDemandLps?: number };
   vessel?: VesselSizing;
+  /** Air valve plan only on mains from this size (mm); networks default to 300. */
+  avMinDn?: number;
   plan?: AirValvePlanItem[];
   test?: { before: { minPressure: number; at: string; cavity: number; slams: number }; after: { minPressure: number; at: string; cavity: number; slams: number }; antiSlam: string[]; net: Network };
 }
@@ -100,8 +103,10 @@ export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, 
 
   // ── gaps follow the evidence ──
   const hasPlan = S.docs.some((d) => d.kind === 'dxf' && (d.dxf?.layers.length ?? 0) > 0);
-  useEffect(() => { setSession((s) => ({ ...s, gaps: findGaps(s.evidence, s.gaps, hasPlan) })); }, [S.evidence, hasPlan, setSession]);
-  const mode: 'line' | 'network' = S.mode ?? (hasPlan && S.evidence.filter((e) => e.type === 'profilePoint' && e.status !== 'rejected').length < 2 ? 'network' : 'line');
+  const hasItems = S.evidence.some((e) => e.status !== 'rejected' && e.type === 'pipe' && e.values.from !== undefined && e.values.to !== undefined);
+  useEffect(() => { setSession((s) => ({ ...s, gaps: findGaps(s.evidence, s.gaps, hasPlan || hasItems) })); }, [S.evidence, hasPlan, hasItems, setSession]);
+  const fewProfile = S.evidence.filter((e) => e.type === 'profilePoint' && e.status !== 'rejected').length < 2;
+  const mode: 'line' | 'network' | 'items' = S.mode ?? (hasPlan && fewProfile ? 'network' : hasItems && fewProfile ? 'items' : 'line');
   const openCritical = S.gaps.filter((g) => g.critical && g.status === 'open');
   const basis = useMemo(() => buildBasis(S.evidence, S.gaps, S.docs), [S.evidence, S.gaps, S.docs]);
 
@@ -116,8 +121,9 @@ export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, 
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
   // ── network from the plan drawing ──
+  const itemsCfg = (): NonNullable<IntakeSession['netPlan']> => ({ doc: '', layers: [], units: 'm', symbols: {}, roles: {} });
   const planCfg = (): NonNullable<IntakeSession['netPlan']> => {
-    if (S.netPlan) return S.netPlan;
+    if (S.netPlan && S.netPlan.doc !== '') return S.netPlan;
     const d = S.docs.find((x) => x.kind === 'dxf' && x.dxf?.layers.length)!;
     // symbols and pipe layers: the AI's mapping where it gave one, else a guess from the names
     const aiSym: Record<string, SymbolKind> = {}, aiLayers: string[] = [];
@@ -125,17 +131,16 @@ export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, 
       if (e.values.block && SYMBOL_KINDS.includes(String(e.values.kind) as SymbolKind)) aiSym[String(e.values.block)] = String(e.values.kind) as SymbolKind;
       if (e.values.layer && String(e.values.kind) === 'pipe') aiLayers.push(String(e.values.layer));
     }
-    const pts = [...d.dxf!.blocks.flatMap((b) => b.at), ...d.dxf!.texts.map((t) => [t.x, t.y] as [number, number])];
-    const span = pts.length ? Math.max(Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1]))) : 0;
     const layers = aiLayers.filter((l) => d.dxf!.layers.some((x) => x.name === l));
-    return { doc: d.id, layers: layers.length ? layers : guessPipeLayers(d.dxf!), units: span > 50000 ? 'mm' : 'm', symbols: Object.fromEntries(d.dxf!.blocks.map((b) => [b.name, aiSym[b.name] ?? guessSymbol(b.name)])), roles: {} };
+    return { doc: d.id, layers: layers.length ? layers : guessPipeLayers(d.dxf!), units: guessUnits(d.dxf!), symbols: Object.fromEntries(d.dxf!.blocks.map((b) => [b.name, aiSym[b.name] ?? guessSymbol(b.name)])), roles: {} };
   };
   const buildPlan = () => {
     setErr(null);
     try {
-      const cfg = planCfg();
-      const d = S.docs.find((x) => x.id === cfg.doc)!;
-      const r = planToNetwork(d.dxf!, { layers: cfg.layers, units: cfg.units, symbols: cfg.symbols, diameterMm: basis.diameterMm, material: materialId(basis.material), classM: basis.classM }, S.name);
+      const cfg = mode === 'items' ? (S.netPlan?.doc === '' ? S.netPlan : itemsCfg()) : planCfg();
+      const d = S.docs.find((x) => x.id === cfg.doc);
+      const opts = { diameterMm: basis.diameterMm, material: materialId(basis.material), classM: basis.classM };
+      const r = mode === 'items' ? networkFromItems(S.evidence, opts, S.name) : planToNetwork(d!.dxf!, { layers: cfg.layers, units: cfg.units, symbols: cfg.symbols, ...opts }, S.name);
       // ends: a reservoir symbol is a source; otherwise closed until the engineer says
       const roles: Record<string, EndRole> = {};
       for (const id of r.ends) { const n = r.net.nodes.find((x) => x.id === id)!; roles[id] = cfg.roles[id] ?? (n.kind === 'reservoir' ? { role: 'source', level: n.head ?? n.elev } : { role: 'closed' }); }
@@ -148,15 +153,15 @@ export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, 
     if (!np?.draft) return;
     setErr(null);
     try {
-      const f = finishPlanNetwork(np.draft.net, np.roles);
+      const f = finishPlanNetwork(np.draft.net, np.roles, { totalDemandLps: np.totalDemandLps });
       let net = f.net;
       // a pump curve from the data sheet, where the plan has pumps
       if (basis.curve && net.pumps.length) net = { ...net, pumps: net.pumps.map((p) => ({ ...p, curve: basis.curve!.map(([q, h]) => [q / 1000, h] as [number, number]), ...(basis.inertia ? { inertia: basis.inertia } : {}) })) };
-      const trace = [{ what: 'Network', value: `${net.nodes.length} nodes, ${net.pipes.length} pipes`, from: S.docs.find((d) => d.id === np.doc)?.name ?? 'DXF' }, ...basis.trace.filter((x) => !['Long section', 'Start water level', 'End water level', 'Design flow', 'Air valves on the drawings'].includes(x.what))];
+      const trace = [{ what: 'Network', value: `${net.nodes.length} nodes, ${net.pipes.length} pipes`, from: np.doc === '' ? 'schedules and plans read' : S.docs.find((d) => d.id === np.doc)?.name ?? 'DXF' }, ...basis.trace.filter((x) => !['Long section', 'Start water level', 'End water level', 'Design flow', 'Air valves on the drawings'].includes(x.what))];
       net = { ...net, sources: trace };
       setBusy(tr('Checking it against the documents…'));
       const verify = await verifyNetwork(net);
-      set({ built: { net, notes: [...np.draft.notes, ...f.notes], verify, basis: { ...basis, trace }, mode: 'network' }, plan: undefined, test: undefined, vessel: undefined });
+      set({ built: { net, notes: [...np.draft.notes, ...f.notes], verify, basis: { ...basis, trace }, mode: np.doc === '' ? 'items' : 'network' }, plan: undefined, test: undefined, vessel: undefined, avMinDn: S.avMinDn ?? 250 });
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
   const sizeVessel = async () => {
@@ -172,7 +177,7 @@ export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, 
     if (!S.built) return;
     setErr(null);
     try {
-      const o = await call<{ plan: AirValvePlanItem[]; test?: IntakeSession['test']; net?: Network }>({ type: 'avPlan', net: S.built.net, plan: test ? S.plan : undefined, test }, (m) => setBusy(m));
+      const o = await call<{ plan: AirValvePlanItem[]; test?: IntakeSession['test']; net?: Network }>({ type: 'avPlan', net: S.built.net, plan: test ? S.plan : undefined, test, options: S.avMinDn ? { minDiameter: S.avMinDn / 1000 } : undefined }, (m) => setBusy(m));
       set(test ? { plan: o.plan, test: o.test && o.net ? { ...o.test, net: o.net } : undefined } : { plan: o.plan, test: undefined });
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
@@ -196,17 +201,18 @@ export function IntakeWorkspace({ session, setSession, onClose, onOpenAccounts, 
         {stage === 'gaps' && <GapsStage S={S} setSession={setSession} addFiles={async (f) => { const fresh = (await addFiles(f)).filter((d) => d.kind !== 'sheet' || !S.read[d.id]); if (fresh.length && hasAI) await readWithAI(fresh); }} />}
         {stage === 'build' && (
           <>
-            {hasPlan && (
+            {(hasPlan || hasItems) && (
               <div className="build-mode seg" role="tablist">
                 <button className={mode === 'line' ? 'on' : ''} onClick={() => set({ mode: 'line' })}>{tr('Single main from the long section')}</button>
-                <button className={mode === 'network' ? 'on' : ''} onClick={() => set({ mode: 'network' })}>{tr('Network from the plan drawing (DXF)')}</button>
+                {hasPlan && <button className={mode === 'network' ? 'on' : ''} onClick={() => set({ mode: 'network', ...(S.netPlan?.doc === '' ? { netPlan: undefined } : {}) })}>{tr('Network from the plan drawing (DXF)')}</button>}
+                {hasItems && <button className={mode === 'items' ? 'on' : ''} onClick={() => set({ mode: 'items', ...(S.netPlan && S.netPlan.doc !== '' ? { netPlan: undefined } : {}) })}>{tr('Network from schedules or a scanned plan')}</button>}
               </div>
             )}
             {mode === 'line' ? <BuildStage S={S} basis={basis} build={build} busy={!!busy} />
-              : <PlanBuild S={S} cfg={S.netPlan ?? planCfg()} setCfg={(c) => set({ netPlan: c })} buildPlan={buildPlan} finishPlan={finishPlan} busy={!!busy} />}
+              : <PlanBuild S={S} cfg={S.netPlan ?? (mode === 'items' ? itemsCfg() : planCfg())} setCfg={(c) => set({ netPlan: c })} buildPlan={buildPlan} finishPlan={finishPlan} busy={!!busy} />}
           </>
         )}
-        {stage === 'protect' && <ProtectStage S={S} plan={plan} busy={!!busy} onOpen={onOpen} sizeVessel={sizeVessel} canSize={canSize} />}
+        {stage === 'protect' && <ProtectStage S={S} plan={plan} busy={!!busy} onOpen={onOpen} sizeVessel={sizeVessel} canSize={canSize} setMinDn={(v) => set({ avMinDn: v, plan: undefined, test: undefined })} />}
       </div>
       <footer className="intake-foot">
         <span className="small muted">{S.docs.length} {tr(S.docs.length === 1 ? 'document' : 'documents')} · {S.evidence.filter((e) => e.status !== 'rejected').length} {tr('items')} · {S.gaps.filter((g) => g.status === 'open').length} {tr('open questions')}</span>
@@ -267,6 +273,7 @@ function ReviewStage({ S, setSession }: { S: IntakeSession; setSession: (f: (s: 
   const [filter, setFilter] = useState<string>('all');
   const [edit, setEdit] = useState<{ id: string; text: string } | null>(null);
   const [view, setView] = useState<{ doc: string; page: number } | null>(() => { const d = S.docs.find((x) => x.pages.length); return d ? { doc: d.id, page: 1 } : null; });
+  const [digitise, setDigitise] = useState(false);
   const upd = (id: string, p: Partial<Evidence>) => setSession((s) => ({ ...s, evidence: s.evidence.map((e) => (e.id === id ? { ...e, ...p } : e)) }));
   const ev = S.evidence.filter((e) => filter === 'all' || e.source.doc === filter);
   const groups = EV_TYPES.map((t) => [t, ev.filter((e) => e.type === t)] as const).filter(([, l]) => l.length);
@@ -287,8 +294,11 @@ function ReviewStage({ S, setSession }: { S: IntakeSession; setSession: (f: (s: 
                 {S.docs.filter((d) => d.pages.length).flatMap((d) => d.pages.map((p) => <option key={`${d.id}|${p.n}`} value={`${d.id}|${p.n}`}>{d.name}{d.pages.length > 1 ? ` · ${tr('page')} ${p.n}` : ''} ({S.evidence.filter((e) => e.source.doc === d.id && e.source.page === p.n).length})</option>))}
               </select>
               <span className="small muted">{tr('Boxes show where each item was read; click one to find it in the list.')}</span>
+              <span style={{ flex: 1 }} />
+              {page && !digitise && <button className="btn small" onClick={() => setDigitise(true)}>{tr('Digitise a pump curve')}</button>}
             </div>
-            {page && (
+            {page && digitise && <CurveDigitizer doc={doc!.id} page={page.n} image={page.image} onClose={() => setDigitise(false)} onAdd={(add) => setSession((s) => ({ ...s, evidence: [...s.evidence, ...add] }))} />}
+            {page && !digitise && (
               <div className="page-view">
                 <img src={page.image} alt={`${doc!.name} ${page.n}`} />
                 {onPage.map((e) => { const [x0, y0, x1, y1] = e.source.box!; return <button key={e.id} className={`ev-box t-${e.type} ${e.id === sel ? 'sel' : ''} ${e.status}`} style={{ left: `${x0 * 100}%`, top: `${y0 * 100}%`, width: `${Math.max(0.6, (x1 - x0) * 100)}%`, height: `${Math.max(0.6, (y1 - y0) * 100)}%` }} title={`${tr(TYPE_NAMES[e.type])}: ${valuesText(e)}`} onClick={() => setSel(e.id)} />; })}
@@ -428,13 +438,28 @@ const profileLevel = (p: [number, number][], ch: number) => { for (let k = 0; k 
 
 const SYMBOL_NAMES: Record<SymbolKind, string> = { airValve: 'Air valve', washout: 'Washout', valve: 'Line valve', checkValve: 'Check valve', pump: 'Pump', reservoir: 'Reservoir', tank: 'Tank', hydrant: 'Hydrant', ignore: 'Not a pipeline item' };
 function PlanBuild({ S, cfg, setCfg, buildPlan, finishPlan, busy }: { S: IntakeSession; cfg: NonNullable<IntakeSession['netPlan']>; setCfg: (c: NonNullable<IntakeSession['netPlan']>) => void; buildPlan: () => void; finishPlan: () => Promise<void>; busy: boolean }) {
+  const [showAll, setShowAll] = useState(false);
+  const items = cfg.doc === '';
   const d = S.docs.find((x) => x.id === cfg.doc);
-  if (!d?.dxf) return <div className="empty">{tr('No plan drawing (DXF) among the documents.')}</div>;
+  if (!items && !d?.dxf) return <div className="empty">{tr('No plan drawing (DXF) among the documents.')}</div>;
   const draft = cfg.draft;
   const setRole = (id: string, r: EndRole) => setCfg({ ...cfg, roles: { ...cfg.roles, [id]: r } });
-  const built = S.built?.mode === 'network' ? S.built : undefined;
+  const built = S.built?.mode === (items ? 'items' : 'network') ? S.built : undefined;
+  const ok = S.evidence.filter((e) => e.status !== 'rejected');
   return (
     <div className="intake-build plan-build">
+      {items ? (
+        <div className="build-left">
+          <h4>{tr('From the schedules and plans read')}</h4>
+          <table className="grid-table small"><tbody>
+            <tr><td>{tr('Junctions')}</td><td className="mono">{ok.filter((e) => e.type === 'junction').length}</td></tr>
+            <tr><td>{tr('Reservoirs and tanks')}</td><td className="mono">{ok.filter((e) => e.type === 'reservoir' || e.type === 'tank').length}</td></tr>
+            <tr><td>{tr('Pipes (from → to)')}</td><td className="mono">{ok.filter((e) => e.type === 'pipe' && e.values.from !== undefined).length}</td></tr>
+            <tr><td>{tr('Pumps and valves')}</td><td className="mono">{ok.filter((e) => ['pump', 'valve', 'checkValve'].includes(e.type) && e.values.from !== undefined).length}</td></tr>
+          </tbody></table>
+          <p className="small muted">{tr('Pipe schedules (from, to, length, diameter) and node schedules (id, x, y, level, demand) are read from spreadsheets; on a scanned plan the AI records each junction where it sits and each pipe by the junctions it joins. Lengths written win; otherwise they are measured on the plan, scaled by the lengths that are written.')}</p>
+        </div>
+      ) : d?.dxf && (
       <div className="build-left">
         <h4>{tr('Pipe layers')}</h4>
         <div className="layer-list">
@@ -443,7 +468,7 @@ function PlanBuild({ S, cfg, setCfg, buildPlan, finishPlan, busy }: { S: IntakeS
           ))}
         </div>
         <label className="field small"><span>{tr('Drawing units')}</span>
-          <select value={cfg.units} onChange={(e) => setCfg({ ...cfg, units: e.target.value as 'm' | 'mm', draft: undefined })}><option value="m">{tr('metres')}</option><option value="mm">{tr('millimetres')}</option></select>
+          <select value={cfg.units} onChange={(e) => setCfg({ ...cfg, units: e.target.value as 'm' | 'mm' | 'ft', draft: undefined })}><option value="m">{tr('metres')}</option><option value="mm">{tr('millimetres')}</option><option value="ft">{tr('feet (levels in feet)')}</option></select>
         </label>
         {d.dxf.blocks.length > 0 && <>
           <h4>{tr('Symbols')}</h4>
@@ -456,20 +481,31 @@ function PlanBuild({ S, cfg, setCfg, buildPlan, finishPlan, busy }: { S: IntakeS
         </>}
         <p className="small muted">{tr('Texts next to the lines give levels (IL, CL, RL; GL less 1.2 m cover) and sizes (DN…); levels not given are filled in from the neighbours.')}</p>
       </div>
+      )}
       <div className="build-right">
-        <button className="btn primary big" disabled={busy || !cfg.layers.length} onClick={buildPlan}>{draft ? tr('Read the plan again') : tr('Read the plan')}</button>
+        <button className="btn primary big" disabled={busy || (!items && !cfg.layers.length)} onClick={buildPlan}>{items ? (draft ? tr('Build the network again') : tr('Build the network')) : draft ? tr('Read the plan again') : tr('Read the plan')}</button>
         {draft && (
           <>
             <div className="plan-preview card"><NetThumb net={draft.net} w={520} h={220} /><div className="small muted">{draft.notes.join(' · ')}</div></div>
-            <h4>{tr('Open ends')}</h4>
-            <table className="grid-table small">
-              <thead><tr><th>{tr('Node')}</th><th>{tr('Level')}</th><th>{tr('Is')}</th><th /></tr></thead>
-              <tbody>{draft.ends.map((id) => { const n = draft.net.nodes.find((x) => x.id === id)!; const r = cfg.roles[id] ?? { role: 'closed' as const }; return (
-                <tr key={id}><td className="mono">{id}</td><td className="mono">{n.elev.toFixed(1)}</td>
-                  <td><select value={r.role} onChange={(e) => setRole(id, e.target.value === 'source' ? { role: 'source', level: Math.round(n.elev + 10) } : e.target.value === 'demand' ? { role: 'demand', lps: 10 } : { role: 'closed' })} aria-label={`${id}`}><option value="closed">{tr('closed end')}</option><option value="source">{tr('source (reservoir or tank)')}</option><option value="demand">{tr('demand')}</option></select></td>
-                  <td>{r.role === 'source' ? <label className="gap-num"><input type="number" value={r.level} onChange={(e) => setRole(id, { role: 'source', level: Number(e.target.value) })} aria-label={tr('Water level')} /><span className="small muted">m</span></label>
-                    : r.role === 'demand' ? <label className="gap-num"><input type="number" value={r.lps} onChange={(e) => setRole(id, { role: 'demand', lps: Number(e.target.value) })} aria-label={tr('Demand')} /><span className="small muted">L/s</span></label> : null}</td></tr>); })}</tbody>
-            </table>
+            <h4>{tr('Sources and open ends')}</h4>
+            <label className="field small"><span>{tr('Total demand spread over the network by pipe length')}</span>
+              <span className="gap-num"><input type="number" min={0} value={cfg.totalDemandLps ?? ''} placeholder="0" onChange={(e) => setCfg({ ...cfg, totalDemandLps: e.target.value === '' ? undefined : Number(e.target.value) })} aria-label={tr('Total demand')} /><span className="small muted">L/s</span></span>
+            </label>
+            {(() => {
+              const ordered = [...draft.ends].sort((a2, b2) => Number((cfg.roles[b2]?.role ?? 'closed') !== 'closed') - Number((cfg.roles[a2]?.role ?? 'closed') !== 'closed'));
+              const shown = showAll ? ordered : ordered.slice(0, 12);
+              return <>
+                <table className="grid-table small">
+                  <thead><tr><th>{tr('Node')}</th><th>{tr('Level')}</th><th>{tr('Is')}</th><th /></tr></thead>
+                  <tbody>{shown.map((id) => { const n = draft.net.nodes.find((x) => x.id === id)!; const r = cfg.roles[id] ?? { role: 'closed' as const }; return (
+                    <tr key={id}><td className="mono">{id}</td><td className="mono">{n.elev.toFixed(1)}</td>
+                      <td><select value={r.role} onChange={(e) => setRole(id, e.target.value === 'source' ? { role: 'source', level: Math.round(n.elev + 10) } : e.target.value === 'demand' ? { role: 'demand', lps: 10 } : { role: 'closed' })} aria-label={`${id}`}><option value="closed">{tr('closed end')}</option><option value="source">{tr('source (reservoir or tank)')}</option><option value="demand">{tr('demand')}</option></select></td>
+                      <td>{r.role === 'source' ? <label className="gap-num"><input type="number" value={r.level} onChange={(e) => setRole(id, { role: 'source', level: Number(e.target.value) })} aria-label={tr('Water level')} /><span className="small muted">m</span></label>
+                        : r.role === 'demand' ? <label className="gap-num"><input type="number" value={r.lps} onChange={(e) => setRole(id, { role: 'demand', lps: Number(e.target.value) })} aria-label={tr('Demand')} /><span className="small muted">L/s</span></label> : null}</td></tr>); })}</tbody>
+                </table>
+                {ordered.length > 12 && <button className="btn small ghost" onClick={() => setShowAll(!showAll)}>{showAll ? tr('Show fewer') : `${tr('Show all')} (${ordered.length})`}</button>}
+              </>;
+            })()}
             <button className="btn primary big" disabled={busy || !Object.values(cfg.roles).some((r) => r.role === 'source')} onClick={() => void finishPlan()}>{built ? tr('Build again') : tr('Build the model')}</button>
           </>
         )}
@@ -485,11 +521,11 @@ function PlanBuild({ S, cfg, setCfg, buildPlan, finishPlan, busy }: { S: IntakeS
   );
 }
 
-function ProtectStage({ S, plan, busy, onOpen, sizeVessel, canSize }: { S: IntakeSession; plan: (test: boolean) => Promise<void>; busy: boolean; onOpen: (net: Network, notes: string[], sizeVessel: boolean) => void; sizeVessel: () => Promise<void>; canSize: boolean }) {
+function ProtectStage({ S, plan, busy, onOpen, sizeVessel, canSize, setMinDn }: { S: IntakeSession; plan: (test: boolean) => Promise<void>; busy: boolean; onOpen: (net: Network, notes: string[], sizeVessel: boolean) => void; sizeVessel: () => Promise<void>; canSize: boolean; setMinDn: (v: number) => void }) {
   const [vessel, setVessel] = useState(true);
-  useEffect(() => { if (S.built && !S.plan && !busy) void plan(false); }, [S.built]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (S.built && !S.plan && !busy) void plan(false); }, [S.built, S.avMinDn]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!S.built) return <div className="empty">{tr('Build the model first.')}</div>;
-  const net = S.built.net, b = S.built.basis, isNet = S.built.mode === 'network';
+  const net = S.built.net, b = S.built.basis, isNet = S.built.mode === 'network' || S.built.mode === 'items';
   const start = isNet ? (net.nodes.find((n) => n.kind === 'reservoir')?.id ?? net.nodes[0].id) : b.kind === 'pumped' ? 'PS-D' : 'R-UP';
   const ch = lineChainage(net, start);
   const rows = (S.plan ?? []).map((it) => ({ it, ch: chainageAt(net, ch, it.at) })).sort((a, b) => (a.ch ?? 1e9) - (b.ch ?? 1e9));
@@ -510,6 +546,7 @@ function ProtectStage({ S, plan, busy, onOpen, sizeVessel, canSize }: { S: Intak
       <div className="row" style={{ gap: 10, alignItems: 'center', margin: '8px 0' }}>
         <span className="ilegend small"><i className="lg drawing" />{tr('on the drawings')}</span><span className="ilegend small"><i className="lg plan" />{tr('proposed')}</span>
         <span style={{ flex: 1 }} />
+        {isNet && <label className="small">{tr('Mains from')} <select value={S.avMinDn ?? 0} onChange={(e) => { setMinDn(Number(e.target.value)); }} aria-label={tr('Mains from')}>{[0, 150, 200, 250, 300, 400, 500].map((v) => <option key={v} value={v}>{v ? `DN${v}` : tr('all sizes')}</option>)}</select></label>}
         <button className="btn" disabled={busy} onClick={() => void plan(false)}>{tr('Plan again')}</button>
         <button className="btn primary" disabled={busy || !S.plan || !canSize} title={canSize ? undefined : tr('Part of SurgeSpace Pro (start an evaluation)')} onClick={() => void plan(true)}>{tr('Test the plan in surge runs')}</button>
       </div>

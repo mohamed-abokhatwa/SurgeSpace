@@ -1064,7 +1064,7 @@ export default function App() {
       <footer className="statusbar">
         <span>{activeCase ? <>Case: <b>{activeCase.name}</b></> : <b>{net.name}</b>}</span>
         <span className="sep" />
-        <span>{net.nodes.length} nodes · {net.pipes.length} pipes · {net.pumps.length} pumps · {net.valves.length} valves</span>
+        <span>{net.nodes.length} {net.nodes.length === 1 ? 'node' : 'nodes'} · {net.pipes.length} {net.pipes.length === 1 ? 'pipe' : 'pipes'} · {net.pumps.length} {net.pumps.length === 1 ? 'pump' : 'pumps'} · {net.valves.length} {net.valves.length === 1 ? 'valve' : 'valves'}</span>
         <span className="sep" />
         <span>{tool === 'select' ? 'Select' : tool === 'pan' ? 'Pan' : `Placing: ${EL[tool as ElementKind]?.name}`}</span>
         {selected.length > 0 && <><span className="sep" /><span>{selected.length} selected</span></>}

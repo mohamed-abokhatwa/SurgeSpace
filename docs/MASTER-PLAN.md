@@ -42,6 +42,7 @@ Legend: [x] done and tested · [~] partly done, or written but not yet tested in
 - [x] S6.2 Visuals: results sweep in after a run, vapour cavities on the drawing, drawing and long section linked by a probe, waterfall (3D) view, surge animation exported as a video, daily operation played on the drawing with tank levels
 - [x] S6.3 Model from documents: drawings (PDF, images), spreadsheets and DXF read into an evidence register (AI with page boxes and the PDF text layer; spreadsheets by their headers without AI), review against the page, missing data asked for, model built from accepted evidence with a traced basis (report section 3.6), checks against the documents
 - [x] S6.4 Air valve plan (AWWA M51 locations; sizes for draining and filling) tested in surge runs, anti-slam where valves slam; copilot command plan_air_valves and task "Plan the air valves"
+- [x] S6.6 Plan reading made robust and checked on a real network (KY4: spatial index, bends kept in pipes, junctions where lines end, drawings in feet, TWL texts, pump orientation, network demand); networks from schedules and scanned plans (Net3 exact); pump curves digitised by hand on any graph (checked on a published curve); faster vessel sizing
 - [x] S6.5 Networks from plan drawings (DXF pipe layers, symbols to devices, texts to levels and sizes, ends as sources or demands); pump curves from data sheets (tables or graphs, fitted and checked against the duty point); air vessel sized inside the documents workflow with the air valve plan in place
 
 ### Phase 1 — Engines to professional grade

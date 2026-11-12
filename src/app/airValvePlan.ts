@@ -34,6 +34,8 @@ export interface AirValvePlanItem {
 export interface AirValvePlanOptions {
   /** Longest run without an air valve, m (default 600). */
   spacing?: number;
+  /** Only mains of at least this internal diameter, m (distribution networks: the transmission mains). */
+  minDiameter?: number;
   /** Smallest rise that counts as a high point, m (default 0.3). */
   minRise?: number;
   /** Smallest grade change that needs a valve (fraction, default 0.01 = 1 %). */
@@ -76,7 +78,7 @@ export function planAirValves(net: Network, o: AirValvePlanOptions = {}, steadyI
   const spacing = o.spacing ?? 600, minRise = o.minRise ?? 0.3, dg = o.gradeChange ?? 0.01, vFill = o.fillVelocity ?? 0.3;
   let steady = steadyIn;
   if (!steady) { try { steady = solveSteady(net); } catch { steady = undefined; } }
-  const open = net.pipes.filter((p) => !p.closed);
+  const open = net.pipes.filter((p) => !p.closed && p.diameter >= (o.minDiameter ?? 0) - 1e-9);
   const prof = new Map(open.map((p) => [p.id, pipeProfile(net, p)]));
   const items = new Map<string, AirValvePlanItem>();
   const key = (at: AirValvePlanItem['at']) => ('node' in at ? `n:${at.node}` : `p:${at.pipe}:${Math.round(at.s)}`);

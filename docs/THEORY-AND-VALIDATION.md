@@ -77,5 +77,9 @@ wall reactions with mass transfer (Sherwood number), completely mixed tanks, boo
 | UTM conversion | PROJ | within 0.2 mm |
 | DXF export | ezdxf (independent reader) | no audit errors |
 | QGIS plug-in | QGIS 3.34 (headless) | export, SurgeSpace import and results layers |
+| Network from a plan drawing (DXF) | KY4, a real distribution network (959 junctions, 1,156 pipes with 2,812 bends, 2 pumps, 4 tanks, 1 reservoir) drawn as a DXF in feet with level, size and TWL texts, symbols and clutter; compared with the network it was drawn from | 99.8 % of nodes and 99.5 % of pipes found between the right nodes; levels 99.8 % within 1 cm; sizes 99.5 %; lengths along the bends 99.8 %; sources and water levels all correct; steady heads against an independently built model: median 0.03 m, 95 % within 0.29 m (the rest is where pipes in the source data run within a metre of a junction they do not join, which a drawing cannot tell apart) |
+| Network from schedules | EPANET Net3 written as node and link schedules (Excel layout) and read back by the header rules | heads equal within 0.0004 m |
+| Pump curve digitised by hand | a raster graph with a known curve; a published extension-service curve (2,000 gpm at 80 ft, stated in its text) | within 0.3 units; 2,000 gpm read as 79.8 ft |
+| Pump curve fitted to points | an exact quadratic | recovered exactly at shut-off, duty and end |
 
 Reference data and generators: `validation/data/` (WNTR scripts and JSON results).

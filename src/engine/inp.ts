@@ -111,6 +111,10 @@ export function parseInp(text: string, name = 'Imported network'): InpImport {
     });
     if (status === 'CV') cvPipes.push(r[0]);
   }
+  // bends drawn in the network file
+  const verts = new Map<string, { x: number; y: number }[]>();
+  for (const r of sec('VERTICES')) { const x = Number(r[1]), y = Number(r[2]); if (Number.isFinite(x) && Number.isFinite(y)) verts.set(r[0], [...(verts.get(r[0]) ?? []), { x, y }]); }
+  for (const p of pipes) { const v = verts.get(p.id); if (v?.length) p.vertices = v; }
   if (pipes.length) notes.push('All pipes got a wave speed of 1000 m/s. Set real values by material (steel ~1200, ductile iron ~1100, PVC ~400, HDPE ~300 m/s).');
 
   const pumps: Pump[] = [];
@@ -332,6 +336,8 @@ export function toInp(net: Network): string {
     ...(net.settings.demandModel === 'PDA' ? ['Demand Model  PDA', `Minimum Pressure  ${net.settings.pdaMin ?? 0}`, `Required Pressure  ${net.settings.pdaReq ?? 0.1}`, `Pressure Exponent  ${net.settings.pdaExp ?? 0.5}`] : []),
     '', '[COORDINATES]');
   for (const n of net.nodes) L.push(`${n.id}  ${n.x}  ${n.y}`);
+  const vp = net.pipes.filter((p) => p.vertices?.length);
+  if (vp.length) { L.push('', '[VERTICES]'); for (const p of vp) for (const v of p.vertices!) L.push(`${p.id}  ${v.x}  ${v.y}`); }
   L.push('', '[END]');
   return L.join('\n');
 }

@@ -87,9 +87,13 @@ and a local server, not live accounts; the v3 Store release has not been made (`
   sources, demands or closed, operation and run length; `verifyNetwork`). Symbols and pipe layers come from the AI
   (note items with `block`/`layer` and `kind`) or from name guesses. Pump curves from data sheets: `fitPumpCurve`.
   The protection step sizes an air vessel (worker job `sizeVessel`) with the air valve plan in place.
-- Open: the document reading has been tested with a stand-in AI server, not yet with live providers on real project
-  drawings; pump direction on a plan follows the drawn line direction (check it); scanned (raster) plans are read
-  by the AI as a single main, not yet as a network.
+- Plan reading checked on a real network: `tests/plan-ky4.test.ts` (KY4 drawn as a DXF by `validation/plan-dxf.ts`,
+  read back and compared item by item, solved against an independent model, then air valve plan, surge test and
+  vessel sizing); in the interface `tests/ui-plan-large.mjs`. Schedules and scanned plans: `networkFromItems`
+  (`tests/items.test.ts`, Net3 exact). Pump curves by hand: `src/ui/CurveDigitizer.tsx` (`tests/ui-digitise.mjs`).
+  Pumps on plans are turned to lift from the lower source; NRVs follow the flow.
+- Open: the AI reading has been tested with stand-in AI servers only (the request format, images, text layer and
+  tool replies), not yet with a live provider on real project drawings — try it with an account.
 
 ## 2. Features
 

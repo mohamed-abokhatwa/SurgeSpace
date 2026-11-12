@@ -16,7 +16,7 @@ export interface IntakeDoc {
   dxf?: DxfSummary;
   text?: string;
 }
-export interface DxfSummary { layers: { name: string; lines: number }[]; blocks: { name: string; count: number; at: [number, number][] }[]; texts: { layer: string; s: string; x: number; y: number }[]; raw: string }
+export interface DxfSummary { layers: { name: string; lines: number }[]; blocks: { name: string; count: number; at: [number, number][] }[]; texts: { layer: string; s: string; x: number; y: number }[]; raw: string; /** $INSUNITS from the header (2 feet, 4 mm, 6 m …). */ insunits?: number }
 
 export const EV_TYPES = ['profilePoint', 'reservoir', 'tank', 'pump', 'pumpCurvePoint', 'pipe', 'valve', 'checkValve', 'airValve', 'washout', 'junction', 'design', 'note'] as const;
 export type EvType = (typeof EV_TYPES)[number];
@@ -148,10 +148,12 @@ export function dxfSummary(text: string): DxfSummary {
     for (let j = i + 1; j < pairs.length && pairs[j][0] !== 0; j++) if (!(pairs[j][0] in e)) e[pairs[j][0]] = pairs[j][1];
     const layer = e[8] ?? '0';
     if (v === 'LINE' || v === 'LWPOLYLINE' || v === 'POLYLINE') layers.set(layer, (layers.get(layer) ?? 0) + 1);
-    else if (v === 'INSERT') { const nm = e[2] ?? '?'; blocks.set(nm, [...(blocks.get(nm) ?? []), [+e[10], +e[20]]]); }
-    else if ((v === 'TEXT' || v === 'MTEXT') && texts.length < 400) texts.push({ layer, s: (e[1] ?? '').replace(/\\P/g, ' ').replace(/\{[^}]*;|}/g, ''), x: +e[10], y: +e[20] });
+    else if (v === 'INSERT') { const nm = e[2] ?? '?'; const a = blocks.get(nm); if (a) a.push([+e[10], +e[20]]); else blocks.set(nm, [[+e[10], +e[20]]]); }
+    else if (v === "TEXT" || v === "MTEXT") texts.push({ layer, s: (e[1] ?? '').replace(/\\P/g, ' ').replace(/\{[^}]*;|}/g, ''), x: +e[10], y: +e[20] });
   }
-  return { layers: [...layers].map(([name, n]) => ({ name, lines: n })).sort((a, b) => b.lines - a.lines), blocks: [...blocks].map(([name, at]) => ({ name, count: at.length, at })), texts, raw: text };
+  const iu = pairs.findIndex(([c, v]) => c === 9 && v === '$INSUNITS');
+  const insunits = iu >= 0 && pairs[iu + 1]?.[0] === 70 ? Number(pairs[iu + 1][1]) : undefined;
+  return { layers: [...layers].map(([name, n]) => ({ name, lines: n })).sort((a, b) => b.lines - a.lines), blocks: [...blocks].map(([name, at]) => ({ name, count: at.length, at })), texts, raw: text, ...(insunits !== undefined ? { insunits } : {}) };
 }
 
 // ── spreadsheets without AI: recognise long sections, pipe and node tables by their headers ──
@@ -178,11 +180,39 @@ export function sheetEvidence(doc: IntakeDoc): Evidence[] {
         if (ch === undefined || z === undefined) return;
         out.push({ id: newId(), type: 'profilePoint', values: { chainage_m: hdr[cCh].includes('km') ? ch * 1000 : ch, level_m: z, ...(cGr >= 0 && cLv >= 0 && num(r, cGr) !== undefined ? { ground_m: num(r, cGr)! } : {}) }, source: { doc: doc.id, cell: cell(cCh, i), how: 'table' }, confidence: 0.95, status: 'proposed' });
       });
-    } else if (cFrom >= 0 && cTo >= 0 && cL >= 0) {
+    } else if (findCol(hdr, 'id', 'node', 'junction', 'name', 'label') >= 0 && ((findCol(hdr, 'x', 'easting', 'east') >= 0 && findCol(hdr, 'y', 'northing', 'north') >= 0) || cLv >= 0) && cFrom < 0) {
+      // node schedule: id, coordinates, level, demand
+      const cId = findCol(hdr, 'id', 'node', 'junction', 'name', 'label'), cX = findCol(hdr, 'x', 'easting', 'east'), cY = findCol(hdr, 'y', 'northing', 'north'), cDem = findCol(hdr, 'demand', 'base demand', 'flow', 'q'), cType = findCol(hdr, 'type', 'kind');
+      // the node's own level, not a water level column
+      const cWl = findCol(hdr, 'water level', 'twl', 'hwl', 'head', 'wl');
+      const cE = (() => { for (const k of ['elevation', 'elev', 'invert', 'ground level', 'ground', 'level', 'rl', 'z']) { const i = hdr.findIndex((h, j) => j !== cWl && (h === k || h.startsWith(`${k} `) || h.includes(` ${k}`) || h.startsWith(k))); if (i >= 0) return i; } return -1; })();
       body.forEach((r, i) => {
-        const L = num(r, cL), d = num(r, cD);
-        if (L === undefined) return;
-        out.push({ id: newId(), type: 'pipe', label: String(r[0] ?? ''), values: { from: String(r[cFrom] ?? ''), to: String(r[cTo] ?? ''), length_m: L, ...(d !== undefined ? { diameter_mm: d < 5 ? d * 1000 : d } : {}) }, source: { doc: doc.id, cell: cell(cL, i), how: 'table' }, confidence: 0.9, status: 'proposed' });
+        const id = String(r[cId] ?? '').trim();
+        if (!id) return;
+        const kind = cType >= 0 ? String(r[cType] ?? '').toLowerCase() : '';
+        const t: EvType = /tank/.test(kind) ? 'tank' : /res|source|sump/.test(kind) ? 'reservoir' : 'junction';
+        const v: Record<string, number | string> = { name: id };
+        if (cX >= 0 && num(r, cX) !== undefined) v.x_m = num(r, cX)!;
+        if (cY >= 0 && num(r, cY) !== undefined) v.y_m = num(r, cY)!;
+        if (cE >= 0 && num(r, cE) !== undefined) v.level_m = num(r, cE)!;
+        if (cWl >= 0 && num(r, cWl) !== undefined) v.head_m = num(r, cWl)!;
+        if (cDem >= 0 && num(r, cDem) !== undefined) v.demand_lps = num(r, cDem)!;
+        out.push({ id: newId(), type: t, label: id, values: v, source: { doc: doc.id, cell: cell(cId, i), how: 'table' }, confidence: 0.95, status: 'proposed' });
+      });
+    } else if (cFrom >= 0 && cTo >= 0 && (cL >= 0 || findCol(hdr, 'type', 'kind') >= 0)) {
+      // link schedule: pipes (from, to, length, diameter, roughness); pumps and valves by a type column
+      const cType = findCol(hdr, 'type', 'kind'), cR = findCol(hdr, 'roughness', 'c factor', 'hw c', 'hazen', 'ks', 'k s'), cMat = findCol(hdr, 'material'), cSt = findCol(hdr, 'status', 'state');
+      body.forEach((r, i) => {
+        const L = num(r, cL), d = num(r, cD), kind = cType >= 0 ? String(r[cType] ?? '').toLowerCase() : 'pipe';
+        const t: EvType = /pump/.test(kind) ? 'pump' : /check|nrv|non.?return/.test(kind) ? 'checkValve' : /valve|prv|fcv|tcv|gv|bfv/.test(kind) ? 'valve' : 'pipe';
+        if (t === 'pipe' && L === undefined) return;
+        const v: Record<string, number | string> = { from: String(r[cFrom] ?? '').trim(), to: String(r[cTo] ?? '').trim() };
+        if (L !== undefined) v.length_m = L;
+        if (d !== undefined) v.diameter_mm = d < 5 ? d * 1000 : d;
+        if (cR >= 0 && num(r, cR) !== undefined) v.roughness = num(r, cR)!;
+        if (cMat >= 0 && r[cMat]) v.material = String(r[cMat]);
+        if (cSt >= 0 && /closed|shut/i.test(String(r[cSt] ?? ''))) v.status = 'closed';
+        out.push({ id: newId(), type: t, label: String(r[0] ?? ''), values: v, source: { doc: doc.id, cell: cell(cFrom, i), how: 'table' }, confidence: 0.9, status: 'proposed' });
       });
     } else if (cQ >= 0 && cHd >= 0 && body.length >= 3) {
       body.forEach((r, i) => {
@@ -209,6 +239,7 @@ Item types:
 - valve: line valve (kind gate|butterfly|globe|ball|prv|psv|fcv, diameter_mm, chainage_m, closure_s).
 - checkValve, airValve (kind double|single|vacuum|antislam, diameter_mm, chainage_m), washout (chainage_m, diameter_mm).
 - junction: a node with its level or a demand (name, chainage_m, level_m, demand_lps).
+On a network PLAN (pipes drawn in plan view, not a long section): record every junction (where pipes meet, end, or change size; tanks and reservoirs as their own types) with its name as written — or J1, J2 … in reading order if none is written — its level_m if written, and its box tight around the point; and every pipe as a pipe item with from and to (the junction names), diameter_mm, length_m if written, and material. Do not skip pipes: the network is built from them.
 - design: design data stated as text (design_flow_lps, static_head_m, working_pressure_m, test_pressure_m).
 - note: anything else that matters for the model (text).
 

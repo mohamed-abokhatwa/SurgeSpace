@@ -35,7 +35,7 @@ export async function extractDxf(cfg: AIConfig, doc: IntakeDoc, signal?: AbortSi
   const txt = [
     `CAD drawing "${doc.name}" (DXF). Layers with line counts: ${d.layers.map((l) => `${l.name} (${l.lines})`).join(', ')}.`,
     `Symbol blocks (name, count, first positions): ${d.blocks.map((b) => `${b.name} ×${b.count} at ${b.at.slice(0, 6).map(([x, y]) => `(${x.toFixed(1)}, ${y.toFixed(1)})`).join(' ')}`).join('; ') || 'none'}.`,
-    `Texts (layer: text @ position):\n${d.texts.map((t) => `${t.layer}: ${t.s} @ (${t.x.toFixed(1)}, ${t.y.toFixed(1)})`).join('\n') || 'none'}`,
+    `Texts (layer: text @ position${d.texts.length > 500 ? `; the first 500 of ${d.texts.length}` : ''}):\n${d.texts.slice(0, 500).map((t) => `${t.layer}: ${t.s} @ (${t.x.toFixed(1)}, ${t.y.toFixed(1)})`).join('\n') || 'none'}`,
     'Work out which symbol blocks are air valves, washouts, line valves, check valves, pumps; and read chainages, levels, diameters and material from the texts (a label such as "ARV DN100 CH 0+950" is an air valve at chainage 950 m). Record each item; put the block or layer name in the label. Also, for EVERY symbol block, record one note item with the fields block (the block name exactly) and kind (one of airValve, washout, valve, checkValve, pump, reservoir, tank, hydrant, ignore), and one note item with fields layer (the layer name) and kind = pipe for each layer that holds pipelines (not roads, kerbs, buildings, contours or text).',
   ].join('\n\n');
   return ask(cfg, [{ type: 'text', text: txt.slice(0, 60000) }], { doc: doc.id }, signal);

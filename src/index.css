@@ -664,3 +664,17 @@ table.grid-table td .pill { margin: 0 3px 3px 0; }
 .vessel-row > div:first-child { display: flex; flex-direction: column; gap: 2px; }
 .vessel-res { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 @media (max-width: 900px) { .vessel-row { grid-template-columns: 1fr; } }
+.dz-panel { padding: 10px 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; border-color: var(--accent); }
+.dz-step { color: var(--accent); font-weight: 600; }
+.dz-val { width: 110px; }
+.dz-read { max-width: 100%; overflow-wrap: anywhere; color: var(--muted); }
+.dz-view { cursor: crosshair; }
+.dz-view img { user-select: none; }
+.dz-layer { position: absolute; inset: 0; }
+.dz-mark { position: absolute; transform: translate(-50%, -50%); min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; font: 600 10px var(--mono); display: grid; place-items: center; pointer-events: none; color: #fff; }
+.dz-pt { background: #ff7a1a; }
+.dz-ref { background: var(--cyan); }
+.dz-pending { background: #8b5cf6; animation: ev-pulse 1s ease-in-out infinite; }
+.dz-row { min-height: 30px; display: flex; align-items: center; }
+.dz-row > .row { width: 100%; }
+.dz-read { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }

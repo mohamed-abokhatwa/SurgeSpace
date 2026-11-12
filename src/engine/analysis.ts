@@ -18,13 +18,13 @@ export interface Uncertainty {
 }
 
 const summary = (r: TransientResult) => {
-  let maxH = -Infinity, minP = Infinity;
+  let maxH = -Infinity, minP = Infinity, minAt = '';
   for (const e of r.envelopes)
     for (let i = 0; i < e.s.length; i++) {
       maxH = Math.max(maxH, e.hMax[i]);
-      minP = Math.min(minP, e.hMin[i] - e.z[i]);
+      if (e.hMin[i] - e.z[i] < minP) { minP = e.hMin[i] - e.z[i]; minAt = `${e.id} at ${e.s[i].toFixed(0)} m`; }
     }
-  return { maxH, minP };
+  return { maxH, minP, minAt };
 };
 
 const interp = (xs: Float64Array, ys: Float64Array, x: number) => {
@@ -96,6 +96,7 @@ export function sizeVessel(net: Network, nodeId: string, onProgress?: (msg: stri
   const qMain = Math.max(...net.pumps.map((p) => Math.abs(steady.flows.get(p.id) ?? 0)), ...net.pipes.filter((p) => p.from === nodeId || p.to === nodeId).map((p) => Math.abs(steady.flows.get(p.id) ?? 0)), 0.01);
   const conn = Math.max(0.1, Math.min(1.0, Math.round(Math.sqrt((4 * qMain) / (Math.PI * 3)) * 20) / 20)); // ~3 m/s at full main flow
   const tried: VesselSizing['tried'] = [];
+  let lastMinAt = '';
   const evaluate = (V: number, gf: number) => {
     const trial: Network = structuredClone(net);
     const n = trial.nodes.find((x) => x.id === nodeId)!;
@@ -112,27 +113,39 @@ export function sizeVessel(net: Network, nodeId: string, onProgress?: (msg: stri
     const emptied = Object.values(r.vessels).some((v) => v.emptied);
     const pass = s.minP >= net.settings.minPressure && ratio <= 1 && !emptied;
     tried.push({ volume: V, gasFraction: gf, pass, minPressure: s.minP });
+    lastMinAt = s.minAt;
     return { pass, minP: s.minP, ratio };
   };
   let best: { V: number; gf: number; minP: number; ratio: number } | null = null;
-  for (const gf of [0.35, 0.5, 0.65]) {
-    onProgress?.(`Initial gas ${Math.round(gf * 100)} %…`);
-    let lo = 0.2, hi = 5;
-    let hiRes = evaluate(hi, gf);
-    while (!hiRes.pass && hi < 3000) {
-      lo = hi;
-      hi *= 3;
-      hiRes = evaluate(hi, gf);
-    }
-    if (!hiRes.pass) continue;
-    for (let k = 0; k < 9 && hi / lo > 1.04; k++) {
+  // the smallest passing volume at 50 % initial gas (grow by 3× until it passes, then halve the bracket); then try
+  // 35 % and 65 % only from that bracket down. If even 3,000 m³ does not pass, no gas fraction will.
+  const search = (gf: number, lo0: number, hi0: number, hiKnown?: { minP: number; ratio: number }) => {
+    let lo = lo0, hi = hi0;
+    let hiRes = hiKnown ? { pass: true, ...hiKnown } : evaluate(hi, gf);
+    while (!hiRes.pass && hi < 3000) { lo = hi; hi *= 3; hiRes = evaluate(hi, gf); }
+    if (!hiRes.pass) return null;
+    for (let k = 0; k < 9 && hi / lo > 1.06; k++) {
       const mid = Math.sqrt(lo * hi);
       const m = evaluate(mid, gf);
       if (m.pass) { hi = mid; hiRes = m; } else lo = mid;
     }
-    if (!best || hi < best.V) best = { V: hi, gf, minP: hiRes.minP, ratio: hiRes.ratio };
+    return { V: hi, gf, minP: hiRes.minP, ratio: hiRes.ratio, lo };
+  };
+  onProgress?.('Initial gas 50 %…');
+  const b50 = search(0.5, 0.2, 5);
+  if (b50) {
+    best = b50;
+    for (const gf of [0.35, 0.65]) {
+      onProgress?.(`Initial gas ${Math.round(gf * 100)} %…`);
+      // does a smaller vessel pass with this gas fraction?
+      const probe = b50.lo * 1.0001;
+      const pr = evaluate(Math.max(probe, 0.2), gf);
+      if (!pr.pass) continue;
+      const r2 = search(gf, Math.max(0.1, probe / 3), probe, pr);
+      if (r2 && r2.V < best.V) best = r2;
+    }
   }
-  if (!best) return { ok: false, node: nodeId, volume: 0, gasVolume: 0, connDiameter: conn, minPressure: NaN, maxPressureRatio: NaN, tried, message: 'No vessel up to 3,000 m³ meets the criteria at this location. Try another location, air valves at the high points, or a higher pipe class.' };
+  if (!best) return { ok: false, node: nodeId, volume: 0, gasVolume: 0, connDiameter: conn, minPressure: NaN, maxPressureRatio: NaN, tried, message: `No vessel up to 3,000 m³ meets the criteria at this location: the lowest pressure stays at ${tried.length ? tried[tried.length - 1].minPressure.toFixed(1) : '?'} m (${lastMinAt}), out of the vessel's reach. Protect that part of the network there (air valves, a feed tank or a second vessel), try another location, or a higher pipe class.` };
   const V = Math.ceil(best.V * 1.1 * 2) / 2; // 10 % margin, rounded up to 0.5 m³
   return {
     ok: true, node: nodeId, volume: V, gasVolume: Math.round(V * best.gf * 100) / 100, connDiameter: conn, minPressure: best.minP, maxPressureRatio: best.ratio, tried,
