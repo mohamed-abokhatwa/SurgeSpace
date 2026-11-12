@@ -12,7 +12,10 @@ hostname). Never mix the two.
 
 - Repository: `github.com/mohamed-abokhatwa/SurgeSpace` (branch `main`)
 - Owner / commit identity: `git -c user.email=mohamed.abokhatwa@hotmail.com -c user.name="Mohamed"`
-- Version: **2.0.x** (MSIX builds are `<major>.<minor>.<run>.0`; v1 builds were 1.0.x, the last 1.0.9.0). Tag `v2.0.0` builds 2.0.<run>.0.
+- Version: **3.0.0** on `main` (tag `v3.0.0`, 12 Nov 2026; MSIX builds are `<major>.<minor>.<run>.0`). The 3.0 Store package is
+  **SurgeSpace_3.0.12.0.msix** (Desktop builds run 12, on the `store-builds` branch). Listing text and screenshots for 3.0:
+  `store/microsoft-store-listing.md`, `store/images/v3/` (made by `scripts/store-shots.mjs`). Last version in the Store before
+  it: 2.0.11.0.
 
 ## 1a. Version 2 workspace (branch `v2-workspace`)
 
