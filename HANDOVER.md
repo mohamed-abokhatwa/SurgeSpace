@@ -98,6 +98,17 @@ and a local server, not live accounts; the v3 Store release has not been made (`
 - Open: the AI reading has been tested with stand-in AI servers only (the request format, images, text layer and
   tool replies), not yet with a live provider on real project drawings — try it with an account.
 
+## 1d. Website (surgespace.engspace.app)
+- Source in `website/` (see `website/README.md`): same design concept as engspace.app (Cormorant Garamond + Jost,
+  champagne-gold foil, diamond ornaments) on SurgeSpace navy with the orange surge accent. Pages: home (live
+  method-of-characteristics trace in `hero.js`), features, ai (model from drawings and copilot), proven, plans (no
+  amounts: Free, 14-day evaluation, licence on request), download (+ what's new), docs (built from `docs/`: manual,
+  tutorials, theory, API), support, privacy (includes the AI features), 404.
+- Build `cd website && npm ci && node build.mjs`; check `node check.mjs` (also in the `tests.yml` ui job).
+- Live since 12 Nov 2026. Hosting: GitHub Pages (source GitHub Actions) via `.github/workflows/pages.yml` (push to main touching website/ or docs/), custom domain
+  from `dist/CNAME`. DNS in Cloudflare: `CNAME surgespace → mohamed-abokhatwa.github.io`, proxied (same as engspace.app).
+- WhatsApp button and footer link use the founder's number, assembled in `site.js` (as on engspace.app).
+
 ## 2. Features
 
 **Model and data**
