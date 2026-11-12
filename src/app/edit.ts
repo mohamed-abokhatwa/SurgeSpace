@@ -133,7 +133,9 @@ export function addLink(net: Network, kind: ElementKind, from: string, to: strin
 export function splitPipe(net: Network, pipeId: string, u: number, d: ElementDefaults = DEFAULTS): { net: Network; node: string; newPipe: string } {
   const p = net.pipes.find((x) => x.id === pipeId);
   if (!p) return { net, node: '', newPipe: '' };
-  u = Math.max(0.02, Math.min(0.98, u));
+  // at least half a metre (and 0.1 %) from either end; on short pipes the usual 2 %
+  const umin = Math.min(0.02, Math.max(0.5 / Math.max(p.length, 1e-6), 0.001));
+  u = Math.max(umin, Math.min(1 - umin, u));
   const pts = pipePath(net, p);
   const at = pointAt(pts, u);
   const s = u * p.length;

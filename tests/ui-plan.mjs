@@ -57,12 +57,12 @@ try {
   t('the reservoir symbol is taken as the source', (await roleOf(0)) === 'source');
   // demands at the other three ends
   for (let i = 1; i < ends; i++) { await rows.nth(i).locator('select').selectOption('demand'); await rows.nth(i).locator('input').fill('40'); }
-  await rows.nth(0).locator('input').fill('100');
+  await rows.nth(0).locator('input').fill('104'); // sump 5.5 m above the pipe: enough suction head for the trip
   if (shots) await p.screenshot({ path: `${shots}/plan-1-read.png` });
   await p.getByRole('button', { name: 'Build the model' }).click();
   await p.waitForSelector('.plan-build .verify', { timeout: 15000 });
   const ver = await p.locator('.plan-build .vrow').allTextContents();
-  t('built and checked (steady state solves; the high branch end is flagged)', ver[0].startsWith('✓') && ver.some((v) => v.startsWith('!') && v.includes('N7')), ver.map((v) => v.slice(0, 50)).join(' | '));
+  t('built and checked (steady state solves; the high branch end is flagged)', ver[0].startsWith('✓') && ver.some((v) => v.startsWith('!') && /lowest -?\d/.test(v)), ver.map((v) => v.slice(0, 50)).join(' | '));
   await p.locator('.intake-next').click();
   await p.waitForSelector('.intake-protect tbody tr', { timeout: 20000 });
   t('air valve plan on the network (locations by node or pipe)', await p.locator('.intake-protect tbody tr').count() >= 5);

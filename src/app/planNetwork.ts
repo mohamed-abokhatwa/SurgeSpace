@@ -5,7 +5,7 @@
 import { solveSteady } from '../engine/steady';
 import { defaultSettings, type Network, type NetNode, type Pipe } from '../engine/types';
 import { PIPE_MATERIALS } from './catalogues';
-import { addLink, insertOnPipe, uniqueId } from './edit';
+import { addLink, insertOnPipe, splitPipe, uniqueId } from './edit';
 import type { DxfSummary } from './intake';
 import { wizardWaveSpeed } from './wizard';
 
@@ -385,7 +385,7 @@ export function planToNetwork(d: DxfSummary, o: PlanOptions, name = 'Network fro
       else if (best) {
         const endNode = best.u * best.p.length < 1 ? best.p.from : (1 - best.u) * best.p.length < 1 ? best.p.to : null;
         if (endNode && !linkKind) hits.push({ kind, block: b.name, x, y, node: endNode });
-        else hits.push({ kind, block: b.name, x, y, pipe: best.p, u: linkKind ? Math.max(0.03, Math.min(0.97, best.u)) : best.u });
+        else hits.push({ kind, block: b.name, x, y, pipe: best.p, u: linkKind ? Math.max(1 / best.p.length, Math.min(1 - 1 / best.p.length, best.u)) : best.u });
       }
     }
   }
@@ -401,16 +401,8 @@ export function planToNetwork(d: DxfSummary, o: PlanOptions, name = 'Network fro
     else if (h.kind === 'washout' || h.kind === 'hydrant') { if (h.kind === 'washout') net = { ...net, annotations: [...(net.annotations ?? []), { id: uniqueId(net, 'A-'), x: h.x, y: h.y, text: 'WO' }] }; placed.push({ kind: h.kind, at: 'note' }); }
     else {
       // a pump or valve drawn on a node: the node is split there, the link joins the two halves (direction set later)
-      const n0 = net.nodes.find((x) => x.id === h.node)!;
-      const ps = net.pipes.filter((q) => q.from === n0.id || q.to === n0.id).sort((p1, p2) => p2.length - p1.length);
-      if (!ps.length) { skipped++; continue; }
-      const q = ps[0];
-      const toward = q.from === n0.id ? (q.vertices?.[0] ?? net.nodes.find((x) => x.id === q.to)!) : (q.vertices?.[q.vertices.length - 1] ?? net.nodes.find((x) => x.id === q.from)!);
-      const L = Math.hypot(toward.x - n0.x, toward.y - n0.y) || 1, g = Math.min(0.5, L / 4);
-      const bId = uniqueId(net, 'J-');
-      const B: NetNode = { ...n0, id: bId, x: n0.x + ((toward.x - n0.x) / L) * g, y: n0.y + ((toward.y - n0.y) / L) * g, airValve: undefined, vessel: undefined, demand: 0, kind: 'junction', head: undefined };
-      net = { ...net, nodes: [...net.nodes, B], pipes: net.pipes.map((x) => (x.id === q.id ? { ...x, ...(x.from === n0.id ? { from: bId } : { to: bId }), length: Math.max(0.1, x.length - g) } : x)) };
-      const rr = addLink(net, h.kind === 'valve' ? 'lineValve' : h.kind === 'checkValve' ? 'nrv' : 'pump', n0.id, bId);
+      const rr = linkAt(net, h.node!, h.kind);
+      if (!rr) { skipped++; continue; }
       net = rr.net; placed.push({ kind: h.kind, at: rr.id });
     }
   }
@@ -421,10 +413,17 @@ export function planToNetwork(d: DxfSummary, o: PlanOptions, name = 'Network fro
     if (h.kind === 'washout' || h.kind === 'hydrant') { if (h.kind === 'washout') net = { ...net, annotations: [...(net.annotations ?? []), { id: uniqueId(net, 'A-'), x: h.x, y: h.y, text: 'WO' }] }; placed.push({ kind: h.kind, at: 'note' }); continue; }
     if (h.kind === 'reservoir' || h.kind === 'tank') { skipped++; continue; }
     const f = frac.get(h.pipe!.id) ?? 1;
-    const u = Math.max(0.02, Math.min(0.98, h.u! / f));
-    const r = insertOnPipe(net, h.pipe!.id, h.kind === 'airValve' ? 'airValve' : h.kind === 'valve' ? 'lineValve' : h.kind === 'checkValve' ? 'nrv' : 'pump', u);
-    net = r.net; frac.set(h.pipe!.id, h.u!);
-    placed.push({ kind: h.kind, at: r.id });
+    const u = Math.max(0.001, Math.min(0.999, h.u! / f));
+    if (h.kind === 'airValve') { const r = insertOnPipe(net, h.pipe!.id, 'airValve', u); net = r.net; placed.push({ kind: h.kind, at: r.id }); }
+    else {
+      // a link on a pipe: split the pipe where the symbol is, then put the link across a short gap there
+      const sp = splitPipe(net, h.pipe!.id, u);
+      if (!sp.node) { skipped++; continue; }
+      const rr = linkAt(sp.net, sp.node, h.kind, sp.newPipe);
+      if (!rr) { skipped++; continue; }
+      net = rr.net; placed.push({ kind: h.kind, at: rr.id });
+    }
+    frac.set(h.pipe!.id, h.u!);
   }
   if (skipped) notes.push(`${skipped} symbol(s) away from the pipes left out`);
   const counts = SYMBOL_KINDS.map((x) => [x, placed.filter((p) => p.kind === x).length] as const).filter(([, c]) => c);
@@ -434,6 +433,25 @@ export function planToNetwork(d: DxfSummary, o: PlanOptions, name = 'Network fro
   const ends = net.nodes.filter((n) => (dg.get(n.id) ?? 0) === 1 || n.kind === 'reservoir').map((n) => n.id);
   notes.unshift(`${net.nodes.length} nodes, ${net.pipes.length} pipes from layer(s) ${o.layers.join(', ')}; ${ends.length} open end(s) and sources`);
   return { net, notes, ends, placed };
+}
+
+/** A pump or valve at a node: the node is split, a short gap (at most 0.5 m) opened along one of its pipes (the
+ *  given one, else the longest) and the link put across it. */
+function linkAt(net: Network, nodeId: string, kind: SymbolKind, prefer?: string): { net: Network; id: string } | null {
+  const n0 = net.nodes.find((x) => x.id === nodeId);
+  if (!n0) return null;
+  const ps = net.pipes.filter((q) => q.from === n0.id || q.to === n0.id).sort((p1, p2) => (p1.id === prefer ? -1 : p2.id === prefer ? 1 : p2.length - p1.length));
+  if (!ps.length) return null;
+  const q = ps[0];
+  const far = net.nodes.find((x) => x.id === (q.from === n0.id ? q.to : q.from))!;
+  const toward = q.from === n0.id ? (q.vertices?.[0] ?? far) : (q.vertices?.[q.vertices.length - 1] ?? far);
+  const L = Math.hypot(toward.x - n0.x, toward.y - n0.y) || 1, g = Math.min(0.5, L / 4, q.length / 4);
+  const bId = uniqueId(net, 'J-');
+  const B: NetNode = { ...n0, id: bId, x: n0.x + ((toward.x - n0.x) / L) * g, y: n0.y + ((toward.y - n0.y) / L) * g, airValve: undefined, vessel: undefined, demand: 0, kind: 'junction', head: undefined };
+  const shift = (pr: Pipe['profile']) => (q.from === n0.id ? pr?.map((v) => ({ s: Math.max(0, v.s - g), z: v.z })).filter((v) => v.s > 0) : pr);
+  const n1: Network = { ...net, nodes: [...net.nodes, B], pipes: net.pipes.map((x) => (x.id === q.id ? { ...x, ...(x.from === n0.id ? { from: bId } : { to: bId }), length: Math.max(0.1, x.length - g), ...(x.profile ? { profile: shift(x.profile) } : {}) } : x)) };
+  const rr = addLink(n1, kind === 'valve' ? 'lineValve' : kind === 'checkValve' ? 'nrv' : 'pump', n0.id, bId);
+  return { net: rr.net, id: rr.id };
 }
 
 export type EndRole = { role: 'closed' } | { role: 'source'; level: number } | { role: 'demand'; lps: number };

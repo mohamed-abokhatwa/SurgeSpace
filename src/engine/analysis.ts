@@ -132,8 +132,18 @@ export function sizeVessel(net: Network, nodeId: string, onProgress?: (msg: stri
     return { V: hi, gf, minP: hiRes.minP, ratio: hiRes.ratio, lo };
   };
   onProgress?.('Initial gas 50 %…');
-  const b50 = search(0.5, 0.2, 5);
-  if (b50) {
+  let b50 = search(0.5, 0.2, 5);
+  // none at 50 %: a gas-rich vessel may pass where the water empties (or the reverse), so search the others in full —
+  // unless even the largest vessel hardly changed the lowest pressure (it is out of the vessel's reach)
+  const at50 = tried.filter((x) => x.gasFraction === 0.5);
+  const reach = at50.length > 1 ? at50[at50.length - 1].minPressure - at50[0].minPressure : Infinity;
+  if (!b50 && reach > 1) for (const gf of [0.65, 0.35]) {
+    onProgress?.(`Initial gas ${Math.round(gf * 100)} %…`);
+    const r = search(gf, 0.2, 5);
+    if (r && (!b50 || r.V < b50.V)) b50 = r;
+  }
+  if (b50 && b50.gf !== 0.5) best = b50;
+  else if (b50) {
     best = b50;
     for (const gf of [0.35, 0.65]) {
       onProgress?.(`Initial gas ${Math.round(gf * 100)} %…`);
