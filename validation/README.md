@@ -120,3 +120,9 @@ with control valves, 3 s without).
 - A closed valve with a check valve could be re-opened by the steady solver; it now stays closed.
 
 `scripts/full-check.sh` runs every test and comparison in this folder; it was run three times with identical results.
+
+## Plan drawing check (KY4)
+
+`data/ky4.inp` is network KY4 of the Kentucky research networks (Jolly, Lothes, Bryson & Ormsbee, 2014, University
+of Kentucky; as distributed with WNTR). `plan-dxf.ts` draws it as a plan (DXF), `tests/plan-ky4.test.ts` reads the
+drawing back and compares it with the network, and `write-plan-dxf.ts` writes the drawing for the interface test.
