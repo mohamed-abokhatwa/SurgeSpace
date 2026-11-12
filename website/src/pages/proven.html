@@ -1,0 +1,79 @@
+<!--{"title":"Proven","description":"How SurgeSpace is checked: against EPANET 2.2, published transient benchmarks, closed-form theory and independent solvers — on every change to the code.","nav":"proven"}-->
+<header class="phero"><div class="wrap">
+  <div class="crumb"><a href="{{p}}index.html">SurgeSpace</a><i></i><span>Proven</span></div>
+  <div class="eyebrow">Checked on every build</div>
+  <h1>Every engine against <em>a reference.</em></h1>
+  <p class="sub">A surge study is only worth the trust you can put in it. Each SurgeSpace engine is compared with an independent reference — EPANET 2.2, published benchmarks, closed-form theory, separate ODE solvers — and the comparisons run in continuous integration on every change.</p>
+</div></header>
+
+<section><div class="wrap">
+  <div class="pnums vitrine reveal">
+    <div class="pnum"><div class="v">0.05 %</div><div class="l">Joukowsky rise</div><div class="s">wave engine against a·ΔV/g</div></div>
+    <div class="pnum"><div class="v">exact</div><div class="l">Benchmark Tnet0</div><div class="s">a published transient benchmark network</div></div>
+    <div class="pnum"><div class="v">0.012 m</div><div class="l">Steady heads</div><div class="s">worst difference from EPANET 2.2 on Net3, KY4 and Net6</div></div>
+    <div class="pnum"><div class="v">0.0004 m</div><div class="l">Schedules read back</div><div class="s">EPANET Net3 written as Excel schedules and rebuilt</div></div>
+  </div>
+</div></section>
+
+<section class="band"><div class="wrap">
+  <div class="head reveal"><div class="eyebrow"><span class="n">i</span>Surge and steady state</div><h2>The hydraulics.</h2></div>
+  <div class="ptable-wrap reveal"><table class="ptable">
+    <thead><tr><th>Check</th><th>Reference</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Joukowsky rise, wave period, line packing</td><td>Closed form</td><td class="r">Joukowsky within 0.05 %</td></tr>
+      <tr><td>Transient benchmarks Tnet0 and Tnet3</td><td>Published benchmark results</td><td class="r">Tnet0 exact; Tnet3 92 % within 3 m</td></tr>
+      <tr><td>Transient, Net3 valve closure</td><td>TSNet</td><td class="r">Steady state and first waves match</td></tr>
+      <tr><td>Steady heads and flows (Net3, KY4, Net6)</td><td>EPANET 2.2</td><td class="r">Worst 0.012 m</td></tr>
+      <tr><td>PRV, PSV, FCV, PBV, GPV, TCV</td><td>EPANET 2.2</td><td class="r">Heads 0.003 m, flows 0.01 L/s</td></tr>
+      <tr><td>Check-valve and air-valve slam</td><td>a&#183;v/g</td><td class="r">As theory</td></tr>
+      <tr><td>Surge tank mass oscillation</td><td>Jaeger's formula; wave engine</td><td class="r">Within 5 %; engines agree within 1 %</td></tr>
+      <tr><td>Differential surge tank</td><td>SciPy ODE integration (independent code)</td><td class="r">Upsurge equal to 0.01 %</td></tr>
+      <tr><td>Motor start, direct on line</td><td>SciPy ODE integration</td><td class="r">Rigid 0.03 %, wave 1.2 %</td></tr>
+      <tr><td>Pipe force on a straight pipe</td><td>&#961;&#183;a&#183;V&#183;A</td><td class="r">Within 12 % (line packing)</td></tr>
+      <tr><td>Rigid-column sparse solve</td><td>Dense solve</td><td class="r">Identical; 3,000 pipes at about 0.1 s a step</td></tr>
+      <tr><td>Built-in examples</td><td>Stored baseline</td><td class="r">880 values identical</td></tr>
+    </tbody></table></div>
+</div></section>
+
+<section class="band"><div class="wrap">
+  <div class="head reveal"><div class="eyebrow"><span class="n">ii</span>Daily operation and water quality</div><h2>Against EPANET 2.2.</h2></div>
+  <div class="ptable-wrap reveal"><table class="ptable">
+    <thead><tr><th>Check</th><th>Reference</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Extended period, Net1, Net2, Net3</td><td>EPANET 2.2</td><td class="r">Heads within 0.04 m</td></tr>
+      <tr><td>Rule-based controls (Net1, four rules)</td><td>EPANET 2.2</td><td class="r">Heads within 0.008 m</td></tr>
+      <tr><td>Emitters (leakage), Net1 over 24 h</td><td>EPANET 2.2</td><td class="r">Heads 0.008 m, demands 0.003 L/s</td></tr>
+      <tr><td>Pressure-driven demand, Net1 over 24 h</td><td>EPANET 2.2</td><td class="r">Heads 0.007 m, demands 0.005 L/s</td></tr>
+      <tr><td>Chlorine, Net1</td><td>EPANET 2.2</td><td class="r">Within 0.003 mg/L</td></tr>
+      <tr><td>Water age, Net1, Net2, Net3</td><td>EPANET 2.2</td><td class="r">95 % within 0.2 h</td></tr>
+      <tr><td>Calibration</td><td>Synthetic field data</td><td class="r">Recovers roughness &#215;3 and demand &#215;1.2</td></tr>
+    </tbody></table></div>
+</div></section>
+
+<section class="band"><div class="wrap">
+  <div class="head reveal"><div class="eyebrow"><span class="n">iii</span>Reading documents</div><h2>The model from your drawings, <em>checked too.</em></h2>
+    <p class="sub">KY4 — a real distribution network of 959 junctions and 1,156 pipes with 2,812 bends, 2 pumps, 4 tanks and a reservoir — was drawn as a CAD plan in feet, with level, size and water-level texts, symbols and clutter. SurgeSpace read it back and was compared item by item with the network it was drawn from.</p></div>
+  <div class="ptable-wrap reveal"><table class="ptable">
+    <thead><tr><th>Check</th><th>Reference</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Nodes and pipes found between the right nodes</td><td>KY4 source network</td><td class="r">99.8 % and 99.5 %</td></tr>
+      <tr><td>Levels, sizes, lengths along the bends</td><td>KY4 source network</td><td class="r">99.8 % within 1 cm; 99.5 %; 99.8 %</td></tr>
+      <tr><td>Steady heads of the model read from the plan</td><td>An independently built model</td><td class="r">Median 0.03 m; 95 % within 0.29 m</td></tr>
+      <tr><td>Network from schedules</td><td>EPANET Net3 as Excel schedules</td><td class="r">Heads within 0.0004 m</td></tr>
+      <tr><td>Pump curve digitised by hand</td><td>A published curve: 2,000 gpm at 80 ft</td><td class="r">Read as 79.8 ft</td></tr>
+      <tr><td>Pump curve fitted to points</td><td>An exact quadratic</td><td class="r">Recovered exactly</td></tr>
+    </tbody></table></div>
+  <p class="plannote reveal">The rest of the KY4 differences are where pipes in the source data pass within a metre of a junction they do not join, which a drawing cannot tell apart. Methods and the full list: <a href="{{p}}docs/theory.html">Theory and validation</a>.</p>
+</div></section>
+
+<section class="band"><div class="wrap">
+  <div class="head reveal"><div class="eyebrow"><span class="n">iv</span>Exchange</div><h2>Files other programs <em>trust.</em></h2></div>
+  <div class="ptable-wrap reveal"><table class="ptable">
+    <thead><tr><th>Check</th><th>Reference</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>DXF export</td><td>ezdxf (independent reader)</td><td class="r">No audit errors</td></tr>
+      <tr><td>QGIS plug-in</td><td>QGIS 3.34</td><td class="r">Export, import and results layers</td></tr>
+      <tr><td>UTM conversion</td><td>PROJ</td><td class="r">Within 0.2 mm</td></tr>
+      <tr><td>EPANET .inp round trip</td><td>EPANET 2.2</td><td class="r">Read and written, with vertices</td></tr>
+    </tbody></table></div>
+</div></section>

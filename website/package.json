@@ -1,0 +1,13 @@
+{
+  "name": "surgespace-website",
+  "private": true,
+  "type": "module",
+  "description": "surgespace.engspace.app — built from src/ and ../docs into dist/",
+  "scripts": {
+    "build": "node build.mjs",
+    "images": "node make-images.mjs"
+  },
+  "devDependencies": {
+    "marked": "18.1.2"
+  }
+}

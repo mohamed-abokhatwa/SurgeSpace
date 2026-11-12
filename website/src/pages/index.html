@@ -1,0 +1,177 @@
+<!--{"title":"SurgeSpace · See every pressure wave before your pipeline does","description":"Water hammer and surge analysis for pipelines, pumping stations, hydropower and water networks. An AI builds the model from your drawings; SurgeSpace finds the surge and designs the protection.","nav":"","heroJs":true}-->
+<header class="hero" id="top"><div class="wrap">
+  <div class="lux-hero">
+    <div>
+      <div class="eyebrow">Pressure surge analysis<span class="xs-hide">&#160;&#183; pipelines, pumping stations, networks</span></div>
+      <h1>See every pressure wave <em>before</em> your pipeline does.</h1>
+      <p class="sub">SurgeSpace is a water hammer and network analysis workspace. Draw the system — or hand the AI your drawings, long sections and data sheets — then trip the pumps, close the valves and watch the waves travel through every pipe. It finds the worst pressures, the vapour cavities and the slams, and designs the <b>air vessel and air valves</b> that stop them.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="{{store}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>Get it for Windows</a>
+        <a class="btn btn-ghost" href="#see">See what it does</a>
+      </div>
+      <p class="fine"><span class="gem au"></span>Free to download &#183; Free plan up to 25 pipes &#183; 14-day evaluation of everything</p>
+    </div>
+    <div>
+      <figure class="trace brk" aria-label="Animated long section: a valve closes at the end of a main and the pressure waves travel back and forth">
+        <div class="trace-top"><span>Long section &#183; valve closure</span><span class="live"><i></i><span id="trace-t">t = 0.0 s</span></span></div>
+        <canvas id="trace" width="640" height="400"></canvas>
+        <div class="trace-key"><span><i style="background:var(--ember)"></i>Head now</span><span><i style="background:var(--gold)"></i>Maximum</span><span><i style="background:var(--sky)"></i>Minimum</span><span><i style="background:#5D7396"></i>Pipe</span></div>
+      </figure>
+      <p class="trace-cap">Not a video: a real method-of-characteristics run, in your browser — a valve closing in five seconds at the end of a 1.8 km main.</p>
+    </div>
+  </div>
+
+  <div class="statband reveal" role="list">
+    <div class="stat" role="listitem"><div class="v">2</div><div class="l">Surge engines</div><div class="s">wave, with column separation, and rigid column for thousands of pipes</div></div>
+    <div class="stat" role="listitem"><div class="v">13</div><div class="l">AI connections</div><div class="s">including free models on your own computer — your keys stay on it</div></div>
+    <div class="stat" role="listitem"><div class="v">1,156</div><div class="l">Pipes from one plan</div><div class="s">a real network read from a CAD drawing and checked item by item</div></div>
+    <div class="stat" role="listitem"><div class="v">0.05<span class="u">%</span></div><div class="l">Joukowsky</div><div class="s">the wave engine against closed-form theory, on every build</div></div>
+    <div class="stat" role="listitem"><div class="v">EN<span class="u">+</span>AR</div><div class="l">Interface</div><div class="s">English or Arabic, right to left, report included</div></div>
+  </div>
+</div></header>
+
+<section id="documents" class="band"><div class="wrap">
+  <div class="head reveal">
+    <div class="eyebrow"><span class="n">i</span>From your drawings to a protected model</div>
+    <h2>Hand it the drawings. <em>Check</em> every number it reads.</h2>
+    <p class="sub">Drop the drawings, long sections, pump data sheets, Excel schedules and CAD plans. Your own AI account reads them, and every value is shown <b>where it came from on the page</b> — for you to accept, edit or reject. What the documents do not say is asked for, never invented.</p>
+  </div>
+  <div class="steps vitrine reveal">
+    <div><div class="pn">01</div><h3>Drop the documents</h3><p>PDF drawings and scans, images, long sections, data sheets, Excel and CSV schedules, DXF plans.</p></div>
+    <div><div class="pn">02</div><h3>Review the evidence</h3><p>Levels, lengths, diameters, pump curves and duties — each one traced to its page, ready to accept or correct.</p></div>
+    <div><div class="pn">03</div><h3>Fill what is missing</h3><p>Only the questions the documents leave open. Typical values are listed as assumptions in the report.</p></div>
+    <div><div class="pn">04</div><h3>Build and check</h3><p>The model is built, the steady state solved, and the result checked back against the documents.</p></div>
+    <div><div class="pn">05</div><h3>Protect it</h3><p>An air valve plan by AWWA M51 practice, tested in surge runs, and the air vessel sized for you.</p></div>
+  </div>
+  <div class="split reveal" style="margin-top:56px">
+    <div class="words">
+      <h3 class="h2b">Whole networks, from a plan drawing.</h3>
+      <p class="sub" style="font-size:16.5px">Pipes with their bends, levels and sizes from the texts, pumps, valves, air valves, tanks and reservoirs from the symbols — in metres or feet. Schedules of nodes and pipes are read without AI at all, and a pump curve on any graph can be digitised by hand.</p>
+      <a class="more" href="{{p}}ai.html">How the model from documents works &#8594;</a>
+    </div>
+    <div class="shot"><img src="{{p}}assets/shots/06-documents-build-1600.webp" srcset="{{p}}assets/shots/06-documents-build-800.webp 800w, {{p}}assets/shots/06-documents-build-1600.webp 1600w" sizes="(max-width:980px) 100vw, 640px" width="1600" height="900" loading="lazy" alt="Every value traced to its document, missing data asked for, the model checked against the drawings"></div>
+  </div>
+</div></section>
+
+<section id="see" class="band"><div class="wrap">
+  <div class="head reveal">
+    <div class="eyebrow"><span class="n">ii</span>One workspace, the whole study</div>
+    <h2>Choose a view — <em>see it real.</em></h2>
+    <p class="sub">These are the app's own screens, not mock-ups.</p>
+  </div>
+  <div class="reveal">
+    <div class="tabsbar" role="tablist" aria-label="Screens">
+      <button class="tabbtn" role="tab" id="t-surge" aria-controls="p-surge" aria-selected="true">The surge</button>
+      <button class="tabbtn" role="tab" id="t-fall" aria-controls="p-fall" aria-selected="false" tabindex="-1">Waterfall</button>
+      <button class="tabbtn" role="tab" id="t-doc" aria-controls="p-doc" aria-selected="false" tabindex="-1">From documents</button>
+      <button class="tabbtn" role="tab" id="t-plan" aria-controls="p-plan" aria-selected="false" tabindex="-1">Plan drawings</button>
+      <button class="tabbtn" role="tab" id="t-av" aria-controls="p-av" aria-selected="false" tabindex="-1">Air valves</button>
+      <button class="tabbtn" role="tab" id="t-ai" aria-controls="p-ai" aria-selected="false" tabindex="-1">AI copilot</button>
+      <button class="tabbtn" role="tab" id="t-eps" aria-controls="p-eps" aria-selected="false" tabindex="-1">Daily operation</button>
+      <button class="tabbtn" role="tab" id="t-ar" aria-controls="p-ar" aria-selected="false" tabindex="-1">Arabic</button>
+    </div>
+    <div class="tabpanel" role="tabpanel" id="p-surge" aria-labelledby="t-surge">
+      <div class="shot"><img src="{{p}}assets/shots/02-network-surge-1600.webp" srcset="{{p}}assets/shots/02-network-surge-800.webp 800w, {{p}}assets/shots/02-network-surge-1600.webp 1600w" sizes="(max-width:980px) 100vw, 780px" width="1600" height="900" loading="lazy" alt="Watch the pressure waves travel through the network after the pumps trip"></div>
+      <div><h3>The waves, travelling.</h3><p>Trip the pumps and the results sweep across the network; the waves travel and reflect in the surge view, and vapour cavities show where they form.</p>
+        <div class="checks"><div><span class="gem em"></span>Worst pressures on every pipe and node</div><div><span class="gem em"></span>Cavities and slams marked on the drawing</div><div><span class="gem em"></span>Export the surge as a video</div></div></div>
+    </div>
+    <div class="tabpanel" role="tabpanel" id="p-fall" aria-labelledby="t-fall" hidden>
+      <div class="shot"><img src="{{p}}assets/shots/03-waterfall-1600.webp" srcset="{{p}}assets/shots/03-waterfall-800.webp 800w, {{p}}assets/shots/03-waterfall-1600.webp 1600w" sizes="(max-width:980px) 100vw, 780px" width="1600" height="900" loading="lazy" alt="Pressure along the main over time in the waterfall view, with the long section and envelopes"></div>
+      <div><h3>Pressure along the main, over time.</h3><p>The waterfall view stacks the head along the line second by second, next to the long section with its maximum and minimum envelopes.</p>
+        <div class="checks"><div><span class="gem em"></span>Envelopes linked to the drawing</div><div><span class="gem em"></span>Graphs of any variable</div><div><span class="gem em"></span>Pipe class and vapour lines drawn in</div></div></div>
+    </div>
+    <div class="tabpanel" role="tabpanel" id="p-doc" aria-labelledby="t-doc" hidden>
+      <div class="shot"><img src="{{p}}assets/shots/05-documents-review-1600.webp" srcset="{{p}}assets/shots/05-documents-review-800.webp 800w, {{p}}assets/shots/05-documents-review-1600.webp 1600w" sizes="(max-width:980px) 100vw, 780px" width="1600" height="900" loading="lazy" alt="Build the model from your drawings: every value the AI reads is shown where it came from"></div>
+      <div><h3>Every value, with its source.</h3><p>The AI reads each page whole and in quarters, with the exact PDF text alongside. Each value it records points back to the place it was read.</p>
+        <div class="checks"><div><span class="gem em"></span>Accept, edit or reject each value</div><div><span class="gem em"></span>Gaps listed before anything is built</div><div><span class="gem em"></span>The basis printed in the report</div></div></div>
+    </div>
+    <div class="tabpanel" role="tabpanel" id="p-plan" aria-labelledby="t-plan" hidden>
+      <div class="shot"><img src="{{p}}assets/shots/08-plan-drawing-1600.webp" srcset="{{p}}assets/shots/08-plan-drawing-800.webp 800w, {{p}}assets/shots/08-plan-drawing-1600.webp 1600w" sizes="(max-width:980px) 100vw, 780px" width="1600" height="900" loading="lazy" alt="Read a whole network from a CAD plan: pipes, bends, levels, sizes, pumps, tanks and air valves"></div>
+      <div><h3>A CAD plan becomes a network.</h3><p>Pipe layers become pipes with their bends; level and size texts are read and carried along; symbols become pumps, valves, air valves and tanks.</p>
+        <div class="checks"><div><span class="gem em"></span>Metres or feet, levels from IL, CL or GL</div><div><span class="gem em"></span>Tees and loose ends joined</div><div><span class="gem em"></span>Checked on a real 1,156-pipe network</div></div></div>
+    </div>
+    <div class="tabpanel" role="tabpanel" id="p-av" aria-labelledby="t-av" hidden>
+      <div class="shot"><img src="{{p}}assets/shots/07-air-valve-plan-1600.webp" srcset="{{p}}assets/shots/07-air-valve-plan-800.webp 800w, {{p}}assets/shots/07-air-valve-plan-1600.webp 1600w" sizes="(max-width:980px) 100vw, 780px" width="1600" height="900" loading="lazy" alt="Air valve plan by AWWA M51 practice, tested in surge runs, and the air vessel sized for you"></div>
+      <div><h3>Air valves placed, sized and tested.</h3><p>High points, grade changes, long runs and pump discharges by AWWA M51 practice, sized for draining and filling — then run in the surge and turned to anti-slam where they slam.</p>
+        <div class="checks"><div><span class="gem em"></span>Applied by splitting the pipes</div><div><span class="gem em"></span>Anti-slam where the surge says so</div><div><span class="gem em"></span>Air vessel sized with the plan in place</div></div></div>
+    </div>
+    <div class="tabpanel" role="tabpanel" id="p-ai" aria-labelledby="t-ai" hidden>
+      <div class="shot"><img src="{{p}}assets/shots/04-ai-copilot-1600.webp" srcset="{{p}}assets/shots/04-ai-copilot-800.webp 800w, {{p}}assets/shots/04-ai-copilot-1600.webp 1600w" sizes="(max-width:980px) 100vw, 780px" width="1600" height="900" loading="lazy" alt="An AI copilot with your own AI account: it reads the model, runs the engines and explains the results"></div>
+      <div><h3>A copilot that uses the engines.</h3><p>It works through the same commands you do: builds and edits the model, runs the engines and explains the results. Every change is an undo step; every number comes from the engines.</p>
+        <div class="checks"><div><span class="gem em"></span>Explain results, review the model</div><div><span class="gem em"></span>Design the protection, scope the cases</div><div><span class="gem em"></span>Draft the report narrative</div></div></div>
+    </div>
+    <div class="tabpanel" role="tabpanel" id="p-eps" aria-labelledby="t-eps" hidden>
+      <div class="shot"><img src="{{p}}assets/shots/09-daily-operation-1600.webp" srcset="{{p}}assets/shots/09-daily-operation-800.webp 800w, {{p}}assets/shots/09-daily-operation-1600.webp 1600w" sizes="(max-width:980px) 100vw, 780px" width="1600" height="900" loading="lazy" alt="Daily operation: tank levels, pump switching, pressures through the day and water quality"></div>
+      <div><h3>Through the day, then the worst hour.</h3><p>Demand patterns, controls and rules, leakage and pressure-driven demand, tank levels, energy, water age and chlorine — then a surge run from the worst hour.</p>
+        <div class="checks"><div><span class="gem em"></span>Checked against EPANET 2.2</div><div><span class="gem em"></span>Play the day on the drawing</div><div><span class="gem em"></span>Live plant data and calibration</div></div></div>
+    </div>
+    <div class="tabpanel" role="tabpanel" id="p-ar" aria-labelledby="t-ar" hidden>
+      <div class="shot"><img src="{{p}}assets/shots/10-arabic-1600.webp" srcset="{{p}}assets/shots/10-arabic-800.webp 800w, {{p}}assets/shots/10-arabic-1600.webp 1600w" sizes="(max-width:980px) 100vw, 780px" width="1600" height="900" loading="lazy" alt="English or Arabic, with the interface, panels and report right to left"></div>
+      <div><h3>English or Arabic.</h3><p>The interface, the panels and the report, right to left — with SI or US units throughout.</p>
+        <div class="checks"><div><span class="gem em"></span>Switch at any time</div><div><span class="gem em"></span>Report in your language and units</div><div><span class="gem em"></span>Light or dark theme</div></div></div>
+    </div>
+  </div>
+</div></section>
+
+<section id="everything" class="band"><div class="wrap">
+  <div class="head reveal">
+    <div class="eyebrow"><span class="n">iii</span>Everything a surge study needs</div>
+    <h2>Every element, both engines, <em>the protection.</em></h2>
+  </div>
+  <div class="ledger reveal">
+    <div><div class="ic"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg></div><h3>Events</h3><ul><li>Pump trip with inertia run-down, controlled stop, start-up</li><li>Valve closure by stroke and law, or an operating curve</li><li>Turbine load rejection with governor and overspeed</li></ul></div>
+    <div><div class="ic"><svg viewBox="0 0 24 24"><path d="M7 21V9a5 5 0 0 1 10 0v12M5 21h14M12 4V2"/></svg></div><h3>Protection</h3><ul><li><b>Air vessels</b> — bladder, dip tube, sized automatically</li><li>Air valves: double-acting, three-stage anti-slam, vacuum breaker</li><li>Surge tanks, feed tanks, anticipator and relief valves, burst discs</li></ul></div>
+    <div><div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></div><h3>Two engines</h3><ul><li><b>Wave</b>: method of characteristics with column separation</li><li><b>Rigid column</b> for slow operations and large networks</li><li>Daily operation and water quality, as EPANET</li></ul></div>
+    <div><div class="ic"><svg viewBox="0 0 24 24"><path d="M3 20h18M6 16l4-6 4 3 5-8"/></svg></div><h3>Results</h3><ul><li>Long sections with envelopes, linked to the drawing</li><li>Waterfall view, graphs of any variable, slams on the map</li><li>A complete report with every assumption</li></ul></div>
+    <div><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></div><h3>Design</h3><ul><li>Least-cost protection by genetic algorithm</li><li>Checks against pipe class, minimum pressure, cavities</li><li>Uncertainty envelopes and pipe forces for thrust blocks</li></ul></div>
+    <div><div class="ic"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg></div><h3>Your data</h3><ul><li>EPANET .inp, Excel and CSV, DXF and the AutoCAD plug-in</li><li>GIS: GeoJSON, QGIS and ArcGIS Pro plug-ins, maps with terrain</li><li>Live data over MQTT, OPC UA and Modbus</li></ul></div>
+  </div>
+  <a class="more reveal" href="{{p}}features.html">All the features &#8594;</a>
+</div></section>
+
+<section id="proven" class="band"><div class="wrap">
+  <div class="head reveal">
+    <div class="eyebrow"><span class="n">iv</span>Proven, on every build</div>
+    <h2>Numbers you can <em>check.</em></h2>
+    <p class="sub">The engines are checked against EPANET 2.2, published transient benchmarks, closed-form theory and independent solvers — and the checks run on every change to the code.</p>
+  </div>
+  <div class="pnums vitrine reveal">
+    <div class="pnum"><div class="v">0.012 m</div><div class="l">Steady heads</div><div class="s">worst difference from EPANET 2.2 on three published networks</div></div>
+    <div class="pnum"><div class="v">0.003 m</div><div class="l">Control valves</div><div class="s">PRV, PSV, FCV, PBV, GPV and TCV against EPANET 2.2</div></div>
+    <div class="pnum"><div class="v">99.8 %</div><div class="l">Plan reading</div><div class="s">of the nodes of a real network found from its CAD plan</div></div>
+    <div class="pnum"><div class="v">880</div><div class="l">Values held</div><div class="s">results of the built-in examples, identical on every build</div></div>
+  </div>
+  <a class="more reveal" href="{{p}}proven.html">Every check, with its reference &#8594;</a>
+</div></section>
+
+<section id="yours" class="band"><div class="wrap">
+  <div class="head reveal">
+    <div class="eyebrow"><span class="n">v</span>Yours</div>
+    <h2>Your models stay on <em>your computer.</em></h2>
+  </div>
+  <div class="g3 vitrine reveal">
+    <div><h3 class="h2b" style="font-size:26px">Local by design</h3><p class="sub" style="font-size:15.5px">Models, drawings and results are processed and stored only on your computer. Nothing is uploaded.</p></div>
+    <div><h3 class="h2b" style="font-size:26px">Your own AI account</h3><p class="sub" style="font-size:15.5px">AI is optional. Keys are encrypted on your device and sent only to the provider you choose — or use a free model on your own computer.</p></div>
+    <div><h3 class="h2b" style="font-size:26px">Works offline</h3><p class="sub" style="font-size:15.5px">A licensed computer checks in once a day when online and keeps working up to 60 days without a connection.</p></div>
+  </div>
+</div></section>
+
+<section id="faq" class="band"><div class="wrap">
+  <div class="head c reveal"><div class="eyebrow c">Questions</div><h2>Asked <em>often.</em></h2></div>
+  <div class="faq reveal">
+    <details><summary>Is SurgeSpace free?</summary><p>It is free to download. The Free plan runs all the built-in examples and your own models up to 25 pipes. A 14-day evaluation unlocks everything; after that, a personal or company licence. See <a class="inl" href="{{p}}plans.html">Plans</a>.</p></details>
+    <details><summary>Which computers does it run on?</summary><p>Windows 10 (version 1809 or later) and Windows 11, 64-bit, from the Microsoft Store. A Mac version is on the way.</p></details>
+    <details><summary>Do I need an AI account?</summary><p>No. Everything except the AI features works without one, including reading Excel schedules, EPANET files and DXF plans. If you want the copilot and the reading of drawings, connect your own account with any of 13 providers, or a free model running on your computer.</p></details>
+    <details><summary>Can I bring my EPANET models?</summary><p>Yes — .inp files import with their pumps, valves (including PRV, PSV and FCV), controls, patterns and vertices, and export back again.</p></details>
+    <details><summary>How do I know the results are right?</summary><p>Every engine is checked against a reference — EPANET 2.2, published transient benchmarks, closed-form theory and independent ODE solutions — and the checks run on every change. The full list is on <a class="inl" href="{{p}}proven.html">Proven</a>, with the methods in <a class="inl" href="{{p}}docs/theory.html">Theory and validation</a>.</p></details>
+    <details><summary>Who makes SurgeSpace?</summary><p>Engineering Workspace, the engineering software house behind <a class="inl" href="https://engspace.app" target="_blank" rel="noopener">engspace.app</a>, in the Kingdom of Saudi Arabia.</p></details>
+  </div>
+</div></section>
+
+<section style="padding-top:20px"><div class="wrap">
+  <div class="ctaband reveal">
+    <span class="crest" style="--s:64px" aria-hidden="true"><span><svg viewBox="0 0 26 26"><path d="M2 15h4.5l2.6-10 4 16 2.6-9.5 2 3.5H24"/></svg></span></span>
+    <div class="grow"><h3>Free to download from the Microsoft Store.</h3><p>Start with the examples, then your own model — or your drawings.</p></div>
+    <a class="btn btn-gold" href="{{store}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M3 5.5 10.5 4.5v7H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zM11.5 12.5H21V21l-9.5-1.3z" style="fill:currentColor;stroke:none"/></svg>Get it from Microsoft Store</a>
+  </div>
+</div></section>
