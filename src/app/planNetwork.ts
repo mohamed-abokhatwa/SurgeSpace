@@ -227,7 +227,7 @@ export function planToNetwork(d: DxfSummary, o: PlanOptions, name = 'Network fro
   for (const t of d.texts) {
     const x = t.x * k, y = t.y * k;
     const w = WL_RE.exec(t.s);
-    if (w) { waterLevels.push({ x, y, z: Number(w[2]) * zk }); continue; }
+    if (w) { waterLevels.push({ x, y, z: Math.round(Number(w[2]) * zk * 1000) / 1000 }); continue; }
     const m = LEVEL_RE.exec(t.s);
     if (!m) continue;
     // a level belongs to the nearest line end (junction), else the nearest vertex
@@ -237,7 +237,7 @@ export function planToNetwork(d: DxfSummary, o: PlanOptions, name = 'Network fro
     if (!best) continue;
     const isGround = /^(GL|G\.L|NGL|FGL)/i.test(m[1]);
     if (fixed.has(best) && isGround) continue;
-    best.elev = Number(m[2]) * zk - (isGround ? cover : 0); fixed.add(best);
+    best.elev = Math.round((Number(m[2]) * zk - (isGround ? cover : 0)) * 1000) / 1000; fixed.add(best);
     if (isGround) gl++; else lv++;
   }
   if (lv || gl) notes.push(`Levels from the drawing texts at ${lv + gl} node(s)${gl ? ` (${gl} from ground level less ${cover} m cover)` : ''}`);

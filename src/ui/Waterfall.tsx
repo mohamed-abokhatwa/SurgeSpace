@@ -105,7 +105,7 @@ export function Waterfall({ net, result, a, b, framePos, height = 300 }: { net: 
     const fH = unitOf('pressureHead', units), fL = unitOf('length', units);
     ctx.fillStyle = muted; ctx.font = '11px IBM Plex Sans, system-ui';
     ctx.strokeStyle = line; ctx.beginPath(); ctx.moveTo(m.l, Y(hi, 0)); ctx.lineTo(m.l, Y(lo, 0)); ctx.lineTo(X(route.L, 0), Y(lo, 0)); ctx.stroke();
-    for (let g = 0; g <= 4; g++) { const v = lo + ((hi - lo) * g) / 4; ctx.textAlign = 'right'; ctx.fillText((v * fH.f).toFixed(0), m.l - 6, Y(v, 0) + 4); }
+    for (let g = 0; g <= 4; g++) { const v = lo + ((hi - lo) * g) / 4; ctx.textAlign = 'right'; ctx.fillText(String(Math.round(v * fH.f) || 0), m.l - 6, Y(v, 0) + 4); }
     ctx.textAlign = 'center';
     for (let g = 0; g <= 5; g++) { const s = (g / 5) * route.L; ctx.fillText((s * fL.f).toFixed(0), X(s, 0), Y(lo, 0) + 15); }
     ctx.fillText(`Chainage (${fL.u})`, m.l + pw / 2, H - 4);
