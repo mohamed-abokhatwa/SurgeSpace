@@ -27,7 +27,7 @@ Copy each block into Partner Center → SurgeSpace → Submission → the matchi
 | Website | https://engspace.app |
 | Support contact info | https://surgespace-licences.engspace.app/support (or support@engspace.app) |
 | Game settings / Display mode | Not applicable |
-| Product declarations | **Tick "This app allows users to make purchases, but does not use the Microsoft Store commerce system"** (required since Nov 2026: licences are sold on engspace.app; policy 10.8.2). Tick "tested to meet accessibility guidelines" only if you have checked it. Leave the others as they are |
+| Product declarations | **Tick "This app allows users to make purchases, but does not use the Microsoft Store commerce system"** (required since Nov 2026: licences are sold on engspace.app; policy 10.8.2). Tick "tested to meet accessibility guidelines" only if you have checked it. **New in 3.0: tick "This product incorporates generative AI features"** (the AI copilot and document reading generate text through the user's own AI account). Leave the others as they are |
 | System requirements, minimum | Windows 10 version 1809 or later, 64-bit; 8 GB RAM; DirectX 9 graphics; 1366×768 display; keyboard and mouse |
 | System requirements, recommended | Windows 11, 16 GB RAM, 1920×1080 display |
 
