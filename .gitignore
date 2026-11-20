@@ -28,6 +28,8 @@ msix/layout
 msix/*.msix
 *.key
 .env*
+# the demo build settings hold no secrets and must reach CI, or the UI tests start real evaluations
+!.env.demo
 temp.bin
 temp.inp
 temp.rpt
