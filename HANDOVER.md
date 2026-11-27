@@ -113,8 +113,8 @@ and a local server, not live accounts; the v3 Store release has not been made (`
   refined"); `src/ui/CurveEditor.tsx` (live chart + table, Excel paste, presets) behind every PairsField and the air
   valve, surge tank area, motor torque, GPV and viscoelastic tables; pump curve from a duty point and the duty point
   of the last run on the chart.
-- Store package with these fixes: Desktop builds run 13 → `SurgeSpace_3.0.13.0.msix` (store-builds branch). Upload
-  that one instead of 3.0.12.0 in the draft submission.
+- Store package with these fixes: Desktop builds run 14 → `SurgeSpace_3.0.14.0.msix` (store-builds branch). Upload
+  that one instead of 3.0.12.0 in the draft submission (run 13 was cancelled).
 
 ## 1d. Website (surgespace.engspace.app)
 - Source in `website/` (see `website/README.md`): same design concept as engspace.app (Cormorant Garamond + Jost,
