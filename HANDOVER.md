@@ -98,6 +98,24 @@ and a local server, not live accounts; the v3 Store release has not been made (`
 - Open: the AI reading has been tested with stand-in AI servers only (the request format, images, text layer and
   tool replies), not yet with a live provider on real project drawings — try it with an account.
 
+## 1e. Review fixes (27 Nov 2026)
+- **"-45 m" lowest pressure**: caused by a source whose water level was below its own bottom (pressure at that end =
+  level − bottom). `health.ts` now makes it a run-blocking error with a one-click fix; raising a source's bottom past
+  its water carries the water up (`schema.ts` elevation setter and the Properties field). Engine unchanged (correct).
+- **Playback**: a run started by Run/F5 auto-plays from t = 0 in the Surge view (`run(n, strict, play)` in App.tsx);
+  the long section hides the final envelopes until the end (`scaleOnly` series in Chart.tsx hold the axes) and shows
+  the building peak/lowest; graphs draw up to tNow while playing; no decorative sweep in surge views; finer frames
+  (1,500 frames ≤ 200 pipes in jobs.ts; up to 121 samples per pipe on small models in transient.ts).
+- **Placement** (`edit.ts`): `replaceNodeWithLink` (pump/turbine/valve on a junction: junction = inlet, new outlet
+  takes the downstream pipes by steady flow or drawing direction), `placeLinkStandalone` (inlet/outlet nodes, no
+  pipes), `nodeToSource`; Canvas click rules and a live hint of what a click does; Shift+click = node-to-node.
+- **Properties**: hero card with key figures per element, card sections, unit chips, switches (index.css "Properties,
+  refined"); `src/ui/CurveEditor.tsx` (live chart + table, Excel paste, presets) behind every PairsField and the air
+  valve, surge tank area, motor torque, GPV and viscoelastic tables; pump curve from a duty point and the duty point
+  of the last run on the chart.
+- Store package with these fixes: Desktop builds run 13 → `SurgeSpace_3.0.13.0.msix` (store-builds branch). Upload
+  that one instead of 3.0.12.0 in the draft submission.
+
 ## 1d. Website (surgespace.engspace.app)
 - Source in `website/` (see `website/README.md`): same design concept as engspace.app (Cormorant Garamond + Jost,
   champagne-gold foil, diamond ornaments) on SurgeSpace navy with the orange surge accent. Pages: home (live
