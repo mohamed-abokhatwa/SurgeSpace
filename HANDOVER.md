@@ -232,7 +232,7 @@ Commands: `npm install`, `npm run dev`, `npx tsc -b`, `npx tsx tests/<name>.test
 
 - Microsoft Store 3.0 (12 Nov 2026): Submission 3 is in draft. Store listing (description, what's new, 20 features, the 10 v3
   screenshots with captions) and the certification notes (with the AI sentence) are filled in and saved. Left for the owner:
-  tick the new "generative AI features" declaration in Properties, upload SurgeSpace_3.0.12.0.msix in Packages (remove
+  tick the new "generative AI features" declaration in Properties, upload SurgeSpace_3.0.14.0.msix in Packages (it includes the 27 Nov review fixes; remove
   2.0.11.0), then Submit for certification.
 - Microsoft Store: 2.0.10.0 failed certification on 9 Nov 2026 (policy 10.8.2: licences sold outside the Store need the "purchases without Store commerce" declaration in Properties). Fixed by ticking that declaration; all mentions of the competitor product name were removed from the app, listing and repo; resubmitted as 2.0.11.0.
 - The GitHub token pasted in chat (Nov 2026) should be revoked and replaced.
