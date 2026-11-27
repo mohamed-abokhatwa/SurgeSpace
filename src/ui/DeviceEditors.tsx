@@ -22,7 +22,7 @@ export function Num({ label, value, onChange, scale = 1, step, list, digits = 3,
   const useList = k === scale ? list : undefined;
   const shown = value === undefined || !Number.isFinite(value) ? '' : String(+(value * k).toFixed(digits));
   return (
-    <label className="field"><span>{shownLabel}</span>
+    <label className="field"><span>{(() => { const m = /^(.*?)\s*\(([^()]+)\)\s*$/.exec(shownLabel); return m && m[2].length <= 12 ? <>{m[1]} <em className="unit">{m[2]}</em></> : shownLabel; })()}</span>
       <input type="number" step={step && k === scale ? step : 'any'} list={useList} value={shown} placeholder={optional ? 'optional' : undefined}
         onChange={(e) => { const v = num(e.target.value); onChange(Number.isFinite(v) ? v / k : undefined); }} />
     </label>

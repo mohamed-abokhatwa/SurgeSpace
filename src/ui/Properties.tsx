@@ -18,6 +18,8 @@ import { FIELDS, applyFields, type ElType } from '../app/schema';
 
 type SetNet = (f: (n: Network) => Network, label?: string) => void;
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s));
+/** no "-0" when a value rounds to zero */
+const nz = (x: number) => (Math.abs(x) < 0.5 ? 0 : x);
 
 /** Number field in display units; the model value is SI. */
 export function QNum({ label, q, value, onChange, digits = 3, step, placeholder, disabled }: { label: string; q: Quantity; value: number | undefined; onChange: (v: number | undefined) => void; digits?: number; step?: number; placeholder?: string; disabled?: boolean }) {
@@ -109,7 +111,7 @@ export function Properties({ net, setNet, selected, result, onSelect }: { net: N
           ['Water level', fmtQ(n.head ?? n.elev, 'head', 2, units)], ['Bottom', fmtQ(n.elev, 'elevation', 2, units)], ['Depth', fmtQ((n.head ?? n.elev) - n.elev, 'head', 2, units)],
         ] : [
           ['Elevation', fmtQ(n.elev, 'elevation', 2, units)], ['Demand', fmtQ(n.demand ?? 0, 'flow', 1, units)],
-          ...(result ? [['Pressure range', `${fmtQ(result.nodeMin[n.id] - n.elev, 'pressureHead', 0, units)} … ${fmtQ(result.nodeMax[n.id] - n.elev, 'pressureHead', 0, units)}`] as [string, string]] : []),
+          ...(result ? [['Pressure range', `${fmtQ(nz(result.nodeMin[n.id] - n.elev), 'pressureHead', 0, units)} … ${fmtQ(nz(result.nodeMax[n.id] - n.elev), 'pressureHead', 0, units)}`] as [string, string]] : []),
         ]} warn={n.kind === 'reservoir' && (n.head ?? n.elev) < n.elev ? `The water level is below the bottom: the pressure there would be ${fmtQ((n.head ?? n.elev) - n.elev, 'pressureHead', 1, units)}. Raise the water level or lower the bottom.` : undefined} />
         <Group title="Identity">
           <div className="grid2">
@@ -280,7 +282,7 @@ function PipeProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
       <Hero kind="pipe" id={p.id} sub={`Pipe · ${p.from} → ${p.to}${p.material ? ` · ${p.material}` : ''}`} chips={[
         ['Length', fmtQ(p.length, 'length', 1, units)], ['Diameter', fmtQ(p.diameter, 'diameter', 0, units)], ['Wave speed', fmtQ(p.wavespeed, 'wavespeed', 0, units)],
         ['Wave time 2L/a', `${(2 * p.length / Math.max(p.wavespeed, 1)).toFixed(2)} s`],
-        ...(result && Number.isFinite(maxP) ? [['Pressure range', `${fmtQ(minP, 'pressureHead', 0, units)} … ${fmtQ(maxP, 'pressureHead', 0, units)}`] as [string, string]] : []),
+        ...(result && Number.isFinite(maxP) ? [['Pressure range', `${fmtQ(nz(minP), 'pressureHead', 0, units)} … ${fmtQ(nz(maxP), 'pressureHead', 0, units)}`] as [string, string]] : []),
       ]} />
       <Group title="Identity">
         <div className="grid2">
