@@ -110,9 +110,17 @@ export function ProfileView({ net, result, a, b, framePos, uEnv, showNow, height
     { name: 'Vapour pressure', color: '#dc2626', x: prof.ch, y: vap, dash: '2 3', width: 1 },
     { name: 'Pipe class', color: '#a855f7', x: prof.ch, y: prof.cls, dash: '6 4', width: 1.2, noScale: Math.max(...prof.max) < 0.8 * Math.min(...prof.cls) },
     { name: 'Steady HGL', color: 'var(--good)', x: prof.ch, y: prof.steady, width: 1.6 },
-    { name: 'Maximum head', color: '#e11d48', x: prof.ch, y: prof.max, width: showNow ? 1 : 2, dash: showNow ? '3 3' : undefined },
-    { name: 'Minimum head', color: '#2563eb', x: prof.ch, y: prof.min, width: showNow ? 1 : 2, dash: showNow ? '3 3' : undefined },
   ];
+  // While the surge plays, the final envelopes are not shown: the peak and the lowest head build up with time, as the
+  // waves travel. They hold the axes still, and appear as the maximum and minimum heads once the run has played out.
+  const atEnd = framePos >= result.times.length - 1.5;
+  if (showNow && !atEnd) {
+    series.push({ name: 'Maximum head', color: '#e11d48', x: prof.ch, y: prof.max, scaleOnly: true });
+    series.push({ name: 'Minimum head', color: '#2563eb', x: prof.ch, y: prof.min, scaleOnly: true });
+  } else {
+    series.push({ name: 'Maximum head', color: '#e11d48', x: prof.ch, y: prof.max, width: 2 });
+    series.push({ name: 'Minimum head', color: '#2563eb', x: prof.ch, y: prof.min, width: 2 });
+  }
   // other cases: their envelopes at the same chainages (interpolated along each pipe of the route)
   (overlay ?? []).forEach((o, k) => {
     const col = ['#f59e0b', '#10b981', '#8b5cf6', '#0ea5e9'][k % 4];
@@ -144,8 +152,10 @@ export function ProfileView({ net, result, a, b, framePos, uEnv, showNow, height
   if (now && live && showNow) {
     bands.push({ name: 'Above steady', color: 'rgba(220,38,38,0.22)', x: live.ch, lo: live.steady, hi: now.up });
     bands.push({ name: 'Below steady', color: 'rgba(37,99,235,0.22)', x: live.ch, lo: now.dn, hi: live.steady });
-    series.push({ name: 'Peak so far', color: '#e11d48', x: live.ch, y: now.mx, width: 1.8 });
-    series.push({ name: 'Lowest so far', color: '#2563eb', x: live.ch, y: now.mn, width: 1.8 });
+    if (!atEnd) {
+      series.push({ name: 'Peak so far', color: '#e11d48', x: live.ch, y: now.mx, width: 1.8, dash: '6 3' });
+      series.push({ name: 'Lowest so far', color: '#2563eb', x: live.ch, y: now.mn, width: 1.8, dash: '6 3' });
+    }
     const T = result.times, f0 = Math.min(Math.floor(framePos), T.length - 1), f1 = Math.min(f0 + 1, T.length - 1);
     const t = T[f0] + (T[f1] - T[f0]) * (framePos - f0);
     series.push({ name: `Head at ${t.toFixed(2)} s`, color: 'var(--accent)', x: live.ch, y: now.h, width: 2.4 });

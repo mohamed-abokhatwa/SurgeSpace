@@ -29,7 +29,11 @@ export const NODE_FIELDS: FieldDef<NetNode>[] = [
   { key: 'label', label: 'Label', type: 'string', help: 'Free text shown on the drawing.', get: (e) => e.label ?? '', set: (e, v) => ({ ...e, label: String(v) || undefined }) },
   { key: 'x', label: 'X', type: 'number', unit: 'm', q: 'length', help: 'Map coordinate (east).', get: (e) => e.x, set: (e, v) => ({ ...e, x: n(v) }) },
   { key: 'y', label: 'Y', type: 'number', unit: 'm', q: 'length', help: 'Map coordinate (north).', get: (e) => e.y, set: (e, v) => ({ ...e, y: n(v) }) },
-  { key: 'elevation', label: 'Elevation', type: 'number', unit: 'm', q: 'elevation', help: 'Ground or pipe centreline level.', get: (e) => e.elev, set: (e, v) => ({ ...e, elev: n(v) }) },
+  { key: 'elevation', label: 'Elevation', type: 'number', unit: 'm', q: 'elevation', help: 'Ground or pipe centreline level.', get: (e) => e.elev, set: (e, v) => {
+    // a source keeps its water above its bottom: raising the bottom past the water carries the water up with it (same depth)
+    if (e.kind === 'reservoir' && e.head !== undefined && e.head < n(v)) return { ...e, elev: n(v), head: n(v) + Math.max(e.head - e.elev, 1) };
+    return { ...e, elev: n(v) };
+  } },
   { key: 'demand_lps', label: 'Demand', type: 'number', unit: 'L/s', q: 'flow', help: 'Base demand of a junction.', get: (e) => (e.demand ?? 0) * 1000, set: (e, v) => ({ ...e, demand: n(v) / 1000 }) },
   { key: 'emitter_lps_at_1m', label: 'Emitter coefficient', type: 'number', unit: 'L/s at 1 m', min: 0, help: 'Leakage, sprinkler or hydrant: flow C·p^γ to the atmosphere (0 = none).', get: (e) => (e.emitter ?? 0) * 1000, set: (e, v) => ({ ...e, emitter: n(v) > 0 ? n(v) / 1000 : undefined }) },
   { key: 'water_level_m', label: 'Water level', type: 'number', unit: 'm', q: 'head', help: 'Water surface level of a source.', get: (e) => e.head, set: (e, v) => ({ ...e, head: n(v) }) },

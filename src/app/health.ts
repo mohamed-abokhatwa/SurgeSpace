@@ -81,7 +81,18 @@ export function healthCheck(net: Network): Issue[] {
   for (const n of net.nodes) {
     const r: ElRef = { type: 'node', id: n.id };
     if (n.kind === 'reservoir') {
-      if ((n.head ?? n.elev) < n.elev - 1e-9) out.push({ level: 'warn', title: `Source ${n.id}: water level below its bottom`, ref: r, fix: { label: 'Set the bottom 1 m below the water', apply: mapNode(n.id, (x) => ({ ...x, elev: (x.head ?? x.elev) - 1 })) } });
+      // a source whose water is below its own bottom gives an impossible pressure at that end (water level − bottom),
+      // which no protection can change: stop the run until it is fixed
+      if ((n.head ?? n.elev) < n.elev - 1e-9) {
+        const h = n.head ?? n.elev, gap = n.elev - h;
+        out.push({
+          level: 'error', title: `Source ${n.id}: water level ${h.toFixed(2)} m is below its bottom ${n.elev.toFixed(2)} m`,
+          detail: `The pressure where the pipe joins it would be ${(-gap).toFixed(1)} m. Set the water level above the bottom (or lower the bottom).`, ref: r,
+          fix: gap > 2
+            ? { label: 'Raise the water level to 1 m above the bottom', apply: mapNode(n.id, (x) => ({ ...x, head: x.elev + 1 })) }
+            : { label: 'Set the bottom 1 m below the water', apply: mapNode(n.id, (x) => ({ ...x, elev: (x.head ?? x.elev) - 1 })) },
+        });
+      }
       if (n.vessel || n.airValve || n.tank || n.sav || n.relief || n.outlet) out.push({ level: 'warn', title: `Source ${n.id}: devices on a source are ignored`, ref: r });
     }
     if (n.vessel && n.vessel.gasInput !== 'precharge' && n.vessel.gasVolume >= n.vessel.volume) out.push({ level: 'error', title: `Air vessel ${n.id}: gas volume must be less than the vessel volume`, ref: r, fix: { label: 'Start half full of gas', apply: mapNode(n.id, (x) => ({ ...x, vessel: { ...x.vessel!, gasVolume: x.vessel!.volume / 2 } })) } });

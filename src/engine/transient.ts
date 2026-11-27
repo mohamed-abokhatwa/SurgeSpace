@@ -280,7 +280,8 @@ export function runTransient(net: Network, opt: RunOptions = {}): TransientResul
     const H = new Float64Array(N + 1);
     for (let i = 0; i <= N; i++) H[i] = h1 + ((h2 - h1) * i) / N;
     const Qa = new Float64Array(N + 1).fill(q0);
-    const nSamp = Math.min(N + 1, 25);
+    // animation samples along the pipe: fine on small models, so a wave front is seen travelling, coarse on large ones
+    const nSamp = Math.min(N + 1, openPipes.length <= 20 ? 121 : openPipes.length <= 200 ? 41 : 25);
     const samples = new Int32Array(nSamp);
     for (let k2 = 0; k2 < nSamp; k2++) samples[k2] = Math.round((k2 * N) / (nSamp - 1));
     const s = new Float64Array(N + 1);

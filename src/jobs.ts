@@ -26,7 +26,7 @@ export function handleJob(req: JobRequest, post: (msg: Record<string, unknown>) 
       post({ id: req.id, type: 'progress', message: 'Steady state…', data: { stage: 'steady' } });
       const steady = solveSteady(req.net);
       post({ id: req.id, type: 'progress', message: 'Surge run…', data: { stage: 'surge', frac: 0, steadyMs: Date.now() - t0, iterations: steady.iterations, steadyHeads: Object.fromEntries(steady.heads) } });
-      const result = runTransient(req.net, { steady, frames: 600, onProgress: (p) => post({ id: req.id, type: 'progress', message: `Surge run… ${Math.round(p.frac * 100)} %`, data: { stage: 'surge', frac: p.frac, t: p.t, duration: p.duration, nodeMax: p.nodeMax, nodeMin: p.nodeMin } }) });
+      const result = runTransient(req.net, { steady, frames: req.net.pipes.length <= 200 ? 1500 : 600, onProgress: (p) => post({ id: req.id, type: 'progress', message: `Surge run… ${Math.round(p.frac * 100)} %`, data: { stage: 'surge', frac: p.frac, t: p.t, duration: p.duration, nodeMax: p.nodeMax, nodeMin: p.nodeMin } }) });
       post({ id: req.id, type: 'progress', message: 'Design checks…', data: { stage: 'checks' } });
       post({ id: req.id, type: 'done', result, checks: designChecks(req.net, result) });
     } else if (req.type === 'uncertainty') {

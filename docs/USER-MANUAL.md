@@ -74,7 +74,19 @@ US customary; the model is always stored in SI). Every change can be undone (Ctr
      with the plan in place. Open the model with the plan and the vessel.
   The documents session stays while the app is open. The basis of the model appears in the report (section 3.6).
 - **Draw:** place a Fixed-Level Source (R), pick Pipe (P) and click from point to point; Shift+click adds bends.
-  Click a pipe with a pump, valve or device tool to insert it there.
+  Placing a pump, turbine or valve: click a **junction** to put it in the junction's place (the junction becomes the
+  inlet; a new outlet node takes the downstream pipes, by the steady flow after a run, else the pipes drawn leaving
+  it), click a **pipe** to split it there, or click **empty space** for the element on its own with an inlet and an
+  outlet node to draw pipes to. Shift+click two nodes to connect them directly. Devices (air vessel, air valve,
+  standpipe…) go on a junction, split a pipe, or sit on a new node of their own the same way; a source placed on a
+  junction turns it into the source.
+- **Properties:** each element opens with its key figures (a pump's duty flow and head, shaft power, inertia; a
+  pipe's length, diameter, wave speed and 2L/a; a source's water level, bottom and depth). Curves — pump head,
+  valve characteristics, operating curves, long sections, level schedules, air valve curves, motor torque — are a
+  table with a live chart: type in the cells (Enter adds a row), paste rows straight from Excel, remove a point with
+  ×. A pump curve can also be made from its duty point (shut-off at 133 % of the duty head, run-out at 150 % of the
+  flow), and after a run the duty point is marked on the chart. A source's water level must be above its bottom:
+  raising the bottom past the water carries the water up with it, and the Health Check stops a run otherwise.
 - **Import:** File → Import (EPANET .inp with tanks, patterns, controls and rules; spreadsheets of nodes and pipes; a
   long section; DXF), File → Import GIS layer (GeoJSON from QGIS, ArcGIS or any GIS — field names are matched).
 - **From a description:** ask the Copilot, for example "Build a 5 km DN600 rising main from the sump at 95 m to a tank
@@ -103,7 +115,10 @@ US customary; the model is always stored in SI). Every change can be undone (Ctr
 ## 4. Surge analysis
 
 While the analysis runs, the run screen shows its stages (steady state, surge run, design checks) and the pressure
-envelope growing along the main line; Cancel stops it. After the run the results sweep along the pipes; vapour
+envelope growing along the main line; Cancel stops it. A run started with Run (or F5) then plays out from t = 0
+in the Surge view: the head moves along the long section, the peak and the lowest head build up as the waves
+travel (the final maximum and minimum heads appear when the playback reaches the end), and the graphs draw each
+history up to the present moment. In the envelope views (Max, Min) the results sweep along the pipes; vapour
 cavities show as bubbles on the drawing; moving the mouse over the long section marks the same point on the
 drawing and the other way round. Profile → Waterfall (3D) stacks the pressure along the route over time. File →
 Export surge animation (video) records about 20 seconds of the animation as a WebM film. In Daily operation, Play

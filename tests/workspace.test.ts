@@ -12,7 +12,7 @@ import { designChecks } from '../src/engine/analysis';
 import { solveSteady } from '../src/engine/steady';
 import { runTransient, schedHead } from '../src/engine/transient';
 import { HB, HV, applyFluid, barometricHead, type Network } from '../src/engine/types';
-import { addNode, addPipe, deleteElements, insertOnPipe, renameElement, splitPipe, pipeLengthFromDrawing } from '../src/app/edit';
+import { addNode, addPipe, deleteElements, insertOnPipe, renameElement, splitPipe, pipeLengthFromDrawing, replaceNodeWithLink, placeLinkStandalone, nodeToSource } from '../src/app/edit';
 import { FLUIDS, waveSpeed, PIPE_MATERIALS } from '../src/app/catalogues';
 import { toShow, fromShow } from '../src/app/units';
 import { healthCheck } from '../src/app/health';
@@ -144,6 +144,40 @@ const maxOf = (r: ReturnType<typeof runTransient>) => Math.max(...Object.values(
   t('turbine: design check reports the speed rise', designChecks(h, r).some((c) => c.title.includes('Turbine TU-1')));
   const htmlUS = buildReport(h, r, designChecks(h, r), { version: 'test', units: { system: 'US', flow: 'gpm', pressure: 'psi' } });
   t('report in US units shows psi, gpm and ft', htmlUS.includes('(psi)') && htmlUS.includes('(gpm)') && htmlUS.includes('(ft)') && htmlUS.includes('Turbine'));
+}
+
+// a source whose water is below its own bottom (the cause of a reported "-45 m" lowest pressure) stops the run
+{
+  const net = risingMain(false);
+  const bad = { ...net, nodes: net.nodes.map((n) => (n.id === 'TANK' ? { ...n, elev: 147, head: 102 } : n)) };
+  const iss = healthCheck(bad).find((i) => i.title.startsWith('Source TANK'));
+  t('source water below its bottom is an error with the pressure it would give', !!iss && iss.level === 'error' && /-45\.0 m/.test(iss.detail ?? ''), iss?.detail);
+  const fixed = iss?.fix?.apply(bad);
+  t('one-click fix puts the water above the bottom', !!fixed && fixed.nodes.find((n) => n.id === 'TANK')!.head! > fixed.nodes.find((n) => n.id === 'TANK')!.elev);
+  const { NODE_FIELDS } = await import('../src/app/schema');
+  const f = NODE_FIELDS.find((x) => x.key === 'elevation')!;
+  const moved = f.set({ id: 'S', kind: 'reservoir', x: 0, y: 0, elev: 0, head: 5 }, 25);
+  t('raising a source bottom past its water carries the water up', moved.elev === 25 && moved.head === 30);
+}
+
+// placing elements: on a junction (replacing it), on its own, and a source on a junction
+{
+  const net = risingMain(false);
+  const st = solveSteady(net);
+  const r = replaceNodeWithLink(net, 'CH1200', 'lineValve', 5, st.flows)!;
+  const v = r.net.valves.find((x) => x.id === r.id)!;
+  const m2 = r.net.pipes.find((p) => p.id === 'M2')!, m1 = r.net.pipes.find((p) => p.id === 'M1')!;
+  t('valve on a junction: the junction is its inlet, the downstream pipe moves to a new outlet', v.from === 'CH1200' && m1.to === 'CH1200' && m2.from === v.to && v.to !== 'CH1200');
+  const st2 = solveSteady(r.net);
+  t('the network still solves with the valve in place of the junction', Math.abs((st2.flows.get('M2') ?? 0) - (st.flows.get('M2') ?? 0)) < 0.01, `${(st2.flows.get('M2') ?? 0).toFixed(3)} vs ${(st.flows.get('M2') ?? 0).toFixed(3)}`);
+  const pu = replaceNodeWithLink(net, 'HP2600', 'pump', 5)!;
+  t('a pump on a junction without a run: pipes drawn leaving it go downstream', pu.net.pipes.find((p) => p.id === 'M3')!.from !== 'HP2600' && pu.net.pipes.find((p) => p.id === 'M2')!.to === 'HP2600');
+  const sa = placeLinkStandalone(net, { x: 500, y: 500 }, 'pump', 10);
+  const pp = sa.net.pumps.find((x) => x.id === sa.id)!;
+  t('a pump on its own gets an inlet and an outlet node, no pipes', pp.from !== pp.to && sa.net.nodes.length === net.nodes.length + 2 && sa.net.pipes.length === net.pipes.length);
+  const src = nodeToSource(net, 'CH3800', 'reservoir');
+  const c = src.nodes.find((x) => x.id === 'CH3800')!;
+  t('a source dropped on a junction makes it a source with water above its bottom', c.kind === 'reservoir' && c.head! > c.elev && src.pipes.length === net.pipes.length);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

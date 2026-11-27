@@ -1,6 +1,7 @@
 // Editors for the surge protection devices at a junction: hydropneumatic tank, air valve, open surge tank,
 // one-way tank, surge anticipation valve, pressure relief valve and discharge to atmosphere / rupture disk.
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { CurveEditor } from './CurveEditor';
 import { airValveModel, orificeCurve, vesselGeometry, waterDepthOf } from '../engine/devices';
 import type { TransientResult } from '../engine/transient';
 import type { AirValve, AirValveType, NetNode, OpenTank, ReliefValve, SurgeAnticipationValve, SurgeVessel, VesselShape } from '../engine/types';
@@ -121,14 +122,10 @@ function VesselEditor({ n, setNode, steadyHead }: { n: NetNode; setNode: SetNode
 }
 
 // ── air valve ──
-const CURVE_TEXT = (c?: [number, number][]) => (c ?? []).map(([a, b]) => `${a}, ${+b.toFixed(1)}`).join('\n');
-const PARSE_CURVE = (t: string) => t.split(/\n+/).map((l) => l.split(/[,;\t ]+/).map(Number)).filter((p) => p.length >= 2 && p.every(Number.isFinite)).map((p) => [p[0], p[1]] as [number, number]);
 function AirValveEditor({ n, setNode }: { n: NetNode; setNode: SetNode }) {
   const a = n.airValve!;
   const set = (p: Partial<AirValve>) => setNode(n.id, (x) => ({ ...x, airValve: { ...x.airValve!, ...p } }));
   const type = a.type ?? 'double';
-  const [inText, setInText] = useState(CURVE_TEXT(a.inCurve));
-  const [outText, setOutText] = useState(CURVE_TEXT(a.outCurve));
   const usesIn = type !== 'releaseOnly' && type !== 'curve';
   const usesOut = type === 'double' || type === 'threeStage';
   const usesSmall = type !== 'vacuumBreaker' && type !== 'curve';
@@ -155,15 +152,11 @@ function AirValveEditor({ n, setNode }: { n: NetNode; setNode: SetNode }) {
       {type === 'threeStage' && <p className="muted dev-note">Air leaves through the large orifice until the overpressure reaches the switch value, then only through the small orifice. The air left in the pipe cushions the returning water.</p>}
       {type === 'curve' && (
         <>
-          <p className="muted dev-note">One point per line: pressure difference (kPa), free air flow (Nm³/h).</p>
-          <div className="grid2">
-            <label className="field"><span>Inflow curve</span><textarea rows={5} value={inText} onChange={(e) => { setInText(e.target.value); set({ inCurve: PARSE_CURVE(e.target.value) }); }} /></label>
-            <label className="field"><span>Outflow curve</span><textarea rows={5} value={outText} onChange={(e) => { setOutText(e.target.value); set({ outCurve: PARSE_CURVE(e.target.value) }); }} /></label>
-          </div>
+          <CurveEditor title="Air inflow (vacuum)" xLabel="Pressure difference (kPa)" yLabel="Free air flow (Nm³/h)" value={a.inCurve} onChange={(c) => set({ inCurve: c })} height={130} />
+          <CurveEditor title="Air outflow" xLabel="Pressure difference (kPa)" yLabel="Free air flow (Nm³/h)" value={a.outCurve} onChange={(c) => set({ outCurve: c })} height={130} />
           <button className="btn small" onClick={() => {
             const m = airValveModel({ ...a, type: 'double' });
-            const ic = orificeCurve(m.cdAin, true), oc = orificeCurve(m.cdAout, false);
-            setInText(CURVE_TEXT(ic)); setOutText(CURVE_TEXT(oc)); set({ inCurve: ic, outCurve: oc });
+            set({ inCurve: orificeCurve(m.cdAin, true), outCurve: orificeCurve(m.cdAout, false) });
           }}>Start from the orifice sizes</button>
         </>
       )}
@@ -228,7 +221,7 @@ function TankEditor({ n, setNode }: { n: NetNode; setNode: SetNode }) {
       </div>
       {!t.oneWay && (
         <label className="field" style={{ marginTop: 6 }}><span>Variable plan area (optional): water level m, area m² — one pair per line</span>
-          <textarea rows={3} defaultValue={(t.areaCurve ?? []).map(([z, a]) => `${z}\t${a}`).join('\n')} placeholder={'e.g. shaft then a wide chamber:\n100\t3.1\n118\t3.1\n118.5\t50\n125\t50'} onBlur={(e) => { const rows = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 2 && r.every(Number.isFinite) && r[1] > 0).map(([z, a]) => [z, a] as [number, number]); set({ areaCurve: rows.length >= 2 ? rows : undefined }); }} />
+          <CurveEditor xLabel="Level (m)" yLabel="Area (m²)" minPoints={2} value={t.areaCurve} onChange={(rows) => { const ok = rows.filter((r) => r[1] > 0); set({ areaCurve: ok.length >= 2 ? ok : undefined }); }} />
         </label>
       )}
       <p className="muted dev-note">{t.oneWay ? 'A non-return valve lets water flow only from the tank into the pipe, when the pipe head falls below the tank level. Keep the water level below the steady head.' : t.differential ? 'The riser follows the pipe head directly; the chamber fills and empties through the ports, whose loss damps the oscillation. The riser overflows into the chamber. Graphs show both levels.' : 'Open to air; the water level starts at the steady head and moves with the surge. Water above the top spills.'}</p>

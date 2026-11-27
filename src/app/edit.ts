@@ -182,6 +182,60 @@ export function insertOnPipe(net: Network, pipeId: string, kind: ElementKind, u:
   return { net: r.net, id: r.id, type: kind === 'pump' ? 'pump' : 'valve' };
 }
 
+/** Put a pump, turbine or valve in place of a junction: the junction becomes its inlet and a new node a short way
+ *  downstream becomes its outlet; the downstream pipes move to the outlet. Which pipes are downstream: the steady
+ *  flow when it is known, else the pipes drawn leaving the junction (with two pipes and no direction, the second). */
+export function replaceNodeWithLink(net: Network, nodeId: string, kind: ElementKind, gap: number, flows?: Map<string, number>, d: ElementDefaults = DEFAULTS): { net: Network; id: string; type: ElRef['type'] } | null {
+  const node = net.nodes.find((x) => x.id === nodeId);
+  if (!node || node.kind === 'reservoir') return null;
+  const at = net.pipes.filter((p) => p.from === nodeId || p.to === nodeId);
+  // flow leaving the junction through each pipe (positive = away from it)
+  const out = (p: Pipe) => { const q = flows?.get(p.id); if (q === undefined || Math.abs(q) < 1e-9) return p.from === nodeId ? 1e-12 : -1e-12; return p.from === nodeId ? q : -q; };
+  let down = at.filter((p) => out(p) > 0);
+  if (at.length >= 2 && (down.length === 0 || down.length === at.length)) down = [at[at.length - 1]];
+  // the outlet sits along the first downstream pipe (or to the east of a dead end)
+  let dir = { x: 1, y: 0 };
+  if (down.length) {
+    const pts = pipePath(net, down[0]);
+    const tgt = down[0].from === nodeId ? pts[1] : pts[pts.length - 2];
+    const dx = tgt.x - node.x, dy = tgt.y - node.y, l = Math.hypot(dx, dy);
+    if (l > 1e-9) dir = { x: dx / l, y: dy / l };
+    gap = Math.min(gap, l * 0.45 || gap);
+  } else if (at.length === 1) {
+    const pts = pipePath(net, at[0]);
+    const src = at[0].to === nodeId ? pts[pts.length - 2] : pts[1];
+    const dx = node.x - src.x, dy = node.y - src.y, l = Math.hypot(dx, dy);
+    if (l > 1e-9) dir = { x: dx / l, y: dy / l };
+  }
+  const bId = uniqueId(net, 'J-');
+  const b: NetNode = { id: bId, kind: 'junction', x: node.x + dir.x * gap, y: node.y + dir.y * gap, elev: node.elev, demand: 0 };
+  const downIds = new Set(down.map((p) => p.id));
+  let n: Network = { ...net, nodes: [...net.nodes, b], pipes: net.pipes.map((p) => (downIds.has(p.id) ? (p.from === nodeId ? { ...p, from: bId } : { ...p, to: bId }) : p)) };
+  const D = at[0]?.diameter ?? d.pipeDiameter;
+  const r = addLink(n, kind, nodeId, bId, { ...d, pipeDiameter: D });
+  n = r.net;
+  return { net: n, id: r.id, type: kind === 'pump' ? 'pump' : 'valve' };
+}
+
+/** A pump, turbine or valve on its own: an inlet and an outlet node `gap` apart, ready for pipes to be drawn to them. */
+export function placeLinkStandalone(net: Network, q: XY, kind: ElementKind, gap: number, d: ElementDefaults = DEFAULTS): { net: Network; id: string; type: ElRef['type'] } {
+  const elev = Math.round(nearElev(net, q, d) * 100) / 100;
+  const aId = uniqueId(net, 'J-');
+  const n1: Network = { ...net, nodes: [...net.nodes, { id: aId, kind: 'junction', x: q.x - gap / 2, y: q.y, elev, demand: 0 }] };
+  const bId = uniqueId(n1, 'J-');
+  const n2: Network = { ...n1, nodes: [...n1.nodes, { id: bId, kind: 'junction', x: q.x + gap / 2, y: q.y, elev, demand: 0 }] };
+  const r = addLink(n2, kind, aId, bId, d);
+  return { net: r.net, id: r.id, type: kind === 'pump' ? 'pump' : 'valve' };
+}
+
+/** A fixed- or varying-level source put on a junction turns the junction into the source (its pipes stay). */
+export function nodeToSource(net: Network, nodeId: string, kind: 'reservoir' | 'levelSource'): Network {
+  return { ...net, nodes: net.nodes.map((x) => (x.id !== nodeId || x.kind === 'reservoir' ? x : {
+    id: x.id, kind: 'reservoir', x: x.x, y: x.y, elev: x.elev, head: x.elev + 5, ...(x.label ? { label: x.label } : {}),
+    ...(kind === 'levelSource' ? { headSchedule: { mode: 'sine' as const, amplitude: 1, period: 30, phase: 0 } } : {}),
+  })) };
+}
+
 /** Delete elements; deleting a node removes the pipes, pumps and valves connected to it. */
 export function deleteElements(net: Network, refs: ElRef[]): Network {
   const nodes = new Set(refs.filter((r) => r.type === 'node').map((r) => r.id));

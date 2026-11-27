@@ -13,6 +13,8 @@ export interface Series {
   hideInLegend?: boolean;
   /** Draw but do not let it set the axis range (e.g. a pipe-class line far above the data). */
   noScale?: boolean;
+  /** Not drawn and not in the legend; only holds the axis range (so the axes stay still while a curve builds up). */
+  scaleOnly?: boolean;
 }
 export interface Band {
   name: string;
@@ -99,7 +101,7 @@ export function Chart({
   const yt = ticks(y0, y1, 5);
   const readout = useMemo(() => {
     if (hx === null) return null;
-    return series.filter((s) => !s.hideInLegend).map((s) => {
+    return series.filter((s) => !s.hideInLegend && !s.scaleOnly).map((s) => {
       let best = 0, bd = Infinity;
       for (let i = 0; i < s.x.length; i++) { const d = Math.abs(s.x[i] - hx); if (d < bd) { bd = d; best = i; } }
       return { name: s.name, color: s.color, v: s.y[best] };
@@ -146,7 +148,7 @@ export function Chart({
             for (let k = idx.length - 1; k >= 0; k--) d += `L${X(b.x[idx[k]]).toFixed(1)},${Y(b.lo[idx[k]]).toFixed(1)}`;
             return <path key={`b${b.name}`} d={d + 'Z'} fill={b.color} stroke="none" />;
           })}
-          {series.map((s) => (
+          {series.filter((s) => !s.scaleOnly).map((s) => (
             <path key={s.name} d={path(s.x, s.y)} fill="none" stroke={s.color} strokeWidth={s.width ?? 1.6} strokeDasharray={s.dash} strokeLinejoin="round" />
           ))}
           {(() => {
@@ -167,8 +169,8 @@ export function Chart({
           {hx !== null && <line x1={X(hx)} x2={X(hx)} y1={m.t} y2={m.t + ih} stroke="var(--text)" strokeOpacity="0.35" />}
         </g>
       </svg>
-      <div className="row small" style={{ flexWrap: 'wrap', gap: 12, marginTop: 2 }}>
-        {series.filter((s) => !s.hideInLegend).map((s) => (
+      <div className="row small chart-legend" style={{ flexWrap: 'wrap', gap: 12, marginTop: 2 }}>
+        {series.filter((s) => !s.hideInLegend && !s.scaleOnly).map((s) => (
           <span key={s.name} className="row" style={{ gap: 5 }}>
             <svg width="18" height="8"><line x1="0" x2="18" y1="4" y2="4" stroke={s.color} strokeWidth="2.2" strokeDasharray={s.dash} /></svg>
             <span className="muted">{s.name}</span>

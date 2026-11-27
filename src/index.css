@@ -279,8 +279,6 @@ body { font-size: 13px; }
 details.pgroup { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 details.pgroup > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--cyan); }
 details.pgroup > summary::-webkit-details-marker { display: none; }
-details.pgroup > summary > span::before { content: '▸ '; color: var(--faint); }
-details.pgroup[open] > summary > span::before { content: '▾ '; }
 .pgroup-body { padding: 2px 10px 10px; }
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .field span .unit, .field .unit { font-style: normal; color: var(--faint); font-size: 11px; }
@@ -678,3 +676,85 @@ table.grid-table td .pill { margin: 0 3px 3px 0; }
 .dz-row { min-height: 30px; display: flex; align-items: center; }
 .dz-row > .row { width: 100%; }
 .dz-read { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+
+/* ═══ Properties, refined (all elements) ═══
+   A hero card with the element's key figures, sections as soft cards with an accent rail, inputs with their unit
+   as a chip, switches instead of bare checkboxes, and curve editors with a live chart above an editable table. */
+.props { gap: 10px; }
+.props-hero { position: relative; border-radius: 14px; padding: 14px 14px 12px; overflow: hidden;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--panel)) 0%, var(--panel) 62%);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); box-shadow: var(--shadow); }
+.props-hero::after { content: ''; position: absolute; right: -40px; top: -40px; width: 140px; height: 140px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 18%, transparent), transparent 70%); pointer-events: none; }
+.ph-top { display: flex; gap: 12px; align-items: center; }
+.ph-icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; flex: none; color: var(--accent);
+  background: var(--panel); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 18%, transparent); }
+.ph-name b { display: block; font: 600 18px/1.15 var(--sans); letter-spacing: -0.01em; }
+.ph-name span { font-size: 12.5px; color: var(--muted); }
+.ph-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 6px; margin-top: 12px; position: relative; z-index: 1; }
+.ph-chip { background: color-mix(in srgb, var(--panel) 82%, transparent); border: 1px solid var(--line); border-radius: 10px; padding: 6px 9px; backdrop-filter: blur(4px); }
+.ph-chip span { display: block; font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); }
+.ph-chip b { display: block; font: 600 13.5px var(--mono); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-warn { margin-top: 10px; padding: 8px 10px; border-radius: 9px; font-size: 12.5px; color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent); }
+
+details.pgroup { position: relative; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 1px 2px rgba(13, 35, 64, 0.04); transition: box-shadow 0.15s, border-color 0.15s; }
+details.pgroup[open] { box-shadow: var(--shadow); }
+details.pgroup::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 0 3px 3px 0; background: var(--line-2); transition: background 0.15s; }
+details.pgroup[open]::before { background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 30%, transparent)); }
+details.pgroup > summary { padding: 10px 12px 9px 14px; font: 600 11.5px var(--sans); letter-spacing: 0.08em; color: var(--text); }
+details.pgroup > summary > span:first-child::before { content: ''; display: inline-block; width: 7px; height: 7px; border-right: 1.6px solid var(--muted); border-bottom: 1.6px solid var(--muted); transform: rotate(-45deg); margin: 0 9px 1px 0; transition: transform 0.15s; }
+details.pgroup[open] > summary > span:first-child::before { content: ''; transform: rotate(45deg); }
+details.pgroup > summary > span.pill::before { content: none; }
+details.pgroup > summary:hover { color: var(--accent); }
+.pgroup-body { padding: 2px 12px 12px 14px; }
+.props .field { gap: 4px; }
+.props .field > span { font-size: 12px; font-weight: 500; color: var(--muted); display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.props .field span .unit, .props .field .unit { font: 500 10.5px var(--mono); color: var(--cyan); background: var(--cyan-soft); border-radius: 999px; padding: 1px 7px; }
+.props .field input, .props .field select { height: 36px; border-radius: 9px; padding: 0 10px; background: var(--panel-2); border: 1px solid var(--line-2); font-variant-numeric: tabular-nums; transition: border-color 0.12s, box-shadow 0.12s, background 0.12s; }
+.props .field input:hover, .props .field select:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2)); }
+.props .field input:focus, .props .field select:focus { outline: none; background: var(--panel); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.props .field input[type='number'] { font-family: var(--mono); font-size: 13.5px; }
+.props .grid2, .props .grid3 { gap: 10px; }
+/* switches */
+.props input[type='checkbox'] { appearance: none; -webkit-appearance: none; width: 34px; height: 20px; border-radius: 999px; background: var(--line-2); position: relative; cursor: pointer; flex: none; margin: 0 8px 0 0; vertical-align: middle; transition: background 0.15s; border: 0; }
+.props input[type='checkbox']::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.15s; }
+.props input[type='checkbox']:checked { background: var(--accent); }
+.props input[type='checkbox']:checked::after { transform: translateX(14px); }
+.props input[type='checkbox']:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
+.props label.row { display: flex; align-items: center; gap: 0; font-size: 13px; cursor: pointer; padding: 4px 0; }
+.props .stats .stat { border-radius: 12px; background: linear-gradient(180deg, var(--panel), var(--panel-2)); }
+.props .hint { border-style: solid; border-color: var(--line); background: color-mix(in srgb, var(--cyan) 5%, var(--panel)); border-radius: 10px; }
+.props .linkbtn { color: var(--accent); font-weight: 600; }
+
+/* curve editor */
+.curve-ed { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.curve-title { font: 600 12px var(--sans); color: var(--text); }
+.curve-chart { width: 100%; height: auto; border-radius: 12px; background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--line); }
+.cv-grid { stroke: var(--grid); stroke-width: 1; }
+.cv-tick { font: 9.5px var(--mono); fill: var(--faint); }
+.cv-axis { font: 600 9.5px var(--sans); fill: var(--muted); }
+.cv-line { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.cv-extra { fill: none; stroke: var(--cyan); stroke-width: 1.6; stroke-dasharray: 5 4; }
+.cv-pt { fill: var(--panel); stroke: var(--accent); stroke-width: 2.2; }
+.cv-mark { fill: var(--cyan); stroke: var(--panel); stroke-width: 2.5; }
+.cv-mark-t { font: 600 9.5px var(--sans); fill: var(--cyan); }
+.cv-key { display: flex; gap: 14px; font-size: 11.5px; color: var(--muted); }
+.cv-key i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.cv-key .k1 { background: var(--accent); } .cv-key .k2 { background: var(--cyan); }
+.curve-tbl { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.curve-tbl th { font: 600 10.5px var(--sans); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); text-align: left; padding: 7px 8px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.curve-tbl td { padding: 0; border-bottom: 1px solid var(--line); }
+.curve-tbl tr:last-child td { border-bottom: 0; }
+.curve-tbl td input { width: 100%; height: 32px; border: 0; background: transparent; padding: 0 8px; font: 13px var(--mono); font-variant-numeric: tabular-nums; }
+.curve-tbl td input:focus { outline: none; background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
+.curve-tbl td input[aria-invalid='true'] { color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, transparent); }
+.curve-tbl tbody tr:hover { background: var(--panel-2); }
+.cv-n { width: 28px; text-align: center; font: 11px var(--mono); color: var(--faint); }
+.curve-tbl th:last-child, .curve-tbl td:last-child { width: 30px; text-align: center; }
+.cv-del { border: 0; background: none; color: var(--faint); font-size: 16px; line-height: 1; width: 26px; height: 26px; border-radius: 7px; cursor: pointer; }
+.cv-del:hover:not(:disabled) { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.cv-del:disabled { opacity: 0.3; cursor: default; }
+.cv-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.cv-hint { margin-left: auto; font-size: 11px; color: var(--faint); }
+.duty-quick { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; margin-top: 10px; padding: 10px; border-radius: 12px; border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line-2)); background: color-mix(in srgb, var(--accent) 4%, var(--panel)); }
+.duty-quick .dq-l { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--text); }

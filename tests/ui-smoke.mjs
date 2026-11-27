@@ -44,6 +44,22 @@ try {
   const rs = await p.waitForSelector('.run-screen', { timeout: 5000 }).then(() => 1, () => 0);
   await p.waitForFunction(() => !document.querySelector('.run-screen'), null, { timeout: 30000 });
   t('run screen shows the stages, then clears', rs === 1);
+  // a run started by the user plays out from t = 0: the long section shows the building envelope, not the final one
+  await p.locator('.dtab', { hasText: 'Profile' }).first().click();
+  await p.waitForTimeout(1500);
+  const legend = await p.locator('.dock .chart-legend, .chart-legend').first().textContent().catch(() => '') ?? '';
+  const playing = await p.locator('.timeline, .tl').first().textContent().catch(() => '');
+  t('after a run the surge plays from the start, building up', /Peak so far/.test(legend) && !/Maximum head/.test(legend), `${legend.slice(0, 120)} | ${String(playing).slice(0, 40)}`);
+  // the pump curve is a table with a live chart
+  await p.locator('.ptab', { hasText: 'Properties' }).first().click().catch(() => {});
+  await p.locator('.explorer').getByText('Pumps', { exact: true }).click();
+  await p.locator('.explorer').getByText('PU1', { exact: true }).first().click(); await p.waitForTimeout(300);
+  const rows = await p.locator('.props .curve-tbl tbody tr').count();
+  await p.locator('.props .curve-tbl input[data-c="1-1"]').fill('76');
+  await p.locator('.props .curve-tbl input[data-c="1-1"]').press('Tab'); await p.waitForTimeout(200);
+  const pts = await p.locator('.props .curve-chart .cv-pt').count();
+  t('pump curve editor: three rows, editable, drawn on its chart', rows === 3 && pts === 3, `${rows} rows, ${pts} points`);
+  await p.locator('.props .curve-tbl input[data-c="1-1"]').fill('74'); await p.keyboard.press('Tab');
   await p.locator('.dtab', { hasText: 'Profile' }).first().click();
   await p.locator('.seg-btn', { hasText: 'Waterfall' }).click(); await p.waitForTimeout(400);
   t('waterfall (3D) view draws', (await p.locator('.waterfall canvas').count()) === 1);

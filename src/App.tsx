@@ -229,7 +229,7 @@ export default function App() {
   }, [net]);
 
   /** Run the model. With `strict` (the copilot), problems are thrown as errors instead of shown. */
-  const run = useCallback(async (n: Network = netRef.current, strict = false): Promise<RunOutput | undefined> => {
+  const run = useCallback(async (n: Network = netRef.current, strict = false, play = false): Promise<RunOutput | undefined> => {
     const f = licRef.current.features;
     if (!isExample.current && n.pipes.length > f.maxPipes) {
       const msg = `This model has ${n.pipes.length} pipes. The Free plan runs your own models up to ${f.maxPipes} pipes (built-in examples run at any size). Start a free trial or activate a licence to run it.`;
@@ -264,7 +264,11 @@ export default function App() {
       setUnc(null);
       setStale(false);
       setFramePos(0);
-      setMode((m) => (m === 'plain' ? 'max' : m));
+      if (play) {
+        // a run started by the user plays out from t = 0, so the surge is seen building up wave by wave
+        setMode('surge'); setFlowDashes(true);
+        setTimeout(() => { setFramePos(0); setPlaying(true); }, 800);
+      } else setMode((m) => (m === 'plain' ? 'max' : m));
       setGraphs((g) => {
         const valid = g.filter((it) => it.ref.type !== 'node' || out.result.nodeHead[it.ref.id]);
         if (valid.length) return valid;
@@ -566,7 +570,7 @@ export default function App() {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); saveProject(); return; }
       if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); openProject(); return; }
-      if ((mod && e.key === 'Enter') || e.key === 'F5') { e.preventDefault(); run(); return; }
+      if ((mod && e.key === 'Enter') || e.key === 'F5') { e.preventDefault(); run(undefined, false, true); return; }
       if (typing || dialog) return;
       if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if (mod && ((e.key.toLowerCase() === 'z' && e.shiftKey) || e.key.toLowerCase() === 'y')) { e.preventDefault(); redo(); return; }
@@ -676,7 +680,7 @@ export default function App() {
     { label: 'Analysis', items: [
       { label: 'Model Health Check…', action: () => setDialog('health') },
       { label: 'Run Setup…', action: () => setDialog('setup') },
-      { label: 'Run surge', shortcut: 'F5', action: () => run(), disabled: !!busy },
+      { label: 'Run surge', shortcut: 'F5', action: () => run(undefined, false, true), disabled: !!busy },
       'sep',
       { label: 'Uncertainty (worst case)', action: doUncertainty, disabled: !!busy },
       { label: 'Extended period (daily operation, water quality)…', action: () => { setBottom('eps'); if (dock === 'min') setDock('normal'); } },
@@ -880,7 +884,7 @@ export default function App() {
           <RB icon="health" label="Check" onClick={() => setDialog('health')} title="Model Health Check" />
           <RB icon="setup" label="Setup" onClick={() => setDialog('setup')} title="Run Setup" />
           <RB icon="catalogue" label="Catalogues" onClick={() => setDialog('catalogues')} />
-          <button className="rb run" onClick={() => run()} disabled={!!busy} title="Run (F5)"><Ic name="run" size={20} /><span>{busy ? 'Running' : stale && result ? 'Run*' : 'Run'}</span></button>
+          <button className="rb run" onClick={() => run(undefined, false, true)} disabled={!!busy} title="Run (F5)"><Ic name="run" size={20} /><span>{busy ? 'Running' : stale && result ? 'Run*' : 'Run'}</span></button>
           <RB icon="report" label="Report" onClick={openReport} disabled={!result} />
         </div><div className="rcap">{tr('Analysis')}</div></div>
       </div>
@@ -1004,7 +1008,7 @@ export default function App() {
                         {profView === 'section' ? <ProfileView probe={probe?.from === 'map' ? probe : null} onProbe={(p2) => setProbe(p2 ? { ...p2, from: 'profile' } : null)} net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} uEnv={unc?.envelopes} showNow={live} height={dock === 'max' ? 420 : 250} overlay={caseRes.filter((c) => overlayIds.includes(c.id) && c.id !== net.activeCase)} /> : <Waterfall net={net} result={result} a={route[0]} b={route[1]} framePos={framePos} height={dock === 'max' ? 440 : 270} />}
                       </div>
                     )}
-                    {bottom === 'graphs' && <GraphsView net={net} result={result} items={graphs} setItems={setGraphs} selected={selected} tNow={tNow} />}
+                    {bottom === 'graphs' && <GraphsView net={net} result={result} items={graphs} setItems={setGraphs} selected={selected} tNow={tNow} building={playing} />}
                     {bottom === 'checks' && <ChecksView checks={checks} onFocus={(c) => { if (c.where?.pipe) setSelected([{ type: 'pipe', id: c.where.pipe }]); else if (c.where?.node) setSelected([{ type: 'node', id: c.where.node }]); setMode(c.title.toLowerCase().includes('minimum') || c.title.toLowerCase().includes('column') ? 'min' : 'max'); }} />}
                     {bottom === 'uncertainty' && (
                       <div>

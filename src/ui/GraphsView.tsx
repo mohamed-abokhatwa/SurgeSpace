@@ -42,7 +42,7 @@ const VARS: Record<ElRef['type'], VarDef[]> = {
   ],
 };
 
-export function GraphsView({ net, result, items, setItems, selected, tNow }: { net: Network; result: TransientResult; items: GraphItem[]; setItems: (f: (i: GraphItem[]) => GraphItem[]) => void; selected: ElRef[]; tNow: number }) {
+export function GraphsView({ net, result, items, setItems, selected, tNow, building }: { net: Network; result: TransientResult; items: GraphItem[]; setItems: (f: (i: GraphItem[]) => GraphItem[]) => void; selected: ElRef[]; tNow: number; building?: boolean }) {
   const units = useUnits();
   const [tab, setTab] = useState<'builder' | 'devices'>('builder');
   const t = result.times;
@@ -103,7 +103,12 @@ export function GraphsView({ net, result, items, setItems, selected, tNow }: { n
             {!items.length && <span className="hint">Select elements on the drawing (Shift for several) and press “Add selected”. Clicking a node also adds it.</span>}
           </div>
           <div className={charts.length > 1 ? 'grid2' : ''}>
-            {charts.map((c) => <Chart key={c.title + c.unit} series={c.series} xLabel="Time (s)" yLabel={`${c.title} (${c.unit})`} yUnit={c.unit} xUnit="s" vLine={tNow} height={charts.length > 1 ? 200 : 220} />)}
+            {charts.map((c) => {
+              // while the surge plays, each history is drawn up to the present moment (the full curve holds the axes)
+              const n = building ? Math.max(2, t.findIndex((v) => v > tNow) < 0 ? t.length : t.findIndex((v) => v > tNow)) : t.length;
+              const series = building && n < t.length ? [...c.series.map((q) => ({ ...q, x: Array.prototype.slice.call(q.x, 0, n), y: Array.prototype.slice.call(q.y, 0, n) })), ...c.series.map((q) => ({ ...q, name: q.name + ' ·', scaleOnly: true }))] : c.series;
+              return <Chart key={c.title + c.unit} series={series} xLabel="Time (s)" yLabel={`${c.title} (${c.unit})`} yUnit={c.unit} xUnit="s" vLine={tNow} height={charts.length > 1 ? 200 : 220} />;
+            })}
           </div>
         </>
       )}

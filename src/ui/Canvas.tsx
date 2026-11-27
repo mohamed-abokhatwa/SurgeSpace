@@ -7,7 +7,7 @@ import type { PipeEnvelope, TransientResult } from '../engine/transient';
 import { HB, HV, area, type Network, type NetNode } from '../engine/types';
 import { pressureColor } from './util';
 import { EL, deviceDefaults, nodeDevices, valveKind, type ElementKind } from '../app/elements';
-import { addLink, addNode, addPipe, insertOnPipe, moveNodes, nearestFraction, pipePath, splitPipe, type ElRef, type ElementDefaults } from '../app/edit';
+import { addLink, addNode, addPipe, insertOnPipe, moveNodes, nearestFraction, nodeToSource, pipePath, placeLinkStandalone, replaceNodeWithLink, splitPipe, type ElRef, type ElementDefaults } from '../app/edit';
 import { fmtQ, getUnits, toShow, uLabel } from '../app/units';
 import { computeContours } from '../app/contours';
 
@@ -471,7 +471,8 @@ export function Canvas({
     }
     if (casingW) { ctx.strokeStyle = theme.dark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.95)'; ctx.lineWidth = casingW; ctx.stroke(casing); }
     ctx.lineCap = !result || md === 'plain' ? 'round' : 'butt';
-    const rvT = result && md !== 'plain' && !reduceMotion ? (now - anim.current.reveal) / 700 : 1;
+    // the decorative sweep is only for the envelope views; the surge views build up from the frames themselves
+    const rvT = result && md !== 'plain' && md !== 'surge' && md !== 'pressure' && !reduceMotion ? (now - anim.current.reveal) / 700 : 1;
     if (rvT < 1) {
       // reveal: neutral pipes, the result colours sweeping across from the left with a bright leading edge
       const e = 1 - (1 - Math.max(0, rvT)) ** 3, xe = -40 + (w + 80) * e;
@@ -958,7 +959,15 @@ export function Canvas({
         onEdit((n) => splitPipe(n, hit.ref.id, hit.u!, defaults).net, undefined, 'Split pipe');
         return;
       }
-      if (hit?.ref.type === 'node') { onSelect([hit.ref]); return; }
+      if (hit?.ref.type === 'node') {
+        // a source dropped on a junction turns that junction into the source
+        const n0 = net.nodes.find((x) => x.id === hit.ref.id);
+        if ((t === 'reservoir' || t === 'levelSource') && n0 && n0.kind !== 'reservoir') {
+          onEdit((n) => nodeToSource(n, hit.ref.id, t), [hit.ref], `Make ${hit.ref.id} a ${info.name.toLowerCase()}`);
+          return;
+        }
+        onSelect([hit.ref]); return;
+      }
       let id = '';
       onEdit((n) => { const r = addNode(n, wq, t, defaults); id = r.id; return r.net; }, undefined, `Add ${info.name.toLowerCase()}`);
       setTimeout(() => id && onSelect([{ type: 'node', id }]), 0);
@@ -1024,8 +1033,19 @@ export function Canvas({
       setTimeout(() => r && onSelect([r]), 0);
       return;
     }
+    const gap = Math.max(28 / view.current.s, 0.5);
     if (hit?.ref.type === 'node') {
       const d = drawing?.kind === 'link' ? drawing : { kind: 'link' as const, from: null };
+      const n0 = net.nodes.find((x) => x.id === hit.ref.id);
+      // on a junction: the element takes its place (the junction is its inlet, a new outlet takes the downstream
+      // pipes). Shift+click, or clicking a source, starts a node-to-node connection instead.
+      if (!d.from && !shift && n0 && n0.kind !== 'reservoir') {
+        const flows = result ? new Map(Object.entries(result.frameFlows).map(([k, v]) => [k, v[0]] as [string, number])) : undefined;
+        let r: ElRef | null = null;
+        onEdit((n) => { const o = replaceNodeWithLink(n, hit.ref.id, t, gap, flows, defaults); if (!o) return n; r = { type: o.type, id: o.id }; return o.net; }, undefined, `${info.name} at ${hit.ref.id}`);
+        setTimeout(() => r && onSelect([r]), 0);
+        return;
+      }
       if (!d.from) { setDrawing({ kind: 'link', from: hit.ref.id }); return; }
       if (d.from === hit.ref.id) return;
       const from = d.from;
@@ -1033,6 +1053,13 @@ export function Canvas({
       onEdit((n) => { const o = addLink(n, t, from, hit.ref.id, defaults); r = { type: t === 'pump' ? 'pump' : 'valve', id: o.id }; return o.net; }, undefined, `Add ${info.name.toLowerCase()}`);
       setTimeout(() => r && onSelect([r]), 0);
       setDrawing(null);
+      return;
+    }
+    // empty space: the element on its own, with an inlet and an outlet node to draw pipes to
+    if (!hit && !(drawing?.kind === 'link' && drawing.from)) {
+      let r: ElRef | null = null;
+      onEdit((n) => { const o = placeLinkStandalone(n, wq, t, gap, defaults); r = { type: o.type, id: o.id }; return o.net; }, undefined, `Add ${info.name.toLowerCase()}`);
+      setTimeout(() => r && onSelect([r]), 0);
     }
   };
 
@@ -1227,7 +1254,16 @@ export function Canvas({
             : drawing.from ? <>From <b>{drawing.from}</b>: click the second node</> : 'Click the first node'}
         </div>
       )}
-      {!drawing && tool !== 'select' && tool !== 'pan' && EL[tool as ElementKind] && <div className="tool-hint"><b>{EL[tool as ElementKind].name}</b> · {EL[tool as ElementKind].description} <span className="muted">Esc to finish</span></div>}
+      {!drawing && tool !== 'select' && tool !== 'pan' && EL[tool as ElementKind] && (() => {
+        // what a click does where the pointer is: replace a junction, split a pipe, or place on its own
+        const info = EL[tool as ElementKind];
+        const hn = hover?.sel.type === 'node' ? net.nodes.find((x) => x.id === hover.sel.id) : undefined;
+        const act = info.placement === 'link' && tool !== 'pipe'
+          ? hn ? (hn.kind === 'reservoir' ? <>Click <b>{hn.id}</b> to start a connection from it</> : <>Click: <b>{info.short}</b> in place of <b>{hn.id}</b></>) : hover?.sel.type === 'pipe' ? <>Click: split <b>{hover.sel.id}</b> and put the {info.short.toLowerCase()} there</> : <>Click: a {info.short.toLowerCase()} on its own (inlet and outlet nodes)</>
+          : info.placement === 'device' ? hn ? <>Click: add to <b>{hn.id}</b></> : hover?.sel.type === 'pipe' ? <>Click: split <b>{hover.sel.id}</b> and add it there</> : null
+          : (tool === 'reservoir' || tool === 'levelSource') && hn && hn.kind !== 'reservoir' ? <>Click: make <b>{hn.id}</b> a source</> : null;
+        return <div className="tool-hint"><b>{info.name}</b> · {act ?? info.description} <span className="muted">Esc to finish</span></div>;
+      })()}
       {hover && hoverInfo && !drag.current && (
         <div className="card small hovercard" style={{ left: Math.min(hover.x + 14, size.w - 230), top: Math.min(hover.y + 14, size.h - 130) }}>
           <b>{hoverInfo.title}</b>

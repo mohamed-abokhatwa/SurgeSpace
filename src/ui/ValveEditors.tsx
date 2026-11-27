@@ -1,22 +1,21 @@
 // Editors for valves and check valves: check valve closure (pumps, valves, pipes), valve characteristic,
 // control valves (PRV / PSV / FCV), and discharge to atmosphere / rupture disk at a node.
-import { useState } from 'react';
 import { VALVE_CURVES, valveArea } from '../engine/devices';
 import type { TransientResult } from '../engine/transient';
 import type { CheckValveSpec, ControlValve, NetNode, Outlet, Valve, ValveLaw } from '../engine/types';
 import { Num } from './DeviceEditors';
 import { fmt } from './util';
+import { CurveEditor, splitPairLabel, type CurveMarker } from './CurveEditor';
 
-const PAIRS_TEXT = (c?: [number, number][]) => (c ?? []).map(([a, b]) => `${+a.toFixed(4)}, ${+b.toFixed(4)}`).join('\n');
-const PARSE_PAIRS = (t: string) => t.split(/\n+/).map((l) => l.split(/[,;\t ]+/).filter(Boolean).map(Number)).filter((p) => p.length >= 2 && p.every(Number.isFinite)).map((p) => [p[0], p[1]] as [number, number]);
 
-/** Two-column table typed or pasted as lines of "x, y". */
-export function PairsField({ label, value, onChange, rows = 5, note }: { label: string; value?: [number, number][]; onChange: (v: [number, number][]) => void; rows?: number; note?: string }) {
-  const [text, setText] = useState(PAIRS_TEXT(value));
+/** Two-column input: a live chart above an editable table (typed, or pasted from Excel). */
+export function PairsField({ label, value, onChange, note, xLabel, yLabel, marker, smooth, presets, extra }: { label: string; value?: [number, number][]; onChange: (v: [number, number][]) => void; rows?: number; note?: string; xLabel?: string; yLabel?: string; marker?: CurveMarker; smooth?: boolean; presets?: { label: string; make: () => [number, number][] }[]; extra?: { label: string; points: [number, number][] } }) {
+  const sp = splitPairLabel(label);
+  const hint = [sp.note, note && !/\n/.test(note) ? note : undefined].filter(Boolean).join(' ');
   return (
-    <label className="field" style={{ gridColumn: '1 / -1' }}><span>{label}</span>
-      <textarea rows={rows} value={text} placeholder={note} onChange={(e) => { setText(e.target.value); onChange(PARSE_PAIRS(e.target.value)); }} />
-    </label>
+    <div style={{ gridColumn: '1 / -1' }}>
+      <CurveEditor value={value} onChange={onChange} xLabel={xLabel ?? sp.x} yLabel={yLabel ?? sp.y} note={hint || undefined} marker={marker} smooth={smooth} presets={presets} extra={extra} />
+    </div>
   );
 }
 

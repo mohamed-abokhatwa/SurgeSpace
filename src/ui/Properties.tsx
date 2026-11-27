@@ -4,9 +4,11 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { TransientResult } from '../engine/transient';
 import { area, type Network, type NetNode, type Pipe, type Pump, type Valve } from '../engine/types';
 import { estimateInertia, pumpRatedQ } from '../engine/hydraulics';
+import { DEFAULT_MOTOR_CURVE } from '../engine/devices';
 import { turbineK, turbineSpeeds } from '../engine/results';
 import { DeviceEditors, DeviceDatalists } from './DeviceEditors';
 import { CheckValveEditor, PairsField, ValveLinkEditor } from './ValveEditors';
+import { CurveEditor } from './CurveEditor';
 import { EL, nodeDevices, nodeKind, valveKind } from '../app/elements';
 import { pipeLengthFromDrawing, renameElement, reversePipe, type ElRef } from '../app/edit';
 import { fmtQ, unitOf, useUnits, type Quantity } from '../app/units';
@@ -60,6 +62,34 @@ function IdField({ id, type, net, setNet, onRenamed }: { id: string; type: ElRef
 }
 const Stat = ({ v, l }: { v: string; l: string }) => <div className="stat"><b>{v}</b><span>{l}</span></div>;
 
+/** The head of the Properties panel: the element's icon, name, type and its key figures at a glance. */
+function Hero({ kind, id, sub, chips, warn }: { kind: Parameters<typeof ElIcon>[0]['kind']; id: string; sub: string; chips: [string, string][]; warn?: string }) {
+  return (
+    <div className="props-hero">
+      <div className="ph-top">
+        <span className="ph-icon"><ElIcon kind={kind} size={26} /></span>
+        <div className="ph-name"><b>{id}</b><span>{sub}</span></div>
+      </div>
+      {chips.length > 0 && <div className="ph-chips">{chips.map(([l, v]) => <div key={l} className="ph-chip"><span>{l}</span><b>{v}</b></div>)}</div>}
+      {warn && <div className="ph-warn" role="alert">{warn}</div>}
+    </div>
+  );
+}
+
+/** Three-point pump curve from a duty point: shut-off 133 % of the duty head, run-out at 150 % flow. */
+function DutyQuick({ fQ, fH, onMake }: { fQ: { f: number; u: string }; fH: { f: number; u: string }; onMake: (q: number, h: number) => void }) {
+  const [q, setQ] = useState(''), [h, setH] = useState('');
+  const ok = Number(q) > 0 && Number(h) > 0;
+  return (
+    <div className="duty-quick">
+      <span className="dq-l">Only know the duty point?</span>
+      <label className="field"><span>Flow <em className="unit">{fQ.u}</em></span><input type="number" value={q} onChange={(e) => setQ(e.target.value)} placeholder="duty" /></label>
+      <label className="field"><span>Head <em className="unit">{fH.u}</em></span><input type="number" value={h} onChange={(e) => setH(e.target.value)} placeholder="duty" /></label>
+      <button type="button" className="btn small primary" disabled={!ok} onClick={() => { onMake(Number(q) / fQ.f, Number(h) / fH.f); setQ(''); setH(''); }}>Make the curve</button>
+    </div>
+  );
+}
+
 export function Properties({ net, setNet, selected, result, onSelect }: { net: Network; setNet: SetNet; selected: ElRef[]; result: TransientResult | null; onSelect: (r: ElRef[]) => void }) {
   const units = useUnits();
   if (!selected.length) return <ModelSummary net={net} result={result} />;
@@ -75,7 +105,12 @@ export function Properties({ net, setNet, selected, result, onSelect }: { net: N
     const st = result?.steady.heads[n.id];
     return (
       <div className="props">
-        <div className="props-head"><ElIcon kind={kind} size={22} /><div><b>{n.id}</b><span>{n.kind === 'reservoir' ? EL[kind].name : nodeDevices(n).length ? `Junction with ${nodeDevices(n).map((k) => EL[k].name.toLowerCase()).join(', ')}` : 'Junction'}</span></div></div>
+        <Hero kind={kind} id={n.id} sub={n.kind === 'reservoir' ? EL[kind].name : nodeDevices(n).length ? `Junction with ${nodeDevices(n).map((k) => EL[k].name.toLowerCase()).join(', ')}` : 'Junction'} chips={n.kind === 'reservoir' ? [
+          ['Water level', fmtQ(n.head ?? n.elev, 'head', 2, units)], ['Bottom', fmtQ(n.elev, 'elevation', 2, units)], ['Depth', fmtQ((n.head ?? n.elev) - n.elev, 'head', 2, units)],
+        ] : [
+          ['Elevation', fmtQ(n.elev, 'elevation', 2, units)], ['Demand', fmtQ(n.demand ?? 0, 'flow', 1, units)],
+          ...(result ? [['Pressure range', `${fmtQ(result.nodeMin[n.id] - n.elev, 'pressureHead', 0, units)} … ${fmtQ(result.nodeMax[n.id] - n.elev, 'pressureHead', 0, units)}`] as [string, string]] : []),
+        ]} warn={n.kind === 'reservoir' && (n.head ?? n.elev) < n.elev ? `The water level is below the bottom: the pressure there would be ${fmtQ((n.head ?? n.elev) - n.elev, 'pressureHead', 1, units)}. Raise the water level or lower the bottom.` : undefined} />
         <Group title="Identity">
           <div className="grid2">
             <IdField id={n.id} type="node" net={net} setNet={setNet} onRenamed={renamed} />
@@ -97,7 +132,12 @@ export function Properties({ net, setNet, selected, result, onSelect }: { net: N
           <div className="grid3">
             <QNum label="X" q="length" value={n.x} digits={2} onChange={(v) => v !== undefined && set({ x: v })} />
             <QNum label="Y" q="length" value={n.y} digits={2} onChange={(v) => v !== undefined && set({ y: v })} />
-            <QNum label="Elevation" q="elevation" value={n.elev} digits={3} onChange={(v) => v !== undefined && set({ elev: v })} />
+            <QNum label={n.kind === 'reservoir' ? 'Bottom' : 'Elevation'} q="elevation" value={n.elev} digits={3} onChange={(v) => {
+              if (v === undefined) return;
+              // a source keeps its water above its bottom: raising the bottom past the water carries the water up with it
+              if (n.kind === 'reservoir' && (n.head ?? n.elev) < v) set({ elev: v, head: v + Math.max((n.head ?? n.elev) - n.elev, 1) });
+              else set({ elev: v });
+            }} />
           </div>
         </Group>
         {n.kind === 'junction' ? (
@@ -163,7 +203,11 @@ export function Properties({ net, setNet, selected, result, onSelect }: { net: N
   const setValve = (f: (v: Valve) => Valve) => setNet((n) => ({ ...n, valves: n.valves.map((x) => (x.id === v.id ? f(x) : x)) }));
   return (
     <div className="props">
-      <div className="props-head"><ElIcon kind={kind} size={22} /><div><b>{v.id}</b><span>{EL[kind].name} · {v.from} → {v.to}</span></div></div>
+      <Hero kind={kind} id={v.id} sub={`${EL[kind].name} · ${v.from} → ${v.to}`} chips={[
+        ['Bore', fmtQ(v.diameter, 'diameter', 0, units)], ['Opening', `${Math.round((v.opening ?? 1) * 100)} %`],
+        ...(v.control ? [['Set point', v.control.type === 'FCV' ? fmtQ(v.control.set, 'flow', 1, units) : fmtQ(v.control.set, 'pressureHead', 1, units)] as [string, string]] : []),
+        ...(result?.steady.flows[v.id] !== undefined ? [['Steady flow', fmtQ(result.steady.flows[v.id], 'flow', 1, units)] as [string, string]] : []),
+      ]} />
       <Group title="Identity">
         <div className="grid2">
           <IdField id={v.id} type="valve" net={net} setNet={setNet} onRenamed={renamed} />
@@ -188,9 +232,9 @@ export function Properties({ net, setNet, selected, result, onSelect }: { net: N
           </label>
           {v.pbv !== undefined && <QNum label="Head drop" q="head" value={v.pbv} onChange={(x) => x !== undefined && setValve((y) => ({ ...y, pbv: x }))} />}
           {v.gpv && (
-            <label className="field" style={{ marginTop: 6 }}><span>Head loss curve: flow L/s, loss m (one point per line)</span>
-              <textarea rows={4} defaultValue={v.gpv.map(([q, h]) => `${+(q * 1000).toFixed(3)}\t${h}`).join('\n')} onBlur={(e) => { const pts = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 2 && r.every(Number.isFinite)).map(([q, h]) => [q / 1000, h] as [number, number]).sort((a, b) => a[0] - b[0]); if (pts.length >= 2) setValve((y) => ({ ...y, gpv: pts })); }} />
-            </label>
+            <CurveEditor xLabel={`Flow (${unitOf('flow', units).u})`} yLabel={`Head loss (${unitOf('head', units).u})`} minPoints={2}
+              value={v.gpv.map(([q, h]) => [+(q * unitOf('flow', units).f).toFixed(4), +(h * unitOf('head', units).f).toFixed(3)] as [number, number])}
+              onChange={(pts) => setValve((y) => ({ ...y, gpv: pts.map(([q, h]) => [q / unitOf('flow', units).f, h / unitOf('head', units).f] as [number, number]) }))} />
           )}
           <p className="hint">As in EPANET. In the surge run the valve keeps its steady head loss as a fixed restriction (and still follows any operation).</p>
         </Group>
@@ -233,7 +277,11 @@ function PipeProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
   const dw = net.settings.friction === 'DW';
   return (
     <div className="props">
-      <div className="props-head"><ElIcon kind="pipe" size={22} /><div><b>{p.id}</b><span>Pipe · {p.from} → {p.to}</span></div></div>
+      <Hero kind="pipe" id={p.id} sub={`Pipe · ${p.from} → ${p.to}${p.material ? ` · ${p.material}` : ''}`} chips={[
+        ['Length', fmtQ(p.length, 'length', 1, units)], ['Diameter', fmtQ(p.diameter, 'diameter', 0, units)], ['Wave speed', fmtQ(p.wavespeed, 'wavespeed', 0, units)],
+        ['Wave time 2L/a', `${(2 * p.length / Math.max(p.wavespeed, 1)).toFixed(2)} s`],
+        ...(result && Number.isFinite(maxP) ? [['Pressure range', `${fmtQ(minP, 'pressureHead', 0, units)} … ${fmtQ(maxP, 'pressureHead', 0, units)}`] as [string, string]] : []),
+      ]} />
       <Group title="Identity">
         <div className="grid2">
           <IdField id={p.id} type="pipe" net={net} setNet={setNet} onRenamed={onRenamed} />
@@ -275,9 +323,8 @@ function PipeProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
       <Group title="Viscoelastic wall (PE, PVC)" open={!!p.viscoelastic} right={p.viscoelastic ? <span className="pill good">{p.viscoelastic.J.length} element{p.viscoelastic.J.length > 1 ? 's' : ''}</span> : undefined}>
         <label className="row small"><input type="checkbox" checked={!!p.viscoelastic} onChange={(e) => set({ viscoelastic: e.target.checked ? { J: [0.1, 0.1, 0.09], tau: [0.05, 0.5, 1.5] } : undefined })} /> Creep of the pipe wall damps and slows the waves</label>
         {p.viscoelastic && (
-          <label className="field" style={{ marginTop: 6 }}><span>Kelvin–Voigt elements: creep compliance J (1/GPa) and retardation time τ (s), one per line</span>
-            <textarea rows={3} defaultValue={p.viscoelastic.J.map((j, k) => `${j}\t${p.viscoelastic!.tau[k]}`).join('\n')} onBlur={(e) => { const rows = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 2 && r.every((x) => Number.isFinite(x) && x >= 0)); if (rows.length) set({ viscoelastic: { J: rows.map((r) => r[0]), tau: rows.map((r) => Math.max(r[1], 1e-3)) } }); }} />
-          </label>
+          <CurveEditor chart={false} sortX={false} xLabel="Creep compliance J (1/GPa)" yLabel="Retardation time τ (s)" value={p.viscoelastic.J.map((jj, k) => [jj, p.viscoelastic!.tau[k]] as [number, number])}
+            onChange={(rows) => { const ok = rows.filter((r) => r[0] >= 0 && r[1] >= 0); if (ok.length) set({ viscoelastic: { J: ok.map((r) => r[0]), tau: ok.map((r) => Math.max(r[1], 1e-3)) } }); }} />
         )}
         {p.viscoelastic && !p.wall && <p className="hint bad">Enter the wall thickness (Material and wave speed): it is needed for the wall stress.</p>}
         <p className="hint">Use the instantaneous wave speed. The starting values are indicative for HDPE from published tests; calibrate them to the pipe (or to field records) for design.</p>
@@ -312,9 +359,17 @@ function PumpProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
   const est = estimateInertia((998.2 * 9.80665 * qr * hr) / p.efficiency / 1000, p.speed);
   const parallel = net.pumps.filter((x) => x.from === p.from && x.to === p.to).length;
   const fQ = unitOf('flow', units), fH = unitOf('head', units);
+  const duty = result && result.steady.flows[p.id] !== undefined && result.steady.heads[p.to] !== undefined ? { q: result.steady.flows[p.id], h: result.steady.heads[p.to] - result.steady.heads[p.from] } : null;
+  const shaft = duty ? (998.2 * 9.80665 * Math.abs(duty.q) * duty.h) / Math.max(p.efficiency, 0.05) : (998.2 * 9.80665 * qr * hr) / Math.max(p.efficiency, 0.05);
   return (
     <div className="props">
-      <div className="props-head"><ElIcon kind="pump" size={22} /><div><b>{p.id}</b><span>Pump · {p.from} → {p.to}{parallel > 1 ? ` · ${parallel} in parallel` : ''}</span></div></div>
+      <Hero kind="pump" id={p.id} sub={`Pump · ${p.from} → ${p.to}${parallel > 1 ? ` · ${parallel} in parallel` : ''}`} chips={[
+        [duty ? 'Duty flow (run)' : 'Rated flow', fmtQ(duty ? duty.q : qr, 'flow', 1, units)],
+        [duty ? 'Duty head (run)' : 'Rated head', fmtQ(duty ? duty.h : hr, 'head', 1, units)],
+        ['Shaft power', fmtQ(shaft / 1000, 'power', 0, units)],
+        ['Inertia', fmtQ(p.inertia, 'inertia', 2, units)],
+        ['State', p.on ? 'Running' : 'Stopped'],
+      ]} />
       <Group title="Identity">
         <div className="grid2">
           <IdField id={p.id} type="pump" net={net} setNet={setNet} onRenamed={onRenamed} />
@@ -323,13 +378,16 @@ function PumpProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
         <ConnFields net={net} from={p.from} to={p.to} onChange={(from, to) => set({ from, to })} />
         <label className="row small" style={{ marginTop: 8 }}><input type="checkbox" checked={p.on} onChange={(e) => set({ on: e.target.checked })} /> Running in the steady state</label>
       </Group>
-      <Group title="Head curve">
-        <PairsField key={`${fQ.u}-${fH.u}`} label={`Flow (${fQ.u}), head (${fH.u}) — shut-off, duty, run-out…`} value={p.curve.map(([qq, h]) => [+(qq * fQ.f).toFixed(4), +(h * fH.f).toFixed(3)] as [number, number])}
-          onChange={(v) => v.length >= 1 && set({ curve: v.map(([qq, h]) => [qq / fQ.f, h / fH.f] as [number, number]) })} rows={5} />
-        <div className="grid2" style={{ marginTop: 8 }}>
+      <Group title="Head curve" right={<span className="pill">{p.curve.length === 1 ? 'one point' : p.curve.length === 3 ? 'three points' : `${p.curve.length} points`}</span>}>
+        <PairsField key={`${fQ.u}-${fH.u}`} label={`Flow (${fQ.u}), head (${fH.u})`} smooth value={p.curve.map(([qq, h]) => [+(qq * fQ.f).toFixed(4), +(h * fH.f).toFixed(3)] as [number, number])}
+          marker={duty ? { x: duty.q * fQ.f, y: duty.h * fH.f, label: 'Duty (last run)' } : undefined}
+          note="Shut-off, duty and run-out points (three points give a smooth curve); more points follow the curve point by point."
+          onChange={(v) => v.length >= 1 && set({ curve: v.map(([qq, h]) => [qq / fQ.f, h / fH.f] as [number, number]) })} />
+        <DutyQuick fQ={fQ} fH={fH} onMake={(q, h) => set({ curve: [[0, +(1.33 * h).toFixed(3)], [q, h], [+(1.5 * q).toFixed(5), +(0.5875 * h).toFixed(3)]] })} />
+        <div className="grid3" style={{ marginTop: 10 }}>
           <label className="field"><span>Efficiency at duty <em className="unit">%</em></span><input type="number" value={Math.round(p.efficiency * 1000) / 10} onChange={(e) => set({ efficiency: (num(e.target.value) || 0) / 100 })} /></label>
           <label className="field"><span>Rated speed <em className="unit">rpm</em></span><input type="number" value={p.speed} onChange={(e) => set({ speed: num(e.target.value) || 0 })} /></label>
-          <QNum label="Constant power (optional)" q="power" value={p.power} placeholder="curve used" onChange={(v) => set({ power: v || undefined })} />
+          <QNum label="Constant power" q="power" value={p.power} placeholder="curve used" onChange={(v) => set({ power: v || undefined })} />
         </div>
       </Group>
       <Group title="Inertia">
@@ -366,9 +424,12 @@ function PumpProps({ net, setNet, p, result, onRenamed }: { net: Network; setNet
               <label className="field"><span>Initial voltage <em className="unit">%</em></span><input type="number" value={Math.round((p.motor.softInitial ?? 0.35) * 100)} onChange={(e) => set({ motor: { ...p.motor!, softInitial: (num(e.target.value) || 35) / 100 } })} /></label>
               <label className="field"><span>Voltage ramp <em className="unit">s</em></span><input type="number" value={p.motor.softRamp ?? 10} onChange={(e) => set({ motor: { ...p.motor!, softRamp: num(e.target.value) || 10 } })} /></label>
             </>}
-            <label className="field" style={{ gridColumn: '1 / -1' }}><span>Torque–speed curve (speed %, torque % of full load; blank = typical design B)</span>
-              <textarea rows={3} defaultValue={(p.motor.curve ?? []).map(([a, b]) => `${a * 100}\t${b * 100}`).join('\n')} placeholder={'0\t150\n75\t190\n85\t230\n100\t100\n103\t0'} onBlur={(e) => { const rows = e.target.value.split(/\n/).map((l) => l.trim().split(/[\s,;]+/).map(Number)).filter((r) => r.length >= 2 && r.every(Number.isFinite)).map(([a, b]) => [a / 100, b / 100] as [number, number]); set({ motor: { ...p.motor!, curve: rows.length >= 2 ? rows : undefined } }); }} />
-            </label>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <CurveEditor title="Motor torque–speed curve" xLabel="Speed (%)" yLabel="Torque (% full load)" minPoints={2}
+                value={(p.motor.curve ?? DEFAULT_MOTOR_CURVE).map(([a, b]) => [+(a * 100).toFixed(2), +(b * 100).toFixed(2)] as [number, number])}
+                onChange={(rows) => set({ motor: { ...p.motor!, curve: rows.length >= 2 ? rows.map(([a, b]) => [a / 100, b / 100] as [number, number]) : undefined } })}
+                note="Starts with a typical design B motor; replace it with the motor data sheet." />
+            </div>
           </div>
         )}
         <p className="hint">With a starter, a pump start follows the motor torque, the pump torque and the inertia, so the run-up time is computed rather than set.</p>
